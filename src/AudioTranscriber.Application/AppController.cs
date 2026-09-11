@@ -1,0 +1,1048 @@
+using System.Collections.Concurrent;
+using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
+using System.Text.Json;
+using System.Threading.Channels;
+using AudioTranscriber.Audio;
+using AudioTranscriber.Core;
+using AudioTranscriber.Diarization;
+using AudioTranscriber.Integrations;
+using AudioTranscriber.Providers;
+using AudioTranscriber.Storage;
+using Core = AudioTranscriber.Core;
+
+namespace AudioTranscriber.Application;
+
+public sealed class AppController : IAppController
+{
+    private const string DiarizationProvider = "local-diarization";
+    private readonly IAudioCaptureService capture;
+    private readonly IMediaNormalizer media;
+    private readonly IAudioPlaybackService playback;
+    private readonly TimelinePlayer? timelinePlayer;
+    private readonly NvidiaCredentialVault credentials = new();
+    private readonly CancellationTokenSource shutdown = new();
+    private readonly SemaphoreSlim captureGate = new(1, 1);
+    private readonly SemaphoreSlim wake = new(0);
+    private readonly ConcurrentDictionary<Guid, Task> mediaTasks = new();
+    private readonly ConcurrentDictionary<Guid, CancellationTokenSource> mediaCancellation = new();
+    private readonly ConcurrentDictionary<Guid, CaptureFeed> captureFeeds = new();
+    private readonly Dictionary<string, ITranscriptionProvider> providerCache = new();
+    private readonly System.Diagnostics.Stopwatch recordingClock = new();
+    private readonly object settingsGate = new();
+    private readonly FileStream libraryLock;
+    private readonly string modelDirectory;
+    private readonly string settingsPath;
+    private readonly string credentialPath;
+    private readonly Func<string, ITranscriptionProvider>? providerOverride;
+    private readonly Func<IDiarizationService>? diarizationOverride;
+    private readonly Task scheduler;
+    private Task? activeJobTask;
+    private CancellationTokenSource? activeJobCancellation;
+    private Guid? activeJobSession;
+    private bool activeJobCloud;
+    private Guid? microphoneTrackId;
+    private volatile LocalSettings settings;
+    private bool captureFaulted;
+    private bool stopping;
+    private bool disposed;
+    private double outputLevel, microphoneLevel;
+    public LibraryStore Store { get; }
+    public bool IsRecording => RecordingSessionId is not null;
+    public Guid? RecordingSessionId { get; private set; }
+    public bool HasNvidiaKey { get; private set; }
+    public bool DiarizationModelsReady
+    {
+        get
+        {
+            var paths = DiarizationModelPaths.InDirectory(modelDirectory);
+            return diarizationOverride is not null ||
+                   (File.Exists(paths.SegmentationModelPath) && File.Exists(paths.EmbeddingModelPath));
+        }
+    }
+    public IReadOnlyList<ProviderOption> Providers { get; } = NvidiaModelCatalog.All
+        .Select(model => new ProviderOption(model.Id, model.DisplayName, true,
+            model.VerifiedWordTiming ? "Word timestamps when returned" : "Coarse audio-chunk timestamps"))
+        .Append(new("local-whisper", "Local Whisper (requires a model)", false, "Segment timestamps"))
+        .ToArray();
+    public event Action<AppNotification>? Notification;
+    public event Action<CaptureMeter>? LevelsChanged;
+
+    public AppController(string rootDirectory, IAudioCaptureService? capture = null,
+        IMediaNormalizer? media = null, IAudioPlaybackService? playback = null,
+        Func<string, ITranscriptionProvider>? providerFactory = null,
+        Func<IDiarizationService>? diarizationFactory = null)
+    {
+        var root = Path.GetFullPath(rootDirectory);
+        Directory.CreateDirectory(root);
+        libraryLock = new(Path.Combine(root, "library.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        Store = new(root);
+        Store.RecoverInterruptedJobs();
+        settingsPath = Path.Combine(root, "preferences.json");
+        credentialPath = Path.Combine(root, "nvidia.dpapi");
+        if (File.Exists(settingsPath) && new FileInfo(settingsPath).Length > 16_384)
+            throw new InvalidDataException("The local preferences file exceeds its size limit.");
+        settings = File.Exists(settingsPath)
+            ? JsonSerializer.Deserialize<LocalSettings>(File.ReadAllText(settingsPath))
+              ?? throw new InvalidDataException("The local preferences file is invalid.")
+            : new(null);
+        var checkout = FindCheckout();
+        modelDirectory = checkout is null ? Path.Combine(root, "models", "diarization")
+            : Path.Combine(checkout, ".models", "diarization");
+        if (File.Exists(credentialPath))
+        {
+            Task.Run(() => credentials.LoadForCurrentUserAsync(credentialPath)).GetAwaiter().GetResult();
+            HasNvidiaKey = true;
+        }
+        this.capture = capture ?? new WasapiAudioCaptureService();
+        this.media = media ?? new FfmpegMediaNormalizer();
+        this.playback = playback ?? new AudioPlaybackService();
+        if (playback is null)
+        {
+            timelinePlayer = new TimelinePlayer();
+            timelinePlayer.PlaybackFailed += error => Notify("Playback failed: " + error.Message, true);
+        }
+        providerOverride = providerFactory;
+        diarizationOverride = diarizationFactory;
+        this.capture.ChunkSealed += OnNativeChunk;
+        this.capture.Levels += OnLevels;
+        this.capture.Fault += OnCaptureFault;
+        if (this.playback is AudioPlaybackService player)
+            player.PlaybackFailed += error => Notify("Playback failed: " + error.Message, true);
+        scheduler = Task.Run(SchedulerAsync);
+    }
+
+    public IReadOnlyList<DeviceChoice> GetOutputDevices() => capture.GetOutputDevices()
+        .Where(device => device.IsAvailable).OrderByDescending(device => device.IsDefault)
+        .Select(device => new DeviceChoice(device.Id, device.Name)).ToArray();
+
+    public IReadOnlyList<DeviceChoice> GetMicrophoneDevices() => capture.GetMicrophoneDevices()
+        .Where(device => device.IsAvailable).OrderByDescending(device => device.IsDefault)
+        .Select(device => new DeviceChoice(device.Id, device.Name)).ToArray();
+
+    public void SetNvidiaKey(string key, bool remember)
+    {
+        credentials.SetMemoryOnly(key);
+        HasNvidiaKey = true;
+        if (remember)
+            Task.Run(() => credentials.SaveForCurrentUserAsync(credentialPath, true)).GetAwaiter().GetResult();
+        else if (File.Exists(credentialPath)) File.Delete(credentialPath);
+        Notify(remember ? "NVIDIA key protected for this Windows user." : "NVIDIA key held in memory only.");
+    }
+
+    public void ClearNvidiaKey()
+    {
+        credentials.Clear();
+        HasNvidiaKey = false;
+        if (File.Exists(credentialPath)) File.Delete(credentialPath);
+        Notify("NVIDIA key cleared. Queued cloud work will require a key again.");
+    }
+
+    public void SetLocalWhisperModel(string path)
+    {
+        if (!File.Exists(path)) throw new FileNotFoundException("Choose an existing local Whisper model.");
+        UpdateSettings(current => current with { WhisperModelPath = Path.GetFullPath(path) });
+        Notify("Local Whisper model selected. It will load only when local transcription is requested.");
+    }
+
+    public async Task InstallDiarizationModelsAsync(IProgress<string>? progress = null, CancellationToken cancellationToken = default)
+    {
+        await DiarizationModels.InstallAsync(modelDirectory,
+            new Progress<long>(bytes => progress?.Report($"Downloading/verifying diarization artifact: {bytes:N0} bytes")), cancellationToken);
+        progress?.Report("Segmentation and speaker embedding models are installed and hash-verified.");
+        Notify("Speaker models are ready for new audio. Choose Analyze speakers on a session to resume its previously blocked speaker analysis.");
+    }
+
+    public async Task<MediaProbeSummary> ProbeMediaAsync(string path, CancellationToken cancellationToken = default)
+    {
+        var probe = await media.ProbeAsync(path, cancellationToken);
+        return new(probe.Path, probe.DurationSeconds ?? 0, probe.AudioStreams.Select(stream =>
+            new MediaStreamChoice(stream.Index,
+                $"Stream {stream.Index}: {stream.Codec}, {stream.Format?.SampleRate} Hz, {stream.Format?.Channels} channel(s)")).ToArray());
+    }
+
+    public async Task<StoredSession> StartRecordingAsync(string name, string outputDeviceId, string? microphoneDeviceId,
+        string providerId, string language, bool cloudConsent, CancellationToken cancellationToken = default)
+    {
+        await captureGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (IsRecording) throw new InvalidOperationException("Stop the current recording before starting another.");
+            RequireProvider(providerId);
+            var session = Store.CreateSession(name, providerId, language);
+            var outputId = Guid.NewGuid();
+            microphoneTrackId = microphoneDeviceId is null ? null : Guid.NewGuid();
+            Store.AddTrack(new(outputId, session.Id, "Loopback", "Windows output", null, 0, null));
+            if (microphoneTrackId is { } mic)
+                Store.AddTrack(new(mic, session.Id, "Microphone", "Local microphone", null, 0, null));
+            Store.SetConsent(session.Id, cloudConsent);
+            Store.SetSessionState(session.Id, "Starting");
+            RecordingSessionId = session.Id;
+            captureFaulted = false;
+            recordingClock.Restart();
+            StartCaptureFeed(session, outputId);
+            if (microphoneTrackId is { } microphone) StartCaptureFeed(session, microphone);
+            try
+            {
+                await capture.StartAsync(new(session.Id, Path.Combine(session.Directory, "originals"), outputDeviceId,
+                    microphoneDeviceId, outputId, microphoneTrackId), cancellationToken);
+                Store.SetSessionState(session.Id, "Recording");
+                Notify("Recording selected Windows output" + (microphoneDeviceId is null ? ". Local microphone is not captured." : " and a separate microphone track."));
+            }
+            catch
+            {
+                try { await capture.StopAsync(CancellationToken.None); }
+                finally
+                {
+                    recordingClock.Stop();
+                    foreach (var feed in captureFeeds.Values) feed.Signals.Writer.TryComplete();
+                    try { await Task.WhenAll(captureFeeds.Values.Select(feed => feed.Task)); }
+                    finally
+                    {
+                        captureFeeds.Clear();
+                        RecordingSessionId = null;
+                        UpdateCaptureCheckpoint(() => Store.SetSessionDuration(session.Id, recordingClock.Elapsed.Ticks));
+                        UpdateCaptureCheckpoint(() => Store.SetSessionState(session.Id, "Faulted",
+                            "Capture could not start. Check the selected endpoint and Windows microphone permissions."));
+                    }
+                }
+                throw;
+            }
+            return Store.GetSession(session.Id);
+        }
+        finally { captureGate.Release(); }
+    }
+
+    public async Task StopRecordingAsync(CancellationToken cancellationToken = default)
+    {
+        await captureGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (RecordingSessionId is not { } sessionId) return;
+            UpdateCaptureCheckpoint(() => Store.SetSessionState(sessionId, "Stopping"));
+            Notify("Stopping capture; flushing original audio and final normalization output.");
+            try
+            {
+                try { await capture.StopAsync(CancellationToken.None); }
+                catch (Exception error) when (IsOperational(error))
+                {
+                    captureFaulted = true;
+                    Notify("Capture stop reported an error: " + error.Message, true);
+                    throw;
+                }
+                finally
+                {
+                    recordingClock.Stop();
+                    foreach (var feed in captureFeeds.Values) feed.Signals.Writer.TryComplete();
+                    await Task.WhenAll(captureFeeds.Values.Select(feed => feed.Task));
+                    UpdateCaptureCheckpoint(() => Store.SetSessionDuration(sessionId, recordingClock.Elapsed.Ticks));
+                    UpdateCaptureCheckpoint(() => Store.SetSessionState(sessionId, captureFaulted ? "Recoverable" : "Recorded",
+                        captureFaulted ? "Capture or indexing reported an error. Original chunks and gap diagnostics are retained." : null));
+                }
+            }
+            finally
+            {
+                captureFeeds.Clear();
+                RecordingSessionId = null;
+                microphoneTrackId = null;
+                outputLevel = microphoneLevel = 0;
+                LevelsChanged?.Invoke(new(0, 0));
+            }
+            wake.Release();
+            Notify(captureFaulted ? "Capture stopped after errors. Review retained originals and recovery diagnostics."
+                : "Recording stopped. Durable transcription jobs continue; Stop did not discard ASR responses.", captureFaulted);
+        }
+        finally { captureGate.Release(); }
+    }
+
+    public async Task<StoredSession> ImportAudioAsync(string name, string path, int streamIndex, string providerId,
+        string language, bool cloudConsent, CancellationToken cancellationToken = default)
+    {
+        RequireProvider(providerId);
+        var session = Store.CreateSession(name, providerId, language);
+        var track = new StoredTrack(Guid.NewGuid(), session.Id, "Imported", Path.GetFileName(path), null, streamIndex,
+            JsonSerializer.Serialize(new MediaCheckpoint(Path.GetFullPath(path), streamIndex, null)));
+        Store.AddTrack(track);
+        Store.SetConsent(session.Id, cloudConsent);
+        await RunMediaAsync(session, token => NormalizeImportedTrackAsync(session, track, token), cancellationToken);
+        return Store.GetSession(session.Id);
+    }
+
+    public async Task ImportVttAsync(Guid sessionId, string path, CancellationToken cancellationToken = default)
+    {
+        var count = await TranscriptImports.ImportWebVttAsync(Store, sessionId, path, cancellationToken);
+        Notify($"Imported {count:N0} source-timed WebVTT cues. Alignment to session audio is not independently verified.");
+    }
+
+    public async Task FetchTeamsTranscriptAsync(Guid sessionId, TeamsTranscriptRequest request,
+        Func<DeviceSignInPrompt, Task> showSignIn, CancellationToken cancellationToken = default)
+    {
+        var directory = Path.Combine(Store.GetSession(sessionId).Directory, "teams");
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, Guid.NewGuid().ToString("N") + ".vtt");
+        await new TeamsTranscriptClient().DownloadAsync(request, path, showSignIn, cancellationToken);
+        var count = await TranscriptImports.ImportWebVttAsync(Store, sessionId, path, cancellationToken,
+            allowVoiceLabels: !request.Unattributed);
+        Notify($"Imported {count:N0} Teams transcript cues. Attribution policy was respected; this is not live Teams audio capture.");
+    }
+
+    public async Task DiarizeSessionAsync(Guid sessionId, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!DiarizationModelsReady) throw new InvalidOperationException("Install the disclosed 33.49 MB local diarization models first.");
+        if (Store.GetSession(sessionId).ProcessingState != "Running")
+            throw new InvalidOperationException("Session processing is suspended. Resume it before running speaker analysis.");
+        await Task.Run(() =>
+        {
+            QueueDiarization(sessionId);
+            foreach (var track in Store.GetTracks(sessionId))
+                foreach (var chunk in Store.GetChunks(track.Id))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (Store.HasCompletedJob(chunk.Id, DiarizationProvider))
+                        RefreshSpeakerAssignments(sessionId, track.Id, chunk.StartTicks,
+                            chunk.StartTicks + chunk.SampleCount * TimeSpan.TicksPerSecond / 16000L);
+                }
+            Store.ResumeProviderJobs(sessionId, DiarizationProvider);
+        }, cancellationToken);
+        wake.Release();
+        Notify("Local segmentation and speaker matching queued. Short turns and overlap can remain unknown.");
+    }
+
+    public void PauseTranscription(Guid sessionId)
+    {
+        Store.PauseJobs(sessionId);
+        if (activeJobSession == sessionId) activeJobCancellation?.Cancel();
+        Notify("Transcription paused; recording and retained originals are unaffected.");
+    }
+
+    public void ResumeTranscription(Guid sessionId)
+    {
+        var session = Store.GetSession(sessionId);
+        if (settings.CloudBlockReason is not null && session.CloudConsent && RequireProvider(session.ProviderId).IsCloud)
+            UpdateSettings(current => current with { CloudBlockReason = null });
+        Store.ResumeJobs(sessionId);
+        if (session.State is "Recoverable" or "Importing" or "Faulted" && !mediaTasks.ContainsKey(sessionId) &&
+            RecordingSessionId != sessionId)
+        {
+            _ = ObserveRecoveryAsync(session);
+        }
+        wake.Release();
+        Notify("Durable work resumed. Cloud jobs still require the session's explicit upload consent.");
+    }
+
+    public void CancelTranscription(Guid sessionId)
+    {
+        Store.CancelJobs(sessionId);
+        if (activeJobSession == sessionId) activeJobCancellation?.Cancel();
+        if (mediaCancellation.TryGetValue(sessionId, out var cancellation)) cancellation.Cancel();
+        Notify("Transcription/import work canceled. Existing source audio, chunks, and completed results are retained.");
+    }
+
+    public void SetCloudConsent(Guid sessionId, bool consent)
+    {
+        Store.SetConsent(sessionId, consent);
+        if (!consent && activeJobSession == sessionId && activeJobCloud) activeJobCancellation?.Cancel();
+        wake.Release();
+        Notify(consent ? "This session permits NVIDIA submission of its recorded/imported audio tracks."
+            : "Future NVIDIA uploads are disabled. Audio already sent cannot be recalled.");
+    }
+
+    public async Task PlayAsync(Guid sessionId, Guid trackId, long sessionTicks, CancellationToken cancellationToken = default)
+    {
+        var track = Store.GetTracks(sessionId).Single(item => item.Id == trackId);
+        if (track.Kind == "Transcript")
+            throw new InvalidOperationException("This transcript has no linked recording to play.");
+        if (track.Kind == "Imported")
+        {
+            var checkpoint = ReadImport(track);
+            var imported = checkpoint.Imported ?? throw new InvalidOperationException("The original media copy is not complete.");
+            var format = imported.Probe.AudioStreams.Single(stream => stream.Index == imported.AudioStreamIndex).Format;
+            var maximum = Math.Max(TimeSpan.TicksPerSecond, Store.GetSession(sessionId).DurationTicks - sessionTicks);
+            if (timelinePlayer is not null)
+            {
+                await timelinePlayer.PlayAsync(new AudioTranscriber.Audio.PlaybackRequest(sessionTicks,
+                    [new(trackId, Clips: [new(imported.ManagedOriginalPath, imported.AudioStreamIndex, 0,
+                        format?.SampleRate ?? 16000, 0, null)])]), cancellationToken);
+                return;
+            }
+            await playback.PlayAsync(new(new(trackId, imported.ManagedOriginalPath, format, 0,
+                AudioStreamIndex: imported.AudioStreamIndex), sessionTicks, maximum), cancellationToken);
+            return;
+        }
+        var chunks = Store.GetArchiveManifests(trackId).Select(DeserializeNative).OrderBy(chunk => chunk.SessionStartTicks).ToArray();
+        var selected = chunks.FirstOrDefault(chunk => chunk.SessionStartTicks <= sessionTicks && chunk.SessionEndTicks > sessionTicks)
+            ?? throw new InvalidOperationException("No original audio is retained at this timestamp; it may lie in a recorded gap.");
+        if (timelinePlayer is not null)
+        {
+            await timelinePlayer.PlayAsync(new AudioTranscriber.Audio.PlaybackRequest(sessionTicks,
+                [new(trackId, Clips: chunks.Select(chunk => new PlaybackClip(chunk.Path, 0,
+                    chunk.SessionStartTicks, chunk.Format.SampleRate, 0, chunk.SourceFrameCount)).ToArray())]), cancellationToken);
+            return;
+        }
+        await playback.PlayAsync(new(new(trackId, selected.Path, selected.Format, selected.SessionStartTicks,
+            selected.SourceFrameOffset, selected.SourceFrameCount), sessionTicks, selected.SessionEndTicks - sessionTicks), cancellationToken);
+    }
+
+    public void StopPlayback() => Task.Run(async () =>
+    {
+        await playback.StopAsync();
+        if (timelinePlayer is not null) await timelinePlayer.StopAsync();
+    }).GetAwaiter().GetResult();
+
+    private void StartCaptureFeed(StoredSession session, Guid trackId)
+    {
+        // This channel coalesces notifications only. The SQLite/archive manifest is the queue of audio.
+        var feed = new CaptureFeed();
+        captureFeeds[trackId] = feed;
+        feed.Task = Task.Run(async () =>
+        {
+            try
+            {
+                await ConsumeNormalizedAsync(session, media.NormalizeAsync(ObserveOriginals(trackId, feed, shutdown.Token),
+                    new(Path.Combine(session.Directory, "normalized", trackId.ToString("N"))), shutdown.Token), shutdown.Token);
+            }
+            catch (Exception error) when (IsOperational(error))
+            {
+                captureFaulted = true;
+                Notify("Normalization paused; originals remain recorded. " + error.Message, true);
+            }
+        });
+    }
+
+    private async IAsyncEnumerable<Core.NativeChunk> ObserveOriginals(Guid trackId, CaptureFeed feed,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        long nextFrame = 0;
+        while (true)
+        {
+            foreach (var chunk in Store.GetArchiveManifests(trackId).Select(DeserializeNative).OrderBy(chunk => chunk.SourceFrameOffset))
+            {
+                if (chunk.SourceFrameOffset < nextFrame) continue;
+                yield return chunk;
+                nextFrame = chunk.SourceEndFrame;
+            }
+            if (!await feed.Signals.Reader.WaitToReadAsync(cancellationToken)) break;
+            while (feed.Signals.Reader.TryRead(out _)) { }
+        }
+        foreach (var chunk in Store.GetArchiveManifests(trackId).Select(DeserializeNative).OrderBy(chunk => chunk.SourceFrameOffset))
+            if (chunk.SourceFrameOffset >= nextFrame) { yield return chunk; nextFrame = chunk.SourceEndFrame; }
+    }
+
+    private void OnNativeChunk(Core.NativeChunk chunk)
+    {
+        try
+        {
+            Store.AddArchiveChunk(chunk.Id, chunk.TrackId, chunk.Path, chunk.SourceFrameOffset,
+                chunk.SourceFrameCount, chunk.SessionStartTicks, JsonSerializer.Serialize(chunk));
+            if (captureFeeds.TryGetValue(chunk.TrackId, out var feed)) feed.Signals.Writer.TryWrite(1);
+        }
+        catch (Exception error) when (IsOperational(error))
+        {
+            captureFaulted = true;
+            Notify("Original audio was sealed, but database indexing failed; recovery is required. " + error.Message, true);
+        }
+    }
+
+    private void OnLevels(Core.AudioLevels levels)
+    {
+        if (levels.TrackId == microphoneTrackId) microphoneLevel = levels.Peak;
+        else outputLevel = levels.Peak;
+        LevelsChanged?.Invoke(new(outputLevel, microphoneLevel));
+    }
+
+    private void OnCaptureFault(Core.CaptureFault fault)
+    {
+        captureFaulted = true;
+        Notify($"Recording fault [{fault.Code}]: {fault.Message}. Review retained original chunks and gap diagnostics.", true);
+        _ = StopAfterCaptureFaultAsync();
+    }
+
+    private void UpdateCaptureCheckpoint(Action update)
+    {
+        try { update(); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or Microsoft.Data.Sqlite.SqliteException)
+        {
+            captureFaulted = true;
+            Notify("Capture checkpoint failed; stopping audio must not depend on database writes. " + error.Message, true);
+        }
+    }
+
+    private async Task StopAfterCaptureFaultAsync()
+    {
+        try { await StopRecordingAsync(CancellationToken.None); }
+        catch (Exception error) when (IsOperational(error))
+        {
+            Notify("Capture fault cleanup needs attention; original files were retained: " + error.Message, true);
+        }
+    }
+
+    private async Task RunMediaAsync(StoredSession session, Func<CancellationToken, Task> operation, CancellationToken cancellationToken)
+    {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, shutdown.Token);
+        if (!mediaCancellation.TryAdd(session.Id, linked))
+            throw new InvalidOperationException("This session already has an import/recovery operation running.");
+        try
+        {
+            Store.SetSessionState(session.Id, "Importing");
+            var task = Task.Run(() => operation(linked.Token), CancellationToken.None);
+            mediaTasks[session.Id] = task;
+            await task;
+            Store.SetSessionState(session.Id, "Recorded");
+            Notify("Original media retained and final normalization output sealed. Queued recognition continues independently.");
+        }
+        catch (OperationCanceledException) when (linked.IsCancellationRequested)
+        {
+            SetMediaRecoveryState(session.Id, "Media processing canceled. Resume replays the retained source and reuses verified completed chunks.");
+            Notify("Media processing canceled; retained originals and completed chunks remain available.");
+            throw;
+        }
+        catch (Exception error) when (IsOperational(error))
+        {
+            SetMediaRecoveryState(session.Id, error.Message);
+            Notify("Media processing needs attention: " + error.Message, true);
+            throw;
+        }
+        finally
+        {
+            mediaTasks.TryRemove(session.Id, out _);
+            mediaCancellation.TryRemove(session.Id, out _);
+        }
+    }
+
+    private void SetMediaRecoveryState(Guid sessionId, string error)
+    {
+        try { Store.SetSessionState(sessionId, "Recoverable", error); }
+        catch (Exception failure) when (failure is IOException or UnauthorizedAccessException or Microsoft.Data.Sqlite.SqliteException)
+        {
+            Notify("Media recovery could not update its database checkpoint: " + failure.Message, true);
+        }
+    }
+
+    private async Task ObserveRecoveryAsync(StoredSession session)
+    {
+        try { await RunMediaAsync(session, token => RecoverAndNormalizeAsync(session, token), CancellationToken.None); }
+        catch (Exception error) when (IsOperational(error) || error is OperationCanceledException)
+        {
+            Notify("Recovery did not finish; its saved checkpoint remains resumable: " + error.Message, true);
+        }
+    }
+
+    private async Task NormalizeImportedTrackAsync(StoredSession session, StoredTrack track, CancellationToken cancellationToken)
+    {
+        var checkpoint = ReadImport(track);
+        var imported = checkpoint.Imported ?? await RecoverImportedCopyAsync(session, track, cancellationToken);
+        if (imported is null)
+        {
+            imported = await media.CopyImportAsync(new(session.Id, track.Id, checkpoint.SourcePath, checkpoint.StreamIndex,
+                Path.Combine(session.Directory, "imports")), new Progress<OperationProgress>(progress =>
+                Notify($"{progress.Stage}: {progress.Completed:N0}" + (progress.Total is { } total ? $" / {total:N0}" : ""))), cancellationToken);
+            Store.UpdateTrackSource(track.Id, imported.ManagedOriginalPath, imported.AudioStreamIndex,
+                JsonSerializer.Serialize(checkpoint with { Imported = imported }));
+        }
+        else if (checkpoint.Imported is null)
+            Store.UpdateTrackSource(track.Id, imported.ManagedOriginalPath, imported.AudioStreamIndex,
+                JsonSerializer.Serialize(checkpoint with { Imported = imported }));
+        await ConsumeNormalizedAsync(session, media.NormalizeImportAsync(imported,
+            new(Path.Combine(session.Directory, "normalized", track.Id.ToString("N"))), cancellationToken), cancellationToken);
+    }
+
+    private async Task<ImportedMedia?> RecoverImportedCopyAsync(StoredSession session, StoredTrack track,
+        CancellationToken cancellationToken)
+    {
+        var directory = Path.Combine(session.Directory, "imports");
+        if (!Directory.Exists(directory)) return null;
+        await Task.Run(() => MediaImporter.Recover(directory), cancellationToken);
+        var candidates = new List<ManagedImport>();
+        foreach (var manifest in Directory.EnumerateFiles(directory, "*.import.json"))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (new FileInfo(manifest).Length > 1024 * 1024)
+                throw new InvalidDataException("An import recovery manifest exceeds its size limit.");
+            var candidate = JsonSerializer.Deserialize<ManagedImport>(await File.ReadAllTextAsync(manifest, cancellationToken))
+                ?? throw new InvalidDataException("An import recovery manifest is invalid.");
+            if (candidate.SessionId != session.Id || candidate.TrackId != track.Id) continue;
+            if (!Path.GetFullPath(candidate.ManagedPath + ".import.json").Equals(Path.GetFullPath(manifest), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("An import manifest does not identify its retained file.");
+            if (candidate.Stream.Index != track.AudioStreamIndex)
+                throw new InvalidDataException("The retained import has a different selected audio stream.");
+            await using var file = File.OpenRead(candidate.ManagedPath);
+            if (file.Length != candidate.ByteLength ||
+                !Convert.ToHexString(await SHA256.HashDataAsync(file, cancellationToken)).Equals(candidate.Sha256, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("A retained import failed length or hash verification.");
+            candidates.Add(candidate);
+        }
+        if (candidates.Count == 0) return null;
+        if (candidates.Select(item => item.Sha256).Distinct(StringComparer.OrdinalIgnoreCase).Count() != 1)
+            throw new InvalidDataException("Conflicting retained originals need explicit recovery; no source was recopied.");
+        var retained = candidates.OrderBy(item => item.ImportedAt).First();
+        var probe = await media.ProbeAsync(retained.ManagedPath, cancellationToken);
+        Notify("Recovered the verified managed original without recopying the external source.");
+        return new(track.Id, retained.ManagedPath, retained.SourceName, retained.Sha256, retained.Stream.Index, probe, retained.ImportedAt);
+    }
+
+    private async Task RecoverAndNormalizeAsync(StoredSession session, CancellationToken cancellationToken)
+    {
+        var recovered = await Task.Run(() => AudioArchiveCatalog.RecoverOriginals(Path.Combine(session.Directory, "originals")), cancellationToken);
+        foreach (var diagnostic in recovered.Diagnostics) Notify(diagnostic, true);
+        foreach (var chunk in recovered.Chunks)
+            OnNativeChunk(chunk.ToCore());
+        foreach (var track in Store.GetTracks(session.Id))
+        {
+            if (track.Kind == "Imported")
+                await NormalizeImportedTrackAsync(session, track, cancellationToken);
+            else if (track.Kind is "Loopback" or "Microphone")
+                await ConsumeNormalizedAsync(session, media.NormalizeAsync(RetainedOriginals(track.Id, cancellationToken),
+                    new(Path.Combine(session.Directory, "normalized", track.Id.ToString("N"))), cancellationToken), cancellationToken);
+        }
+        if (recovered.Diagnostics.Count > 0)
+            throw new InvalidDataException("Original recovery reported gaps or untrusted files; see the retained archive diagnostics.");
+    }
+
+    private async IAsyncEnumerable<Core.NativeChunk> RetainedOriginals(Guid trackId,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        foreach (var chunk in Store.GetArchiveManifests(trackId).Select(DeserializeNative).OrderBy(chunk => chunk.SourceFrameOffset))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            yield return chunk;
+        }
+        await Task.CompletedTask;
+    }
+
+    private async Task ConsumeNormalizedAsync(StoredSession session, IAsyncEnumerable<NormalizedChunk> chunks, CancellationToken cancellationToken)
+    {
+        StoredAudioChunk? previous = null;
+        await foreach (var decoded in chunks.WithCancellation(cancellationToken))
+        {
+            var anchor = Store.GetArchiveManifests(decoded.TrackId).Select(DeserializeNative)
+                .LastOrDefault(item => item.SourceFrameOffset <= decoded.SourceFrameOffset && item.SourceEndFrame > decoded.SourceFrameOffset);
+            var chunk = anchor is null ? decoded : RecordedClockMapping.AtNativeAnchor(decoded, anchor);
+            var stored = new StoredAudioChunk(chunk.Id, session.Id, chunk.TrackId, chunk.Path,
+                chunk.NormalizedStartSample, checked((int)chunk.SampleCount), chunk.SessionStartTicks, JsonSerializer.Serialize(chunk));
+            Store.AddNormalizedChunk(stored);
+            Store.QueueTranscription(stored, DiarizationProvider, session.Language, false);
+            if (previous is not null) QueueAsr(previous, session);
+            previous = stored;
+            wake.Release();
+            Notify($"Audio ready through {TimeSpan.FromTicks(chunk.SessionEndTicks):g}; recording/import is independent of recognition.");
+        }
+        if (previous is not null) QueueAsr(previous, session);
+        wake.Release();
+    }
+
+    private void QueueAsr(StoredAudioChunk chunk, StoredSession session) =>
+        Store.QueueTranscription(chunk, session.ProviderId, session.Language, RequireProvider(session.ProviderId).IsCloud);
+
+    private void QueueDiarization(Guid sessionId)
+    {
+        var session = Store.GetSession(sessionId);
+        foreach (var track in Store.GetTracks(sessionId))
+            foreach (var chunk in Store.GetChunks(track.Id))
+                Store.QueueTranscription(chunk, DiarizationProvider, session.Language, false);
+    }
+
+    private async Task SchedulerAsync()
+    {
+        while (!shutdown.IsCancellationRequested && !stopping)
+        {
+            StoredJob? job;
+            try { job = Store.ClaimNextJob(); }
+            catch (Exception error) when (error is Microsoft.Data.Sqlite.SqliteException or IOException or UnauthorizedAccessException)
+            {
+                Notify("The durable job queue is unavailable; capture retains its own originals. " + error.Message, true);
+                try { await Task.Delay(TimeSpan.FromSeconds(5), shutdown.Token); }
+                catch (OperationCanceledException) when (shutdown.IsCancellationRequested) { break; }
+                continue;
+            }
+            if (job is null)
+            {
+                try { await wake.WaitAsync(TimeSpan.FromSeconds(2), shutdown.Token); }
+                catch (OperationCanceledException) when (shutdown.IsCancellationRequested) { break; }
+                continue;
+            }
+            activeJobSession = job.SessionId;
+            activeJobCloud = job.Cloud;
+            using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(shutdown.Token);
+            activeJobCancellation = cancellation;
+            try
+            {
+                activeJobTask = ProcessJobAsync(job, cancellation.Token);
+                await activeJobTask;
+            }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+            {
+                Notify("The active job was interrupted; its durable source remains available.");
+            }
+            catch (Exception error) when (IsOperational(error))
+            {
+                Notify("Job bookkeeping failed; the scheduler will continue from durable checkpoints: " + error.Message, true);
+                try { Store.FailJob(job, error.Message, "RetryWaiting", TimeSpan.FromSeconds(5)); }
+                catch (Exception checkpointError) when (IsOperational(checkpointError))
+                {
+                    Notify("The job checkpoint is temporarily unavailable; lease recovery remains pending: " + checkpointError.Message, true);
+                }
+            }
+            finally
+            {
+                activeJobTask = null;
+                activeJobCancellation = null;
+                activeJobSession = null;
+                activeJobCloud = false;
+            }
+        }
+    }
+
+    private async Task ProcessJobAsync(StoredJob job, CancellationToken cancellationToken)
+    {
+        using var operation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cancellationToken = operation.Token;
+        using var leaseLifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var leaseLost = 0;
+        var lease = RenewLeaseAsync(job, () => { Interlocked.Exchange(ref leaseLost, 1); operation.Cancel(); }, leaseLifetime.Token);
+        string? workPath = null;
+        try
+        {
+            if (job.Cloud && settings.CloudBlockReason is { } reason)
+            {
+                Store.FailJob(job, reason, "Blocked");
+                return;
+            }
+            var chunk = Store.GetChunk(job.ChunkId);
+            if (job.ProviderId == DiarizationProvider)
+            {
+                if (!DiarizationModelsReady)
+                {
+                    Store.FailJob(job, "Install the explicitly disclosed local diarization models to assign automatic speakers.", "Blocked");
+                    return;
+                }
+                await ProcessDiarizationAsync(job, chunk, cancellationToken);
+                return;
+            }
+            var provider = CreateProvider(job.ProviderId);
+            var allChunks = Store.GetChunks(job.TrackId);
+            var index = allChunks.ToList().FindIndex(item => item.Id == chunk.Id);
+            if (index < 0) throw new InvalidDataException("The queued audio chunk is not retained.");
+            workPath = Path.Combine(Store.GetSession(job.SessionId).Directory, "work", job.Id.ToString("N") + ".pcm16");
+            var window = await RecognitionWindowBuilder.CreateAsync(chunk, index > 0 ? allChunks[index - 1] : null,
+                index + 1 < allChunks.Count ? allChunks[index + 1] : null, provider.Descriptor.Timing == TimingGranularity.Word,
+                workPath, cancellationToken);
+            var source = JsonSerializer.Deserialize<NormalizedChunk>(chunk.MetadataJson)
+                ?? throw new InvalidDataException("Normalized source timing metadata is missing.");
+            var request = new TranscriptionRequest(job.SessionId, job.TrackId, job.ChunkId, window.Path, window.SampleCount,
+                job.Language, window.SessionStartTicks, window.CoreStartSample, window.CoreSampleCount,
+                checked(chunk.StartSample - window.CoreStartSample),
+                checked(source.SourceFrameOffset - Core.AudioTime.Scale(window.CoreStartSample, source.SourceFormat.SampleRate, 16000)));
+            var result = await provider.TranscribeAsync(request, cancellationToken);
+            if (result.Segments.IsDefault)
+                throw new TranscriptionProviderException(new(ProviderErrorCode.InvalidResponse, "The provider omitted its required segment collection."));
+            result = result with
+            {
+                Diagnostics = result.Diagnostics.IsDefault ? [] : result.Diagnostics,
+                Segments = result.Segments.Select(segment => segment with
+                {
+                    Words = segment.Words.IsDefault ? [] : segment.Words
+                }).ToImmutableArray()
+            };
+            var evidence = JsonSerializer.Serialize(new { Version = 1, Request = request, Result = result });
+            var modelIdentity = result.ObservedModel is { } observed ? "observed:" + observed : "advertised:" + provider.Descriptor.Model;
+            Store.SaveRawAttempt(job, evidence, modelIdentity);
+            if (result.Status == TranscriptionStatus.Partial)
+                throw new TranscriptionProviderException(new(ProviderErrorCode.InvalidResponse,
+                    "The provider returned partial audio coverage or invalid timing. Its raw response is retained; this chunk needs review or an explicit retry."));
+            var provenance = $"{job.ProviderId}; advertised-model={provider.Descriptor.Model}; observed-model={result.ObservedModel ?? "not returned"}; " +
+                $"track={job.TrackId:D}; normalized core={source.NormalizedStartSample}..{source.NormalizedEndSample} @16000Hz; " +
+                $"native frames={source.SourceFrameOffset}..{source.SourceFrameOffset + source.SourceFrameCount} @{source.SourceFormat.SampleRate}Hz";
+            var turns = Store.GetTurns(job.TrackId, window.SessionStartTicks,
+                window.SessionStartTicks + window.SampleCount * TimeSpan.TicksPerSecond / 16000L);
+            IReadOnlyList<SegmentDraft> rows;
+            if (result.Segments.All(segment => segment.Timing == TimingGranularity.Word && !segment.Words.IsDefaultOrEmpty))
+                rows = TranscriptMerger.MergeWords(window, result.Segments.SelectMany(segment => segment.Words)
+                    .Select(word => new RelativeRecognizedWord(word.Text, word.StartMilliseconds, word.EndMilliseconds)), turns, provenance);
+            else
+            {
+                if (window.CoreStartSample != 0 || window.SampleCount != window.CoreSampleCount)
+                    throw new TranscriptionProviderException(new(ProviderErrorCode.InvalidResponse,
+                        "This response omitted usable word timing for overlapping context. Raw source audio is retained; choose a coarse-timed provider explicitly."));
+                rows = TranscriptMerger.MergeSegments(window, result.Segments.Select(segment =>
+                    new RelativeRecognizedSegment(segment.Text, segment.StartMilliseconds ?? 0,
+                        segment.EndMilliseconds ?? (window.SampleCount * 1000L / 16000), segment.Timing.ToString())), turns, provenance);
+            }
+            Store.CompleteJob(job, rows, evidence, modelIdentity);
+            if (result.Status != TranscriptionStatus.Succeeded || !result.Diagnostics.IsDefaultOrEmpty)
+                Notify($"{provider.Descriptor.Name}: {result.Status}. {string.Join("; ", result.Diagnostics.IsDefault ? [] : result.Diagnostics)}");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            Store.FailJob(job, "Interrupted; the durable source remains available.",
+                shutdown.IsCancellationRequested || Volatile.Read(ref leaseLost) != 0 ? "Pending" : "Paused");
+        }
+        catch (TranscriptionProviderException error)
+        {
+            var retry = error.Error.IsTransient && job.Attempts < 3;
+            var blocked = error.Error.Code is ProviderErrorCode.Authentication or ProviderErrorCode.PermissionDenied or
+                ProviderErrorCode.QuotaExceeded or ProviderErrorCode.ConsentRequired or ProviderErrorCode.ModelUnavailable;
+            Store.FailJob(job, error.Error.SafeMessage, retry ? "RetryWaiting" : blocked ? "Blocked" : "Failed",
+                retry ? error.Error.RetryAfter ?? TimeSpan.FromSeconds(Math.Min(120, Math.Pow(2, job.Attempts) * 3 + Random.Shared.NextDouble())) : null);
+            if (job.Cloud && error.Error.Code is ProviderErrorCode.Authentication or ProviderErrorCode.PermissionDenied or ProviderErrorCode.QuotaExceeded)
+            {
+                UpdateSettings(current => current with { CloudBlockReason = error.Error.SafeMessage });
+                Store.BlockCloudJobs(error.Error.SafeMessage);
+                Notify("NVIDIA work is suspended after an authentication, permission, or quota error. Resolve it, then explicitly Resume; no fallback provider was selected.", true);
+            }
+            Notify($"Transcription { (retry ? "will retry" : "needs attention") }: {error.Error.SafeMessage}", true);
+        }
+        catch (Exception error) when (IsOperational(error))
+        {
+            Store.FailJob(job, error.Message);
+            Notify("Background job failed; retained audio is available: " + error.Message, true);
+        }
+        finally
+        {
+            await leaseLifetime.CancelAsync();
+            await lease;
+            if (workPath is not null && File.Exists(workPath)) File.Delete(workPath);
+        }
+    }
+
+    private async Task ProcessDiarizationAsync(StoredJob job, StoredAudioChunk chunk, CancellationToken cancellationToken)
+    {
+        var source = JsonSerializer.Deserialize<NormalizedChunk>(chunk.MetadataJson)
+            ?? throw new InvalidDataException("Normalized source timing metadata is missing.");
+        var previous = Store.GetSpeakerRegistry(job.SessionId);
+        var registry = previous is null ? new SpeakerRegistrySnapshot(job.SessionId, 0, []) : CoreRegistrySerializer.Deserialize(previous);
+        var names = Store.GetSpeakers(job.SessionId).ToDictionary(speaker => speaker.Id, speaker => speaker.Name);
+        registry = registry with { Speakers = registry.Speakers.Select(entry =>
+            names.TryGetValue(entry.Identity.Id.ToString("D"), out var name)
+                ? entry with { Identity = entry.Identity with { DisplayName = name } } : entry).ToImmutableArray() };
+        await using var service = CreateDiarizer(job.SessionId);
+        var result = await service.DiarizeAsync(new(job.SessionId, job.TrackId, chunk.Path, chunk.SampleCount, chunk.StartTicks,
+            NormalizedStartSample: chunk.StartSample, SourceFrameOffset: source.SourceFrameOffset, SourceSampleRate: source.SourceFormat.SampleRate),
+            registry, cancellationToken);
+        Store.SaveRawAttempt(job, JsonSerializer.Serialize(new
+        {
+            Version = 1, Source = source, result.Turns, Diagnostics = result.Diagnostics.IsDefault ? [] : result.Diagnostics,
+            SegmentationSha256 = DiarizationModels.SegmentationModelSha256,
+            DiarizationModels.EmbeddingSha256
+        }), "local:pyannote-segmentation-3.0+wespeaker-resnet34-lm");
+        var turns = result.Turns.Select(turn => new StoredTurn(turn.TrackId, turn.StartTicks, turn.EndTicks,
+            turn.SpeakerId?.ToString("D"), turn.Quality.HasFlag(SpeakerQualityFlags.Overlap),
+            turn.SpeakerId is null || (turn.Quality & (SpeakerQualityFlags.Ambiguous | SpeakerQualityFlags.InsufficientEvidence)) != 0)).ToArray();
+        var speakers = result.Registry.Speakers.Select(entry => new StoredSpeaker(entry.Identity.Id.ToString("D"),
+            job.SessionId, entry.Identity.DisplayName, entry.Identity.ExternalParticipantId, "Local segmentation and speaker embeddings")).ToArray();
+        var endTicks = chunk.StartTicks + chunk.SampleCount * TimeSpan.TicksPerSecond / 16000L;
+        if (!Store.CompleteDiarizationJob(job, CoreRegistrySerializer.Serialize(result.Registry), speakers, turns,
+                chunk.StartTicks, endTicks))
+        {
+            Notify("Speaker result was superseded by a pause, cancellation, or expired lease; the source remains retained.");
+            return;
+        }
+        RefreshSpeakerAssignments(job.SessionId, job.TrackId, chunk.StartTicks, endTicks);
+        if (!result.Diagnostics.IsDefaultOrEmpty) Notify("Speaker analysis: " + string.Join("; ", result.Diagnostics));
+    }
+
+    private void RefreshSpeakerAssignments(Guid sessionId, Guid trackId, long startTicks, long endTicks)
+    {
+        TranscriptCursor? cursor = null;
+        while (true)
+        {
+            var page = Store.GetTranscriptPage(sessionId, after: cursor, seekTicks: startTicks);
+            var assignments = new List<(string SegmentId, string? SpeakerId, bool Uncertain)>();
+            foreach (var row in page)
+            {
+                if (row.StartTicks >= endTicks) break;
+                if (row.TrackId != trackId || row.Provenance.StartsWith("WebVTT ", StringComparison.Ordinal)) continue;
+                var match = TranscriptMerger.MatchSpeaker(row.StartTicks, row.EndTicks,
+                    Store.GetTurns(trackId, row.StartTicks, Math.Max(row.EndTicks, row.StartTicks + 1)));
+                assignments.Add((row.Id, match.Speaker, match.Uncertain));
+            }
+            Store.ApplyAutomaticSpeakerAssignments(assignments);
+            if (page.Count < 200 || page[^1].StartTicks >= endTicks) return;
+            cursor = new(page[^1].StartTicks, page[^1].Id);
+        }
+    }
+
+    private async Task RenewLeaseAsync(StoredJob job, Action leaseLost, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var delay = TimeSpan.FromSeconds(30);
+            while (true)
+            {
+                await Task.Delay(delay, cancellationToken);
+                try
+                {
+                    if (!Store.TryRenewLease(job))
+                    {
+                        Notify("The active job lost its durable lease; inference is being canceled for safe replay.", true);
+                        leaseLost();
+                        return;
+                    }
+                    delay = TimeSpan.FromSeconds(30);
+                }
+                catch (Exception error) when (error is Microsoft.Data.Sqlite.SqliteException or IOException or UnauthorizedAccessException)
+                {
+                    Notify("Lease renewal is temporarily unavailable; retained audio is safe: " + error.Message, true);
+                    delay = TimeSpan.FromSeconds(5);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+    }
+
+    private ITranscriptionProvider CreateProvider(string id)
+    {
+        var cacheKey = id == "local-whisper" ? id + ":" + settings.WhisperModelPath : id;
+        if (providerCache.TryGetValue(cacheKey, out var existing)) return existing;
+        if (id == "local-whisper")
+        {
+            foreach (var old in providerCache.Keys.Where(key => key.StartsWith("local-whisper:", StringComparison.Ordinal)).ToArray())
+            {
+                providerCache[old].DisposeAsync().AsTask().GetAwaiter().GetResult();
+                providerCache.Remove(old);
+            }
+        }
+        var provider = MakeProvider(id);
+        providerCache.Add(cacheKey, provider);
+        return provider;
+    }
+
+    private ITranscriptionProvider MakeProvider(string id)
+    {
+        if (providerOverride is not null) return providerOverride(id);
+        if (id == "local-whisper")
+        {
+            if (string.IsNullOrWhiteSpace(settings.WhisperModelPath))
+                throw new TranscriptionProviderException(new(ProviderErrorCode.ModelUnavailable,
+                    "Choose a local Whisper model first. No cloud fallback or model download was performed."));
+            return new LocalWhisperProvider(settings.WhisperModelPath);
+        }
+        return new NvidiaRivaProvider(NvidiaModelCatalog.Get(id), credentials, new ConsentReader(Store));
+    }
+
+    private ProviderOption RequireProvider(string id) => Providers.SingleOrDefault(provider => provider.Id == id)
+        ?? throw new ArgumentException("Choose an available provider from the local catalog.");
+    private static Core.NativeChunk DeserializeNative(string json) => JsonSerializer.Deserialize<Core.NativeChunk>(json)
+        ?? throw new InvalidDataException("The native chunk manifest is invalid.");
+    private static MediaCheckpoint ReadImport(StoredTrack track) => JsonSerializer.Deserialize<MediaCheckpoint>(track.MetadataJson ?? "")
+        ?? throw new InvalidDataException("The managed import checkpoint is invalid.");
+    private void Notify(string message, bool error = false) => Notification?.Invoke(new(message, error));
+    private void UpdateSettings(Func<LocalSettings, LocalSettings> update)
+    {
+        lock (settingsGate)
+        {
+            var next = update(settings);
+            var temporary = settingsPath + ".partial";
+            try
+            {
+                using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
+                {
+                    JsonSerializer.Serialize(stream, next);
+                    stream.Flush(true);
+                }
+                File.Move(temporary, settingsPath, true);
+                settings = next;
+            }
+            finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        }
+    }
+    private static bool IsOperational(Exception error) => error is IOException or InvalidDataException or UnauthorizedAccessException or
+        InvalidOperationException or ArgumentException or JsonException or TimeoutException or
+        Microsoft.Data.Sqlite.SqliteException or System.ComponentModel.Win32Exception or System.Runtime.InteropServices.COMException;
+
+    private static string? FindCheckout()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        for (var depth = 0; depth < 10 && directory is not null; depth++, directory = directory.Parent)
+            if (File.Exists(Path.Combine(directory.FullName, "AudioTranscriber.slnx"))) return directory.FullName;
+        return null;
+    }
+
+    private IDiarizationService CreateDiarizer(Guid sessionId)
+    {
+        if (diarizationOverride is not null) return diarizationOverride();
+        var (worker, host) = FindWorker();
+        return new WorkerDiarizationService(worker, Path.Combine(Store.GetSession(sessionId).Directory, "workers"),
+            DiarizationModelPaths.InDirectory(modelDirectory), dotnetHostPath: host);
+    }
+
+    private static (string Worker, string? Host) FindWorker()
+    {
+        var local = Path.Combine(AppContext.BaseDirectory, "AudioTranscriber.Worker.exe");
+        if (File.Exists(local)) return (local, null);
+        var root = FindCheckout();
+        if (root is not null)
+        {
+            var preferred = AppContext.BaseDirectory.Contains($"{Path.DirectorySeparatorChar}Release{Path.DirectorySeparatorChar}",
+                StringComparison.OrdinalIgnoreCase) ? "Release" : "Debug";
+            foreach (var configuration in new[] { preferred, preferred == "Release" ? "Debug" : "Release" })
+            {
+                var candidate = Path.Combine(root, "src", "AudioTranscriber.Worker", "bin", configuration,
+                    "net10.0-windows", "win-x64", "AudioTranscriber.Worker.dll");
+                var host = Path.Combine(root, ".tools", "dotnet", "dotnet.exe");
+                if (File.Exists(candidate) && File.Exists(host)) return (candidate, host);
+            }
+        }
+        throw new FileNotFoundException("The local diarization worker is missing. Build or publish the complete application.");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (disposed) return;
+        disposed = true;
+        try { await StopRecordingAsync(CancellationToken.None); }
+        finally
+        {
+            stopping = true;
+            try
+            {
+                Notify("Closing: finishing the current recognition response before checkpointing remaining work.");
+                if (activeJobTask is { } active)
+                    await Task.WhenAny(active, Task.Delay(TimeSpan.FromSeconds(65)));
+                await shutdown.CancelAsync();
+                wake.Release();
+                await scheduler;
+                await Task.WhenAll(mediaTasks.Values);
+            }
+            finally
+            {
+                await shutdown.CancelAsync();
+                try
+                {
+                    var cleanup = new List<Task> { playback.DisposeAsync().AsTask(), capture.DisposeAsync().AsTask() };
+                    if (timelinePlayer is not null) cleanup.Add(timelinePlayer.DisposeAsync().AsTask());
+                    cleanup.AddRange(providerCache.Values.Select(provider => provider.DisposeAsync().AsTask()));
+                    await Task.WhenAll(cleanup);
+                }
+                finally
+                {
+                    credentials.Dispose();
+                    Store.CloseConnections();
+                    libraryLock.Dispose();
+                    shutdown.Dispose();
+                }
+            }
+        }
+    }
+
+    private sealed record LocalSettings(string? WhisperModelPath, string? CloudBlockReason = null);
+    private sealed record MediaCheckpoint(string SourcePath, int StreamIndex, ImportedMedia? Imported);
+    private sealed class CaptureFeed
+    {
+        public Channel<byte> Signals { get; } = Channel.CreateBounded<byte>(1);
+        public Task Task { get; set; } = Task.CompletedTask;
+    }
+    private sealed class ConsentReader(LibraryStore store) : ICloudConsentStore
+    {
+        public Task<CloudConsent?> GetAsync(Guid sessionId, string providerId, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var session = store.GetSession(sessionId);
+            return Task.FromResult<CloudConsent?>(new(sessionId, providerId,
+                store.GetTracks(sessionId).Select(track => track.Id).ToImmutableArray(),
+                session.CloudConsent && session.ProviderId == providerId ? ConsentState.Granted : ConsentState.NotGranted,
+                DateTimeOffset.UtcNow, "nvidia-upload-disclosure-2026-09-11"));
+        }
+    }
+}

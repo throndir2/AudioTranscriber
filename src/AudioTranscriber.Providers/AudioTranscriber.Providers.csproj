@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\AudioTranscriber.Core\AudioTranscriber.Core.csproj" />
+    <PackageReference Include="Google.Protobuf" Version="3.36.1" />
+    <PackageReference Include="Grpc.Net.Client" Version="2.83.0" />
+    <PackageReference Include="Grpc.Tools" Version="2.83.0" PrivateAssets="All" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
+    <PackageReference Include="Whisper.net" Version="1.9.1" />
+    <PackageReference Include="Whisper.net.Runtime" Version="1.9.1" />
+    <Protobuf Include="Protocol\riva\proto\*.proto" ProtoRoot="Protocol" GrpcServices="Client" />
+    <None Update="Protocol\LICENSE*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <EmbeddedResource Include="Protocol\LICENSE-OpenAI-Whisper" LogicalName="WhisperModelLicense" />
+    <InternalsVisibleTo Include="AudioTranscriber.Providers.Tests" />
+  </ItemGroup>
+</Project>

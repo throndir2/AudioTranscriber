@@ -1,0 +1,341 @@
+<Window x:Class="AudioTranscriber.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="AudioTranscriber · Local audio library" Width="1440" Height="940"
+        MinWidth="1040" MinHeight="720" WindowStartupLocation="CenterScreen">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <Border Background="#172C40" Padding="24,13">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="AudioTranscriber" FontSize="25" FontWeight="SemiBold" Foreground="White" />
+                    <TextBlock Text="Originals first. Source-language transcripts. Explicit cloud consent." Foreground="#D9E5ED" Margin="0,3,0,0" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="16,0">
+                    <TextBlock Text="{Binding CaptureState}" FontWeight="Bold" Foreground="White" AutomationProperties.LiveSetting="Polite" />
+                    <TextBlock Text="{Binding RecordingSession}" Foreground="#D9E5ED" MaxWidth="360" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+                <Button Grid.Column="2" Content="■  Stop recording" Command="{Binding StopRecordingCommand}"
+                        Style="{StaticResource StopButton}" Visibility="{Binding IsRecording, Converter={StaticResource BoolVisibility}}"
+                        ToolTip="Stops and seals audio. Does not cancel transcription." />
+            </Grid>
+        </Border>
+        <Grid Grid.Row="1" Margin="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="240" />
+                <ColumnDefinition Width="14" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Border Background="White" CornerRadius="8" BorderBrush="#D6E0E8" BorderThickness="1" Padding="12">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Top">
+                        <TextBlock Text="Your sessions" Style="{StaticResource Heading}" />
+                        <TextBlock Text="Saved locally · newest 2,000 sessions" FontSize="12" Style="{StaticResource Help}" />
+                        <Button Content="_Refresh library" Command="{Binding RefreshCommand}" />
+                    </StackPanel>
+                    <ListBox ItemsSource="{Binding Sessions}" SelectedItem="{Binding SelectedSession}"
+                             BorderThickness="0" Margin="0,8,0,0" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                             AutomationProperties.Name="Saved sessions">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="Padding" Value="9" />
+                                <Setter Property="Margin" Value="0,2" />
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" />
+                                    <TextBlock Text="{Binding CreatedUtc, StringFormat={}{0:MMM d · HH:mm}}" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,4,0,0" />
+                                    <TextBlock Text="{Binding State}" FontSize="12" Foreground="{StaticResource Accent}" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </Border>
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <StackPanel Margin="2,0,0,12">
+                    <TextBlock Text="{Binding SelectedSession.Name, TargetNullValue=Make room for a clearer transcript}" FontSize="23" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding SessionSummary}" Foreground="{StaticResource Muted}" Margin="0,4,0,0" />
+                    <TextBlock Text="{Binding SessionError}" Foreground="#A52232" TextWrapping="Wrap" Margin="0,4,0,0" AutomationProperties.LiveSetting="Polite" />
+                </StackPanel>
+                <TabControl x:Name="MainTabs" Grid.Row="1" Background="White" BorderBrush="#D6E0E8">
+                    <TabItem Header="_Record / import">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="22">
+                                <TextBlock Text="Start with your audio" Style="{StaticResource Heading}" />
+                                <TextBlock Style="{StaticResource Help}" Text="Recording starts only with the button below. It works without cloud consent or a key. Output and optional microphone are archived as separate tracks; originals survive slow or unavailable transcription." />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="150" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <Label Content="Session _name" Target="{Binding ElementName=SessionNameInput}" Padding="0" />
+                                        <TextBox x:Name="SessionNameInput" Text="{Binding SessionName, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="New session name" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1">
+                                        <Label Content="Transcription _provider" Target="{Binding ElementName=ProviderInput}" Padding="0" />
+                                        <ComboBox x:Name="ProviderInput" ItemsSource="{Binding Providers}" DisplayMemberPath="Name" SelectedItem="{Binding SelectedProvider}" AutomationProperties.Name="New session transcription provider" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <Label Content="Source _language" Target="{Binding ElementName=LanguageInput}" Padding="0" />
+                                        <TextBox x:Name="LanguageInput" Text="{Binding Language, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Source language" ToolTip="Explicit provider-supported source language; no translation. Examples: local en; Parakeet en-GB; Canary en-US; hosted Whisper en." />
+                                    </StackPanel>
+                                </Grid>
+                                <TextBlock Text="{Binding ProviderHelp}" Style="{StaticResource Help}" />
+                                <TextBlock Text="Language is explicit: use a locale supported by the selected provider (for example, Parakeet en-GB, Canary en-US, Whisper en). Audio is not silently translated." Style="{StaticResource Help}" />
+                                <Border Background="#EDF7F5" BorderBrush="#B8D8D2" BorderThickness="1" CornerRadius="6" Padding="14" Margin="0,0,0,18">
+                                    <StackPanel>
+                                        <TextBlock Text="Optional NVIDIA upload — this new session only" FontWeight="SemiBold" />
+                                        <TextBlock Style="{StaticResource Help}" Text="If enabled, audio from this session's selected output, separate microphone, or imported audio track is sent to the selected NVIDIA-hosted ASR service. NVIDIA terms and service logging apply. Free access has finite, account/model-dependent quotas; it is not unlimited or guaranteed. Send only audio you are permitted to upload, and no personal or confidential data. Already sent audio cannot be recalled." />
+                                        <CheckBox IsChecked="{Binding NewCloudConsent}" AutomationProperties.Name="Explicit NVIDIA upload consent for this new session">
+                                            <TextBlock TextWrapping="Wrap" Text="I understand these terms and explicitly permit NVIDIA uploads for this new session. (Off by default; reset after creation.)" />
+                                        </CheckBox>
+                                    </StackPanel>
+                                </Border>
+                                <TextBlock Text="Visible Windows capture" FontSize="18" FontWeight="SemiBold" />
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <Label Content="Windows _output endpoint" Target="{Binding ElementName=OutputInput}" Padding="0" />
+                                        <ComboBox x:Name="OutputInput" ItemsSource="{Binding OutputDevices}" DisplayMemberPath="Name" SelectedItem="{Binding OutputDevice}" AutomationProperties.Name="Selected Windows output device" />
+                                        <ProgressBar Value="{Binding OutputLevel, Mode=OneWay}" Minimum="0" Maximum="1" Height="12" Margin="0,0,8,0" AutomationProperties.Name="Output capture peak level" />
+                                        <TextBlock Text="Output level · active only during recording" FontSize="12" Style="{StaticResource Help}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1">
+                                        <CheckBox Content="Include a separate _microphone track" IsChecked="{Binding MicrophoneEnabled}" Margin="0,0,0,2" />
+                                        <ComboBox ItemsSource="{Binding MicrophoneDevices}" DisplayMemberPath="Name" SelectedItem="{Binding MicrophoneDevice}" IsEnabled="{Binding MicrophoneEnabled}" AutomationProperties.Name="Optional separate microphone device" />
+                                        <ProgressBar Value="{Binding MicrophoneLevel, Mode=OneWay}" Minimum="0" Maximum="1" Height="12" Margin="0,0,8,0" AutomationProperties.Name="Microphone capture peak level" />
+                                        <TextBlock Text="Microphone level · not included in loopback" FontSize="12" Style="{StaticResource Help}" />
+                                    </StackPanel>
+                                </Grid>
+                                <WrapPanel>
+                                    <Button Content="●  _Start recording" Style="{StaticResource PrimaryButton}" Command="{Binding StartRecordingCommand}" />
+                                    <Button Content="■  Stop recording" Style="{StaticResource StopButton}" Command="{Binding StopRecordingCommand}" />
+                                    <Button Content="Refresh _devices" Command="{Binding RefreshDevicesCommand}" />
+                                </WrapPanel>
+                                <TextBlock Text="Stop waits for original tails to seal. Transcription pause/cancel are separate controls in Jobs. Endpoint loss is an error, never a silent switch to a different device." Style="{StaticResource Help}" />
+                                <Separator Margin="0,8,0,18" />
+                                <TextBlock Text="Bring an existing recording" FontSize="18" FontWeight="SemiBold" />
+                                <TextBlock Style="{StaticResource Help}" Text="Import an audio or audio-bearing video file. FFprobe inspects streams first: a single audio stream is selected automatically; multiple streams require your choice. A managed original is retained and progress appears below. No entire multi-hour recording is loaded into the UI." />
+                                <Button Content="_Import audio / video…" Command="{Binding ImportAudioCommand}" HorizontalAlignment="Left" />
+                            </StackPanel>
+                        </ScrollViewer>
+                    </TabItem>
+                    <TabItem Header="_Transcript">
+                        <Grid Margin="16">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" MinHeight="80" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="180" />
+                            </Grid.RowDefinitions>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" /><ColumnDefinition Width="180" /><ColumnDefinition Width="130" /><ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="Search effective text" />
+                                    <TextBox Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Search transcript text">
+                                        <TextBox.InputBindings><KeyBinding Key="Return" Command="{Binding SearchCommand}" /></TextBox.InputBindings>
+                                    </TextBox>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Text="Speaker filter" />
+                                    <ComboBox ItemsSource="{Binding SpeakerFilters}" DisplayMemberPath="Name" SelectedItem="{Binding SpeakerFilter}" AutomationProperties.Name="Transcript speaker filter" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Jump hh:mm:ss" />
+                                    <TextBox Text="{Binding Seek, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Jump to transcript timestamp" />
+                                </StackPanel>
+                                <WrapPanel Grid.Column="3" VerticalAlignment="Bottom" Margin="0,0,0,4">
+                                    <Button Content="_Find / jump" Command="{Binding SearchCommand}" />
+                                    <Button Content="Clear" Command="{Binding ClearSearchCommand}" />
+                                </WrapPanel>
+                            </Grid>
+                            <DockPanel Grid.Row="1" Margin="0,0,0,6">
+                                <Button DockPanel.Dock="Right" Content="_Export…" Command="{Binding ExportCommand}" />
+                                <Button DockPanel.Dock="Right" Content="Analyze speakers" Command="{Binding DiarizeCommand}" ToolTip="Runs real local automatic diarization; explicitly install the small models first." />
+                                <TextBlock Text="Only 200 rows per keyset page. Double-click a row to play its own track." FontSize="12" TextWrapping="Wrap" Foreground="{StaticResource Muted}" />
+                            </DockPanel>
+                            <DataGrid x:Name="TranscriptGrid" Grid.Row="2" ItemsSource="{Binding Transcript}" SelectedItem="{Binding SelectedRow}"
+                                      MouseDoubleClick="TranscriptDoubleClick" AutomationProperties.Name="Paged transcript">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Time" Binding="{Binding Timestamp}" Width="86" />
+                                    <DataGridTextColumn Header="Track" Binding="{Binding TrackName}" Width="100" />
+                                    <DataGridTextColumn Header="Speaker" Binding="{Binding Speaker}" Width="110" />
+                                    <DataGridTextColumn Header="Transcript" Binding="{Binding Text}" Width="*" MinWidth="160" />
+                                    <DataGridTextColumn Header="Timing" Binding="{Binding Timing}" Width="88" />
+                                    <DataGridTextColumn Header="Attribution" Binding="{Binding Attribution}" Width="140" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                            <DockPanel Grid.Row="3" Margin="0,6">
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                    <Button Content="← Previous" Command="{Binding PreviousPageCommand}" />
+                                    <Button Content="Next →" Command="{Binding NextPageCommand}" />
+                                </StackPanel>
+                                <TextBlock Text="{Binding PageSummary}" FontSize="12" />
+                            </DockPanel>
+                            <TabControl Grid.Row="4">
+                                <TabItem Header="Correction / source">
+                                    <Grid Margin="10">
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                        <TextBlock Text="{Binding RowDetails}" TextWrapping="Wrap" FontSize="12" Margin="0,0,0,6" />
+                                        <Grid Grid.Row="1">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                            <TextBox Text="{Binding Correction, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Editable transcript correction" />
+                                            <TextBox Grid.Column="1" Text="{Binding RawText, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Background="#F3F6F9" AutomationProperties.Name="Preserved raw recognition" />
+                                        </Grid>
+                                        <WrapPanel Grid.Row="2">
+                                            <Button Content="Save correction" Command="{Binding SaveCorrectionCommand}" />
+                                            <Button Content="Restore raw text" Command="{Binding RestoreRawCommand}" />
+                                            <Button Content="▶ Play row" Command="{Binding PlayRowCommand}" />
+                                            <Button Content="■ Stop playback" Command="{Binding StopPlaybackCommand}" />
+                                        </WrapPanel>
+                                    </Grid>
+                                </TabItem>
+                                <TabItem Header="Speaker names">
+                                    <StackPanel Margin="10">
+                                        <TextBlock Text="Names are display labels, not verified identities. Manual assignment is optional and does not replace automatic diarization." Style="{StaticResource Help}" />
+                                        <WrapPanel>
+                                            <ComboBox Width="190" ItemsSource="{Binding Speakers}" SelectedItem="{Binding ManagedSpeaker}" DisplayMemberPath="Name" AutomationProperties.Name="Speaker to rename" />
+                                            <TextBox Width="230" Text="{Binding SpeakerName, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Speaker display name" />
+                                            <Button Content="Rename throughout session" Command="{Binding RenameSpeakerCommand}" />
+                                        </WrapPanel>
+                                        <WrapPanel>
+                                            <ComboBox Width="240" ItemsSource="{Binding AssignmentSpeakers}" SelectedItem="{Binding AssignmentSpeaker}" DisplayMemberPath="Name" AutomationProperties.Name="Optional manual speaker for selected row" />
+                                            <Button Content="Assign speaker to selected row" Command="{Binding AssignSpeakerCommand}" />
+                                        </WrapPanel>
+                                    </StackPanel>
+                                </TabItem>
+                                <TabItem Header="Track playback">
+                                    <StackPanel Margin="10">
+                                        <TextBlock Text="Play one original track at a time. Row playback always uses that row's track and start time. Coarse cues do not provide word-accurate seeking; unlinked VTT tracks have no audio." Style="{StaticResource Help}" />
+                                        <WrapPanel>
+                                            <ComboBox Width="260" ItemsSource="{Binding Tracks}" SelectedItem="{Binding SelectedTrack}" DisplayMemberPath="Name" AutomationProperties.Name="Original track to play" />
+                                            <TextBox Width="140" Text="{Binding PlaybackTimestamp, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Original track playback timestamp" />
+                                            <Button Content="▶ Play track" Command="{Binding PlayTrackCommand}" />
+                                            <Button Content="■ Stop playback" Command="{Binding StopPlaybackCommand}" />
+                                        </WrapPanel>
+                                    </StackPanel>
+                                </TabItem>
+                            </TabControl>
+                        </Grid>
+                    </TabItem>
+                    <TabItem Header="_Jobs">
+                        <Grid Margin="20">
+                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                            <TextBlock Text="{Binding QueueSummary}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                            <WrapPanel Grid.Row="1" Margin="0,10,0,0">
+                                <Button Content="_Pause transcription" Command="{Binding PauseCommand}" />
+                                <Button Content="_Resume transcription" Command="{Binding ResumeCommand}" />
+                                <Button Content="_Cancel transcription jobs" Command="{Binding CancelJobsCommand}" />
+                            </WrapPanel>
+                            <TextBlock Grid.Row="2" Style="{StaticResource Help}" Text="These controls affect transcription for the selected session, NOT audio capture. Recording Stop remains visible at the top. Latest 100 jobs below; aggregate counts include all jobs. Authentication, quota, and consent failures need explicit action, never a provider fallback." />
+                            <DataGrid Grid.Row="3" ItemsSource="{Binding Jobs}" AutomationProperties.Name="Selected session latest transcription jobs">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="State" Binding="{Binding State}" Width="110" />
+                                    <DataGridTextColumn Header="Provider" Binding="{Binding ProviderId}" Width="160" />
+                                    <DataGridTextColumn Header="Attempts" Binding="{Binding Attempts}" Width="80" />
+                                    <DataGridTextColumn Header="Error / diagnostic" Binding="{Binding Error}" Width="*" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Grid>
+                    </TabItem>
+                    <TabItem Header="_Privacy / models">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="22">
+                                <TextBlock Text="Your data, your decision" Style="{StaticResource Heading}" />
+                                <TextBlock Text="{Binding ConsentSummary}" FontWeight="SemiBold" />
+                                <TextBlock Style="{StaticResource Help}" Text="Consent applies only to the selected session's configured NVIDIA provider and audio tracks. NVIDIA service terms/logging and finite account/model quotas apply. Upload only permitted audio, with no personal or confidential data. Revocation stops future uploads, but cannot recall already sent audio. Choosing local Whisper never opts into cloud on an error." />
+                                <CheckBox IsChecked="{Binding SelectedCloudConsent}" IsEnabled="{Binding HasSession}">
+                                    <TextBlock Text="I explicitly permit NVIDIA uploads for the selected session under the disclosure above." TextWrapping="Wrap" />
+                                </CheckBox>
+                                <WrapPanel>
+                                    <Button Content="Grant selected-session consent" Command="{Binding GrantConsentCommand}" />
+                                    <Button Content="Revoke cloud consent" Command="{Binding RevokeConsentCommand}" />
+                                </WrapPanel>
+                                <Separator Margin="0,12" />
+                                <TextBlock Text="NVIDIA key — never required to record" FontSize="18" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding KeyStatus}" Style="{StaticResource Help}" />
+                                <WrapPanel>
+                                    <PasswordBox x:Name="NvidiaKeyInput" Width="330" Padding="8" Margin="0,4,10,4" AutomationProperties.Name="NVIDIA key, password input, never logged" />
+                                    <Button Content="Use entered key" Click="SaveKeyClick" />
+                                    <Button Content="Clear key" Click="ClearKeyClick" />
+                                </WrapPanel>
+                                <CheckBox Content="Remember key with Windows current-user DPAPI (off by default)" IsChecked="{Binding RememberKey}" />
+                                <TextBlock Text="Memory-only by default. The password field is cleared after use. No keys in configuration, logs, command-line arguments, transcripts, or exports. Graph authentication is separate." Style="{StaticResource Help}" />
+                                <Separator Margin="0,8,0,16" />
+                                <TextBlock Text="Automatic local speaker analysis" FontSize="18" FontWeight="SemiBold" />
+                                <TextBlock Style="{StaticResource Help}" Text="Explicit download: about 33.49 MB total. Segmentation is MIT (CNRS 2023); embedding is CC BY 4.0 with retained attribution and package notices. Official release artifacts need no Hugging Face token; the original HF segmentation model is gated. Nothing downloads on startup." />
+                                <TextBlock Text="{Binding ModelStatus}" TextWrapping="Wrap" FontWeight="SemiBold" />
+                                <WrapPanel>
+                                    <Button Content="Install small diarization models…" Command="{Binding InstallModelsCommand}" />
+                                    <Button Content="Analyze selected session speakers" Command="{Binding DiarizeCommand}" />
+                                </WrapPanel>
+                                <TextBlock Style="{StaticResource Help}" Text="Automatic labels are not verified participant identities. Short turns, overlap, changing character voices, and crowded windows can remain uncertain. More session speakers are possible, but the segmentation model has local-window limits. Manual rename and assignment are available in Transcript." />
+                                <Separator Margin="0,8,0,16" />
+                                <TextBlock Text="Optional local Whisper" FontSize="18" FontWeight="SemiBold" />
+                                <TextBlock Style="{StaticResource Help}" Text="Select an existing compatible whisper.cpp model file. No large model is downloaded automatically. Model files range from roughly 75 MiB for tiny to several GiB for large models; inspect the exact release size, model license, and runtime license before downloading. Upstream OpenAI Whisper uses the MIT license. Larger does not guarantee better results for your recording." />
+                                <Button Content="Choose existing Whisper model…" Command="{Binding ChooseWhisperModelCommand}" HorizontalAlignment="Left" />
+                                <TextBlock Text="{Binding LocalModel}" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding DataRoot, StringFormat=Local library: {0}}" Style="{StaticResource Help}" Margin="0,24,0,8" />
+                            </StackPanel>
+                        </ScrollViewer>
+                    </TabItem>
+                    <TabItem Header="_VTT / Teams">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="22">
+                                <TextBlock Text="Transcript sources with provenance" Style="{StaticResource Heading}" />
+                                <TextBlock Style="{StaticResource Help}" Text="First select an existing session. Import a local WebVTT file to add timed cues and source speaker labels. Cue times retain the source transcript clock; they are not automatically aligned to this session's audio. Labels are retained as transcript provenance, not inferred verified identities. An unlinked transcript does not manufacture playable audio." />
+                                <Button Content="Import local .vtt into selected session…" Command="{Binding ImportVttCommand}" HorizontalAlignment="Left" />
+                                <Separator Margin="0,18" />
+                                <TextBlock Text="Microsoft Teams · configuration required" FontSize="18" FontWeight="SemiBold" />
+                                <TextBlock Style="{StaticResource Help}" Text="This uses real delegated Microsoft Graph retrieval of an existing meeting transcript—not live Teams audio. Supply a work/school tenant, public-client app ID configured for device-code sign-in, and explicit user, online-meeting, and transcript IDs. OnlineMeetingTranscript.Read.All permission, meeting access, and tenant policy must permit retrieval." />
+                                <Button Content="Fetch configured Teams transcript…" Command="{Binding FetchTeamsCommand}" HorizontalAlignment="Left" />
+                                <TextBlock Style="{StaticResource Help}" Text="The sign-in window displays the actual Microsoft verification URL, device code, and expiration—not tokens. Attribution restrictions are respected; an explicitly permitted unattributed policy option is available. No tenant or live Graph validation is implied by the UI smoke test." />
+                                <Separator Margin="0,18" />
+                                <TextBlock Text="Not included: live Teams or Discord audio" FontSize="18" FontWeight="SemiBold" />
+                                <TextBlock Style="{StaticResource Help}" Text="Live Teams requires a separately deployed Azure media bot and tenant policy. Discord live receive needs a visible, authorized guild bot and validated DAVE-compatible receive support. Neither is represented by a fake capture button. Windows selected-output capture is a distinct, explicit local action." />
+                            </StackPanel>
+                        </ScrollViewer>
+                    </TabItem>
+                </TabControl>
+            </Grid>
+        </Grid>
+        <Border Grid.Row="2" BorderBrush="#D6E0E8" BorderThickness="0,1,0,0" Background="White" Padding="18,10">
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="170" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding Status}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Foreground" Value="{StaticResource Ink}" />
+                            <Style.Triggers><DataTrigger Binding="{Binding StatusIsError}" Value="True"><Setter Property="Foreground" Value="#A52232" /></DataTrigger></Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+                <ProgressBar Grid.Column="1" IsIndeterminate="{Binding Busy}" Visibility="{Binding Busy, Converter={StaticResource BoolVisibility}}" Height="8" Margin="15,0" AutomationProperties.Name="Current operation progress" />
+                <Button Grid.Column="2" Content="Cancel operation" Command="{Binding CancelOperationCommand}" Visibility="{Binding Busy, Converter={StaticResource BoolVisibility}}" ToolTip="Cancels the current import, download, or analysis. Does not stop an active recording." />
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

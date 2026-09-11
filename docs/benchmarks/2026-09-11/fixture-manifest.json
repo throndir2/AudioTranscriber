@@ -1,0 +1,28 @@
+{
+  "Dataset": "hf-internal-testing/librispeech_asr_dummy",
+  "Revision": "5be91486e11a2d616f4ec5db8d3fd248585ac07a",
+  "Sha256": "4e69a06fa5edc90921e5e7e39a7084881f8b3ed9c805c574f4f39c6fde27c603",
+  "DownloadUri": "https://huggingface.co/datasets/hf-internal-testing/librispeech_asr_dummy/resolve/5be91486e11a2d616f4ec5db8d3fd248585ac07a/clean/validation-00000-of-00001.parquet",
+  "Attribution": "LibriSpeech ASR corpus, Vassil Panayotov, Guoguo Chen, Daniel Povey and Sanjeev Khudanpur (2015), OpenSLR 12, https://www.openslr.org/12/, CC BY 4.0 https://creativecommons.org/licenses/by/4.0/. Hugging Face hf-internal-testing dummy subset/transcoding; fixture card does not specify a license. Two complete same-speaker clean read utterances; not a D\u0026D or diarization benchmark.",
+  "PreparedUtc": "2026-09-11T06:58:41.4829136+00:00",
+  "Clips": [
+    {
+      "Id": "1272-128104-0000",
+      "Reference": "MISTER QUILTER IS THE APOSTLE OF THE MIDDLE CLASSES AND WE ARE GLAD TO WELCOME HIS GOSPEL",
+      "DurationSeconds": 5.855,
+      "SampleCount": 93680,
+      "SourceSha256": "4e25e22555cd16e90edb0a3b49fdcf1fe652b2a1250ab643634db33895c75b41",
+      "PcmSha256": "156e1e1821700d4c4ad31a63e6d901a5088d5ee155fafd02a9d0d2de37f771e6",
+      "NormalizerVersion": "9.0.1-full_build-www.gyan.dev"
+    },
+    {
+      "Id": "1272-128104-0001",
+      "Reference": "NOR IS MISTER QUILTER\u0027S MANNER LESS INTERESTING THAN HIS MATTER",
+      "DurationSeconds": 4.815,
+      "SampleCount": 77040,
+      "SourceSha256": "46a9d58622b4675b29564da2d9ba73e702241c5fa969f12c387cad4aa984276a",
+      "PcmSha256": "bca0b38f0be340f804ab1d522f4d2a1b339f3cb237913347d1af0847ae48160e",
+      "NormalizerVersion": "9.0.1-full_build-www.gyan.dev"
+    }
+  ]
+}

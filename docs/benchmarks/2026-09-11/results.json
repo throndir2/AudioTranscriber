@@ -1,0 +1,496 @@
+{
+  "SchemaVersion": 1,
+  "StartedUtc": "2026-09-11T06:58:41.5213974+00:00",
+  "UpdatedUtc": "2026-09-11T06:59:27.2857593+00:00",
+  "Fixture": {
+    "Dataset": "hf-internal-testing/librispeech_asr_dummy",
+    "Revision": "5be91486e11a2d616f4ec5db8d3fd248585ac07a",
+    "Sha256": "4e69a06fa5edc90921e5e7e39a7084881f8b3ed9c805c574f4f39c6fde27c603",
+    "Url": "https://huggingface.co/datasets/hf-internal-testing/librispeech_asr_dummy/resolve/5be91486e11a2d616f4ec5db8d3fd248585ac07a/clean/validation-00000-of-00001.parquet",
+    "MaximumDownloadBytes": 15728640,
+    "Attribution": "LibriSpeech ASR corpus, Vassil Panayotov, Guoguo Chen, Daniel Povey and Sanjeev Khudanpur (2015), OpenSLR 12, https://www.openslr.org/12/, CC BY 4.0 https://creativecommons.org/licenses/by/4.0/. Hugging Face hf-internal-testing dummy subset/transcoding; fixture card does not specify a license. Two complete same-speaker clean read utterances; not a D\u0026D or diarization benchmark."
+  },
+  "Clips": [
+    {
+      "Id": "1272-128104-0000",
+      "Reference": "MISTER QUILTER IS THE APOSTLE OF THE MIDDLE CLASSES AND WE ARE GLAD TO WELCOME HIS GOSPEL",
+      "SampleCount": 93680,
+      "DurationSeconds": 5.855,
+      "SourceSha256": "4e25e22555cd16e90edb0a3b49fdcf1fe652b2a1250ab643634db33895c75b41",
+      "PcmSha256": "156e1e1821700d4c4ad31a63e6d901a5088d5ee155fafd02a9d0d2de37f771e6",
+      "NormalizerVersion": "9.0.1-full_build-www.gyan.dev"
+    },
+    {
+      "Id": "1272-128104-0001",
+      "Reference": "NOR IS MISTER QUILTER\u0027S MANNER LESS INTERESTING THAN HIS MATTER",
+      "SampleCount": 77040,
+      "DurationSeconds": 4.815,
+      "SourceSha256": "46a9d58622b4675b29564da2d9ba73e702241c5fa969f12c387cad4aa984276a",
+      "PcmSha256": "bca0b38f0be340f804ab1d522f4d2a1b339f3cb237913347d1af0847ae48160e",
+      "NormalizerVersion": "9.0.1-full_build-www.gyan.dev"
+    }
+  ],
+  "Settings": {
+    "ProviderAuthority": "grpc.nvcf.nvidia.com:443",
+    "Method": "unary Recognize",
+    "Encoding": "signed little-endian PCM16",
+    "SampleRate": 16000,
+    "Channels": 1,
+    "SourceLanguage": "en",
+    "Translation": false,
+    "ModelConfigField": "unset",
+    "Concurrency": 1,
+    "MaximumRetries": 0,
+    "RequestDeadlineSeconds": 60,
+    "MaxAlternatives": 1,
+    "Punctuation": true,
+    "Verbatim": true,
+    "ProfanityFilter": false,
+    "NativeDiarization": false,
+    "WordOffsets": "Parakeet only",
+    "LatencyScope": "adapter wall time including in-process concurrency gate and conservative pacing"
+  },
+  "Budget": {
+    "Attempts": 6,
+    "SubmittedAudioSeconds": 32.010000000000005,
+    "MaximumAttempts": 9,
+    "MaximumAudioSeconds": 135
+  },
+  "Catalog": [
+    {
+      "Id": "nvidia-parakeet-tdt-v3",
+      "DisplayName": "Parakeet TDT v3",
+      "AdvertisedModel": "nvidia/parakeet-tdt-0_6b",
+      "FunctionId": "2b940e91-a70e-4483-a958-d50408b96589",
+      "EnglishLocale": "en-GB",
+      "VerifiedWordTiming": true,
+      "ApiSource": "https://build.nvidia.com/nvidia/parakeet-tdt-0_6b/api",
+      "MaximumAudioDuration": "00:00:30",
+      "NativeDiarization": false,
+      "MetadataCheckedOn": "2026-09-11"
+    },
+    {
+      "Id": "nvidia-canary",
+      "DisplayName": "Canary-1B-Flash2.0",
+      "AdvertisedModel": "nvidia/canary-1b-asr",
+      "FunctionId": "b0e8b4a5-217c-40b7-9b96-17d84e666317",
+      "EnglishLocale": "en-US",
+      "VerifiedWordTiming": false,
+      "ApiSource": "https://build.nvidia.com/nvidia/canary-1b-asr/api",
+      "MaximumAudioDuration": "00:00:30",
+      "NativeDiarization": false,
+      "MetadataCheckedOn": "2026-09-11"
+    },
+    {
+      "Id": "nvidia-whisper-large-v3",
+      "DisplayName": "Hosted Whisper large-v3",
+      "AdvertisedModel": "openai/whisper-large-v3",
+      "FunctionId": "b702f636-f60c-4a3d-a6f4-f3568c13bd7d",
+      "EnglishLocale": "en",
+      "VerifiedWordTiming": false,
+      "ApiSource": "https://build.nvidia.com/openai/whisper-large-v3/api",
+      "MaximumAudioDuration": "00:00:30",
+      "NativeDiarization": false,
+      "MetadataCheckedOn": "2026-09-11"
+    }
+  ],
+  "Normalization": "Unicode NFKC; invariant lowercase; retain Unicode letters/digits; all other runes become spaces; collapse whitespace and trim. WER splits on spaces. CER removes spaces and compares Unicode scalar values. No number expansion, spelling correction, stemming, reference hints, or entity annotations. Levenshtein unit costs; ties prefer substitution, deletion, insertion; rates may exceed 1.",
+  "Interpretation": "Compare only matched successful clips with coverage. Failed/skipped results have no WER; empty/partial hypotheses remain visible but are not matched successes. Same-speaker clean read English, n=2, no repeated latency trials. Cannot establish a D\u0026D winner, named-entity accuracy, or diarization DER.",
+  "Runtime": {
+    "Dotnet": "10.0.12",
+    "Tool": "1.0.0.0"
+  },
+  "Summaries": [
+    {
+      "ProviderId": "nvidia-parakeet-tdt-v3",
+      "Availability": "responded",
+      "PlannedClips": 2,
+      "Successful": 1,
+      "Empty": 0,
+      "Partial": 0,
+      "Failed": 1,
+      "Skipped": 0,
+      "SuccessfulCoverage": 0.5,
+      "MatchedClipIds": [
+        "1272-128104-0001"
+      ],
+      "MatchedWer": 0,
+      "MatchedCer": 0,
+      "MeanSuccessfulWallLatencySeconds": 9.1961925,
+      "MeanSuccessfulRealTimeFactor": 1.909904984423676
+    },
+    {
+      "ProviderId": "nvidia-canary",
+      "Availability": "responded",
+      "PlannedClips": 2,
+      "Successful": 2,
+      "Empty": 0,
+      "Partial": 0,
+      "Failed": 0,
+      "Skipped": 0,
+      "SuccessfulCoverage": 1,
+      "MatchedClipIds": [
+        "1272-128104-0001"
+      ],
+      "MatchedWer": 0,
+      "MatchedCer": 0,
+      "MeanSuccessfulWallLatencySeconds": 0.9325142000000001,
+      "MeanSuccessfulRealTimeFactor": 0.16553285021455688
+    },
+    {
+      "ProviderId": "nvidia-whisper-large-v3",
+      "Availability": "responded",
+      "PlannedClips": 2,
+      "Successful": 2,
+      "Empty": 0,
+      "Partial": 0,
+      "Failed": 0,
+      "Skipped": 0,
+      "SuccessfulCoverage": 1,
+      "MatchedClipIds": [
+        "1272-128104-0001"
+      ],
+      "MatchedWer": 0.09090909090909091,
+      "MatchedCer": 0.07547169811320754,
+      "MeanSuccessfulWallLatencySeconds": 1.2101784,
+      "MeanSuccessfulRealTimeFactor": 0.21472511864698363
+    }
+  ],
+  "Attempts": [
+    {
+      "AttemptNumber": 1,
+      "ProviderId": "nvidia-parakeet-tdt-v3",
+      "ClipId": "1272-128104-0000",
+      "RetryIndex": 0,
+      "Status": "Failed",
+      "FailureCategory": "DeadlineExceeded",
+      "Reference": "MISTER QUILTER IS THE APOSTLE OF THE MIDDLE CLASSES AND WE ARE GLAD TO WELCOME HIS GOSPEL",
+      "Hypothesis": null,
+      "AudioSeconds": 5.855,
+      "LatencySeconds": 30.4184182,
+      "RealTimeFactor": 5.195289188727583,
+      "ObservedModel": null,
+      "Metrics": null,
+      "WordCount": 0,
+      "MissingWordTimingSegments": 0,
+      "InvalidTimingDiagnostics": 0,
+      "Diagnostics": [],
+      "Segments": [],
+      "RawResponse": null
+    },
+    {
+      "AttemptNumber": 2,
+      "ProviderId": "nvidia-parakeet-tdt-v3",
+      "ClipId": "1272-128104-0001",
+      "RetryIndex": 0,
+      "Status": "Succeeded",
+      "FailureCategory": null,
+      "Reference": "NOR IS MISTER QUILTER\u0027S MANNER LESS INTERESTING THAN HIS MATTER",
+      "Hypothesis": "Nor is mister Quilter\u0027s manner less interesting than his matter. ",
+      "AudioSeconds": 4.815,
+      "LatencySeconds": 9.1961925,
+      "RealTimeFactor": 1.909904984423676,
+      "ObservedModel": null,
+      "Metrics": {
+        "NormalizedReference": "nor is mister quilter s manner less interesting than his matter",
+        "NormalizedHypothesis": "nor is mister quilter s manner less interesting than his matter",
+        "Words": {
+          "Substitutions": 0,
+          "Deletions": 0,
+          "Insertions": 0,
+          "ReferenceUnits": 11,
+          "Errors": 0,
+          "Rate": 0
+        },
+        "Characters": {
+          "Substitutions": 0,
+          "Deletions": 0,
+          "Insertions": 0,
+          "ReferenceUnits": 53,
+          "Errors": 0,
+          "Rate": 0
+        }
+      },
+      "WordCount": 10,
+      "MissingWordTimingSegments": 0,
+      "InvalidTimingDiagnostics": 0,
+      "Diagnostics": [],
+      "Segments": [
+        {
+          "Text": "Nor is mister Quilter\u0027s manner less interesting than his matter. ",
+          "StartMilliseconds": 320,
+          "EndMilliseconds": 4160,
+          "Timing": "Word",
+          "Words": [
+            {
+              "Text": "Nor",
+              "StartMilliseconds": 320,
+              "EndMilliseconds": 320,
+              "Confidence": null
+            },
+            {
+              "Text": "is",
+              "StartMilliseconds": 640,
+              "EndMilliseconds": 640,
+              "Confidence": null
+            },
+            {
+              "Text": "mister",
+              "StartMilliseconds": 880,
+              "EndMilliseconds": 1040,
+              "Confidence": null
+            },
+            {
+              "Text": "Quilter\u0027s",
+              "StartMilliseconds": 1120,
+              "EndMilliseconds": 1920,
+              "Confidence": null
+            },
+            {
+              "Text": "manner",
+              "StartMilliseconds": 2000,
+              "EndMilliseconds": 2080,
+              "Confidence": null
+            },
+            {
+              "Text": "less",
+              "StartMilliseconds": 2320,
+              "EndMilliseconds": 2560,
+              "Confidence": null
+            },
+            {
+              "Text": "interesting",
+              "StartMilliseconds": 2720,
+              "EndMilliseconds": 3120,
+              "Confidence": null
+            },
+            {
+              "Text": "than",
+              "StartMilliseconds": 3360,
+              "EndMilliseconds": 3360,
+              "Confidence": null
+            },
+            {
+              "Text": "his",
+              "StartMilliseconds": 3600,
+              "EndMilliseconds": 3600,
+              "Confidence": null
+            },
+            {
+              "Text": "matter.",
+              "StartMilliseconds": 3840,
+              "EndMilliseconds": 4160,
+              "Confidence": null
+            }
+          ],
+          "Confidence": 1
+        }
+      ],
+      "RawResponse": "{ \u0022results\u0022: [ { \u0022alternatives\u0022: [ { \u0022transcript\u0022: \u0022Nor is mister Quilter\u0027s manner less interesting than his matter. \u0022, \u0022confidence\u0022: 1, \u0022words\u0022: [ { \u0022startTime\u0022: 320, \u0022endTime\u0022: 320, \u0022word\u0022: \u0022Nor\u0022 }, { \u0022startTime\u0022: 640, \u0022endTime\u0022: 640, \u0022word\u0022: \u0022is\u0022 }, { \u0022startTime\u0022: 880, \u0022endTime\u0022: 1040, \u0022word\u0022: \u0022mister\u0022 }, { \u0022startTime\u0022: 1120, \u0022endTime\u0022: 1920, \u0022word\u0022: \u0022Quilter\u0027s\u0022 }, { \u0022startTime\u0022: 2000, \u0022endTime\u0022: 2080, \u0022word\u0022: \u0022manner\u0022 }, { \u0022startTime\u0022: 2320, \u0022endTime\u0022: 2560, \u0022word\u0022: \u0022less\u0022 }, { \u0022startTime\u0022: 2720, \u0022endTime\u0022: 3120, \u0022word\u0022: \u0022interesting\u0022 }, { \u0022startTime\u0022: 3360, \u0022endTime\u0022: 3360, \u0022word\u0022: \u0022than\u0022 }, { \u0022startTime\u0022: 3600, \u0022endTime\u0022: 3600, \u0022word\u0022: \u0022his\u0022 }, { \u0022startTime\u0022: 3840, \u0022endTime\u0022: 4160, \u0022word\u0022: \u0022matter.\u0022 } ] } ], \u0022channelTag\u0022: 1, \u0022audioProcessed\u0022: 4.815 } ] }"
+    },
+    {
+      "AttemptNumber": 3,
+      "ProviderId": "nvidia-canary",
+      "ClipId": "1272-128104-0000",
+      "RetryIndex": 0,
+      "Status": "Succeeded",
+      "FailureCategory": null,
+      "Reference": "MISTER QUILTER IS THE APOSTLE OF THE MIDDLE CLASSES AND WE ARE GLAD TO WELCOME HIS GOSPEL",
+      "Hypothesis": "Mister quilter is the apostle of the middle classes and we are glad to welcome his gospel. ",
+      "AudioSeconds": 5.855,
+      "LatencySeconds": 1.5253798,
+      "RealTimeFactor": 0.2605260119555935,
+      "ObservedModel": null,
+      "Metrics": {
+        "NormalizedReference": "mister quilter is the apostle of the middle classes and we are glad to welcome his gospel",
+        "NormalizedHypothesis": "mister quilter is the apostle of the middle classes and we are glad to welcome his gospel",
+        "Words": {
+          "Substitutions": 0,
+          "Deletions": 0,
+          "Insertions": 0,
+          "ReferenceUnits": 17,
+          "Errors": 0,
+          "Rate": 0
+        },
+        "Characters": {
+          "Substitutions": 0,
+          "Deletions": 0,
+          "Insertions": 0,
+          "ReferenceUnits": 73,
+          "Errors": 0,
+          "Rate": 0
+        }
+      },
+      "WordCount": 0,
+      "MissingWordTimingSegments": 1,
+      "InvalidTimingDiagnostics": 0,
+      "Diagnostics": [
+        "word-timing-unavailable"
+      ],
+      "Segments": [
+        {
+          "Text": "Mister quilter is the apostle of the middle classes and we are glad to welcome his gospel. ",
+          "StartMilliseconds": 0,
+          "EndMilliseconds": 5855,
+          "Timing": "Chunk",
+          "Words": [],
+          "Confidence": null
+        }
+      ],
+      "RawResponse": "{ \u0022results\u0022: [ { \u0022alternatives\u0022: [ { \u0022transcript\u0022: \u0022Mister quilter is the apostle of the middle classes and we are glad to welcome his gospel. \u0022, \u0022languageCode\u0022: [ \u0022en-US\u0022 ] } ], \u0022channelTag\u0022: 1, \u0022audioProcessed\u0022: 5.855 } ] }"
+    },
+    {
+      "AttemptNumber": 4,
+      "ProviderId": "nvidia-canary",
+      "ClipId": "1272-128104-0001",
+      "RetryIndex": 0,
+      "Status": "Succeeded",
+      "FailureCategory": null,
+      "Reference": "NOR IS MISTER QUILTER\u0027S MANNER LESS INTERESTING THAN HIS MATTER",
+      "Hypothesis": "Nor is mister quilter\u0027s manner less interesting than his matter. ",
+      "AudioSeconds": 4.815,
+      "LatencySeconds": 0.3396486,
+      "RealTimeFactor": 0.07053968847352025,
+      "ObservedModel": null,
+      "Metrics": {
+        "NormalizedReference": "nor is mister quilter s manner less interesting than his matter",
+        "NormalizedHypothesis": "nor is mister quilter s manner less interesting than his matter",
+        "Words": {
+          "Substitutions": 0,
+          "Deletions": 0,
+          "Insertions": 0,
+          "ReferenceUnits": 11,
+          "Errors": 0,
+          "Rate": 0
+        },
+        "Characters": {
+          "Substitutions": 0,
+          "Deletions": 0,
+          "Insertions": 0,
+          "ReferenceUnits": 53,
+          "Errors": 0,
+          "Rate": 0
+        }
+      },
+      "WordCount": 0,
+      "MissingWordTimingSegments": 1,
+      "InvalidTimingDiagnostics": 0,
+      "Diagnostics": [
+        "word-timing-unavailable"
+      ],
+      "Segments": [
+        {
+          "Text": "Nor is mister quilter\u0027s manner less interesting than his matter. ",
+          "StartMilliseconds": 0,
+          "EndMilliseconds": 4815,
+          "Timing": "Chunk",
+          "Words": [],
+          "Confidence": null
+        }
+      ],
+      "RawResponse": "{ \u0022results\u0022: [ { \u0022alternatives\u0022: [ { \u0022transcript\u0022: \u0022Nor is mister quilter\u0027s manner less interesting than his matter. \u0022, \u0022languageCode\u0022: [ \u0022en-US\u0022 ] } ], \u0022channelTag\u0022: 1, \u0022audioProcessed\u0022: 4.815 } ] }"
+    },
+    {
+      "AttemptNumber": 5,
+      "ProviderId": "nvidia-whisper-large-v3",
+      "ClipId": "1272-128104-0000",
+      "RetryIndex": 0,
+      "Status": "Succeeded",
+      "FailureCategory": null,
+      "Reference": "MISTER QUILTER IS THE APOSTLE OF THE MIDDLE CLASSES AND WE ARE GLAD TO WELCOME HIS GOSPEL",
+      "Hypothesis": "\u0022Mr. Quilter is the apostle of the middle classes, and we are glad to welcome his gospel. ",
+      "AudioSeconds": 5.855,
+      "LatencySeconds": 1.9848107,
+      "RealTimeFactor": 0.33899414175918013,
+      "ObservedModel": null,
+      "Metrics": {
+        "NormalizedReference": "mister quilter is the apostle of the middle classes and we are glad to welcome his gospel",
+        "NormalizedHypothesis": "mr quilter is the apostle of the middle classes and we are glad to welcome his gospel",
+        "Words": {
+          "Substitutions": 1,
+          "Deletions": 0,
+          "Insertions": 0,
+          "ReferenceUnits": 17,
+          "Errors": 1,
+          "Rate": 0.058823529411764705
+        },
+        "Characters": {
+          "Substitutions": 0,
+          "Deletions": 4,
+          "Insertions": 0,
+          "ReferenceUnits": 73,
+          "Errors": 4,
+          "Rate": 0.0547945205479452
+        }
+      },
+      "WordCount": 0,
+      "MissingWordTimingSegments": 1,
+      "InvalidTimingDiagnostics": 0,
+      "Diagnostics": [
+        "word-timing-unavailable"
+      ],
+      "Segments": [
+        {
+          "Text": "\u0022Mr. Quilter is the apostle of the middle classes, and we are glad to welcome his gospel. ",
+          "StartMilliseconds": 0,
+          "EndMilliseconds": 5855,
+          "Timing": "Chunk",
+          "Words": [],
+          "Confidence": null
+        }
+      ],
+      "RawResponse": "{ \u0022results\u0022: [ { \u0022alternatives\u0022: [ { \u0022transcript\u0022: \u0022\\\u0022Mr. Quilter is the apostle of the middle classes, and we are glad to welcome his gospel. \u0022, \u0022languageCode\u0022: [ \u0022en\u0022 ] } ], \u0022channelTag\u0022: 1, \u0022audioProcessed\u0022: 5.855 } ] }"
+    },
+    {
+      "AttemptNumber": 6,
+      "ProviderId": "nvidia-whisper-large-v3",
+      "ClipId": "1272-128104-0001",
+      "RetryIndex": 0,
+      "Status": "Succeeded",
+      "FailureCategory": null,
+      "Reference": "NOR IS MISTER QUILTER\u0027S MANNER LESS INTERESTING THAN HIS MATTER",
+      "Hypothesis": "Nor is Mr. Quilter\u0027s manner less interesting than his matter. ",
+      "AudioSeconds": 4.815,
+      "LatencySeconds": 0.4355461,
+      "RealTimeFactor": 0.09045609553478712,
+      "ObservedModel": null,
+      "Metrics": {
+        "NormalizedReference": "nor is mister quilter s manner less interesting than his matter",
+        "NormalizedHypothesis": "nor is mr quilter s manner less interesting than his matter",
+        "Words": {
+          "Substitutions": 1,
+          "Deletions": 0,
+          "Insertions": 0,
+          "ReferenceUnits": 11,
+          "Errors": 1,
+          "Rate": 0.09090909090909091
+        },
+        "Characters": {
+          "Substitutions": 0,
+          "Deletions": 4,
+          "Insertions": 0,
+          "ReferenceUnits": 53,
+          "Errors": 4,
+          "Rate": 0.07547169811320754
+        }
+      },
+      "WordCount": 0,
+      "MissingWordTimingSegments": 1,
+      "InvalidTimingDiagnostics": 0,
+      "Diagnostics": [
+        "word-timing-unavailable"
+      ],
+      "Segments": [
+        {
+          "Text": "Nor is Mr. Quilter\u0027s manner less interesting than his matter. ",
+          "StartMilliseconds": 0,
+          "EndMilliseconds": 4815,
+          "Timing": "Chunk",
+          "Words": [],
+          "Confidence": null
+        }
+      ],
+      "RawResponse": "{ \u0022results\u0022: [ { \u0022alternatives\u0022: [ { \u0022transcript\u0022: \u0022Nor is Mr. Quilter\u0027s manner less interesting than his matter. \u0022, \u0022languageCode\u0022: [ \u0022en\u0022 ] } ], \u0022channelTag\u0022: 1, \u0022audioProcessed\u0022: 4.815 } ] }"
+    }
+  ]
+}

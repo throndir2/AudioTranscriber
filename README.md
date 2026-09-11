@@ -1,0 +1,168 @@
+# AudioTranscriber
+
+Native Windows x64 recording and transcription with a .NET 10 WPF desktop
+interface, durable local audio, searchable transcripts, and optional NVIDIA ASR.
+
+Record the **selected Windows output endpoint**, optionally with a separately
+timestamped microphone, or import a long audio/video recording. Transcription
+never sits in the capture callback: slow inference or an unavailable network
+leaves the original recording on disk.
+
+| Workflow | First-version behavior |
+| --- | --- |
+| Recording | Visible Start/Stop, selected WASAPI endpoint, separate optional mic, native-format rotated WAVs, explicit gaps/overflow/disk errors |
+| Long imports | FFprobe audio-stream selection, managed original copy, continuous FFmpeg normalization, resumable durable work |
+| Recognition | Three NVIDIA Riva routes; optional local Whisper; source-language ASR, no translation or automatic paid fallback |
+| Speakers | Local segmentation plus clean-turn embeddings and persistent IDs; editable names; overlap/short-turn uncertainty |
+| Transcript | SQLite FTS, bounded pages, speaker filtering, corrections separate from source text, timestamp seek and playback |
+| Exchange | Text, JSON, SRT, WebVTT; local voice-tag VTT import; configured delegated Teams transcript retrieval |
+
+New sessions do not upload audio unless explicitly permitted. NVIDIA's current
+terms and finite trial quota apply; personal or confidential material may not be
+permitted. Recording and local processing do not require an API key. See
+`docs\privacy.md` before enabling uploads.
+
+## Local setup
+
+Use PowerShell from the repository root on Windows x64:
+
+```powershell
+.\scripts\Setup.ps1
+.\scripts\Start-App.ps1
+.\scripts\Start-App.ps1 -Smoke
+.\scripts\Test.ps1
+.\scripts\Publish.ps1
+```
+
+`Setup.ps1` installs **SDK 10.0.401** only into `.tools\dotnet`; it never performs
+a global installation or changes your machine's PATH. `global.json` disallows
+SDK roll-forward. The setup script discovers the exact Windows x64 ZIP in
+[Microsoft's official .NET 10 release metadata](https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json),
+accepts only approved Microsoft HTTPS download hosts, verifies the archive's
+SHA-512 against that metadata before extraction, and reuses an already installed
+pinned local SDK. Downloads, the local CLI home and NuGet cache remain in `.tools`.
+Package lock files are retained; test and publish scripts use locked restore.
+Development startup, workers, and VSTest use the explicit pinned local `dotnet`
+host. Native apphost/image-loading failures were observed intermittently on the
+development machine despite valid on-disk bytes; this is not evidence of a model
+or source-code defect. Published executables are a separate validation target.
+
+FFmpeg and FFprobe must be on PATH for media operations. Use a trusted
+distribution and check its actual build/license terms before redistribution;
+the application does not implicitly bundle or install FFmpeg. No model weights,
+API keys, recording, or cloud upload are required by setup.
+
+Targeted validation and direct local SDK invocation:
+
+```powershell
+.\scripts\Test.ps1 -Project .\tests\AudioTranscriber.Storage.Tests\AudioTranscriber.Storage.Tests.csproj
+.\.tools\dotnet\dotnet.exe build .\src\AudioTranscriber.Core\AudioTranscriber.Core.csproj -c Release
+```
+
+Publish output is `artifacts\publish\win-x64`; launch `AudioTranscriber.App.exe`
+there. Keep the complete output directory together, including the worker and
+native runtime libraries. FFmpeg/FFprobe remain separately installed dependencies.
+The package includes documentation, model notices, dependency license files,
+and a package inventory under `licenses`.
+`Start-App.ps1 -Smoke` uses a fresh isolated directory under `artifacts\smoke`
+and reports its `app-smoke.json` path. `-DataRoot PATH` selects a custom data root;
+smoke mode rejects nonempty roots rather than running previously queued work.
+
+## First session
+
+1. Choose the output device you actually hear. Enable a microphone only when you
+   want a separate local microphone track; loopback alone omits it.
+2. Install the explicitly disclosed **33.49 MB** local speaker models if automatic
+   speaker assignment is wanted. They do not require a Hugging Face account.
+   No model is downloaded simply by opening the app.
+3. Select a provider and source language. The hosted catalog initially enables
+   verified English locales; local Whisper accepts its supported language codes.
+   For NVIDIA, supply a memory-only key or explicitly choose Windows-protected
+   persistence, and grant session upload consent only for permitted audio.
+4. Start recording or import a local file. Stop seals original audio and
+   normalization tails; transcription can continue afterward. Pause, Cancel,
+   and Resume control durable processing separately from recording.
+5. Search the transcript, rename speakers, edit corrections, and double-click a
+   row to seek. An unknown or overlapping voice is not a confirmed identity.
+
+Optional local Whisper weights are selected explicitly; sizes and licenses are
+listed by `scripts\Install-WhisperModel.ps1`. Larger models exceed 1 GiB and are
+never implicit downloads. After installation, select the local model file in the
+desktop settings. See `docs\providers.md`.
+
+## What the initial public comparison showed
+
+One live run submitted two complete public LibriSpeech clips to all three NVIDIA
+routes: **six attempts, 32.010 seconds of submitted audio, no retries**. Five calls
+succeeded; one Parakeet request timed out. Parakeet returned real word timestamps
+on its successful clip; Canary and hosted Whisper returned coarse text.
+
+The tiny single-speaker read-speech sample does **not** identify a best D&D model.
+Whisper's measured word-error differences were only `Mr.` versus `MISTER`
+normalization. Details, failures, settings, hashes, and immutable sanitized public
+outputs are retained in `docs\benchmarks\2026-09-11`.
+
+Reproduction consumes new account quota; do not repeatedly run it after a
+nonzero exit or treat a failed request as a quality score. The optional credential
+bridge takes a configuration **path**, never a key argument:
+
+```powershell
+.\scripts\Compare-Models.ps1 -PrepareOnly
+.\scripts\Compare-Models.ps1 -ApprovePublicAudioCloud -ProductionConfigPath 'C:\authorized\production.json'
+```
+
+## Limits and integration setup
+
+The NVIDIA catalog's selected routes do not claim hosted native diarization.
+Word, segment, and coarse chunk timing remain distinct; coarse text cannot
+support fabricated word-level seek or certain attribution across several turns.
+Local diarization is not source separation. Its segmentation model has three
+local voice slots per ten-second window and at most two simultaneous voices,
+although the persistent registry can contain more session speakers.
+
+Teams retrieval requires a configured public-client application, work/school
+tenant consent, meeting identifiers, and permitted transcript access. It respects
+tenant attribution restrictions and is not live Teams media capture. Imported
+display names are source labels, not invented participant identifiers.
+
+Discord live receive is deferred pending real bot/DAVE permission, rekey,
+reconnect, and packet-loss validation. Universal loopback remains usable without
+Discord bot credentials. No user-token/selfbot integration is provided.
+
+## Data and recovery
+
+The data root contains `library.sqlite3`, session folders, original chunks or
+managed imports, normalized derivatives, provider evidence, and speaker state.
+Back up the whole data root rather than only an exported text file. Do not edit
+retained originals or move their individual files behind the app.
+
+Capture rotates at both duration and byte limits, avoiding classic WAV's 4 GiB
+per-file limit. Overflow, device loss, write failure, and unavailable audio are
+reported rather than silently dropping the oldest data. Periodic disk flushing
+reduces exposure; no application can guarantee the last unflushed samples survive
+power loss. Recovery verifies manifests and hashes and can replay a continuity
+run to reproduce the same resampler state, which takes extra decoding time.
+
+Only one application instance can own a data root. Use `-DataRoot PATH` for an
+isolated library. Never point a smoke run at a populated personal library.
+
+See `docs\usage.md`, `docs\audio.md`, `docs\diarization.md`,
+`docs\providers.md`, and `docs\privacy.md` for operational details and limitations.
+The shipped SQLite native library's exact provenance and hash are in
+`src\AudioTranscriber.Storage\NativeSqlite\README.md`.
+
+## Core conventions
+
+`AudioTranscriber.Core` has no UI, capture, inference, or native dependencies.
+Native frames, track-global normalized samples, and session-relative 100 ns
+ticks are distinct 64-bit coordinates. Normalized ASR files are headerless
+little-endian signed PCM16, mono, 16 kHz; a request owns a non-overlapping core
+within a maximum 30-second context window. Provider timestamps are integer
+milliseconds **relative to supplied audio**, and timing granularity and nullable
+confidence must reflect actual provider output. Preserve raw recognition
+separately from corrections. Loopback and optional microphone are separate tracks.
+
+No hardware capture test is started automatically. Tests use controlled
+synthetic/public data; a physical WASAPI capture check requires separate explicit
+consent to a controlled sound source. Tenant-dependent Graph access also requires
+real tenant setup.

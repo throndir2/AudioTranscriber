@@ -1,0 +1,26 @@
+# Worktree-local tooling, downloads, models, and generated output
+.tools/
+.models/
+artifacts/
+models/
+sessions/
+**/bin/
+**/obj/
+TestResults/
+*.user
+*.suo
+.vs/
+.idea/
+*.nupkg
+*.snupkg
+*.partial
+
+# Never commit credentials or private recordings.
+appsettings.*.local.json
+appsettings.Production.json
+.env
+.env.*
+*.pfx
+*.p12
+*.key
+*.dpapi

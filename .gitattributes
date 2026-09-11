@@ -1,0 +1,3 @@
+# Keep vendored protocol sources and notices in their upstream line-ending form.
+src/AudioTranscriber.Providers/Protocol/riva/proto/*.proto text eol=lf whitespace=-blank-at-eol
+src/AudioTranscriber.Providers/Protocol/LICENSE-* text eol=lf

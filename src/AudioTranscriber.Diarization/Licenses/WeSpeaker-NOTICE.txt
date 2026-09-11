@@ -1,0 +1,24 @@
+WeSpeaker ResNet34 large-margin VoxCeleb speaker embedding model
+Model filename: wespeaker_en_voxceleb_resnet34_LM.onnx
+Original authors: WeSpeaker team / Wenetspeech community.
+Original model and project: https://github.com/wenet-e2e/wespeaker
+Specific large-margin model card (CC BY 4.0):
+https://huggingface.co/Wespeaker/wespeaker-voxceleb-resnet34-LM/blob/f0c48c298fd835726c27956a5d617bad7115627e/README.md
+Pretrained-model attribution and license:
+https://github.com/wenet-e2e/wespeaker/blob/dfa741957e5c11f477623b6e583d67d0af25ee88/docs/pretrained.md
+ONNX conversion/distribution: k2-fsa/sherpa-onnx contributors
+https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models
+https://k2-fsa.github.io/sherpa/onnx/speaker-identification/models.html
+Conversion and runtime metadata additions:
+https://github.com/k2-fsa/sherpa-onnx/blob/v1.13.8/scripts/wespeaker/run.sh
+
+Model license: Creative Commons Attribution 4.0 International (CC BY 4.0)
+https://creativecommons.org/licenses/by/4.0/
+https://creativecommons.org/licenses/by/4.0/legalcode
+
+This is an upstream ONNX conversion of the WeSpeaker pretrained model with
+sherpa-specific runtime metadata added by the conversion contributors; this
+application does not modify the distributed ONNX bytes. Distribution retains
+attribution to the original authors and conversion contributors and links to
+the original project and model license. No endorsement is implied.
+The WeSpeaker code's Apache-2.0 license is separate from this model's CC BY 4.0.
