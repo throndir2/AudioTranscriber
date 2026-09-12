@@ -1,31 +1,54 @@
 [CmdletBinding()]
-param([ValidateSet('Debug', 'Release')][string]$Configuration = 'Release')
+param(
+    [ValidateSet('Debug', 'Release')][string]$Configuration = 'Release',
+    [string]$DotnetPath,
+    [string]$OutputDirectory,
+    [switch]$RequireEmptyOutput
+)
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-$dotnet = Join-Path $root '.tools\dotnet\dotnet.exe'
+$useLocalSdk = [string]::IsNullOrWhiteSpace($DotnetPath)
+$dotnet = if ($useLocalSdk) { Join-Path $root '.tools\dotnet\dotnet.exe' }
+    else { (Get-Command $DotnetPath -ErrorAction Stop).Source }
 $project = Join-Path $root 'src\AudioTranscriber.App\AudioTranscriber.App.csproj'
-$destination = Join-Path $root 'artifacts\publish\win-x64'
+$destination = if ([string]::IsNullOrWhiteSpace($OutputDirectory)) { Join-Path $root 'artifacts\publish\win-x64' }
+    else { [IO.Path]::GetFullPath($OutputDirectory) }
 if (-not (Test-Path $dotnet)) { throw 'Run .\scripts\Setup.ps1 first to install the pinned local SDK.' }
 if (-not (Test-Path $project)) { throw 'The desktop application project is not present in this checkout yet.' }
-$env:DOTNET_ROOT = Split-Path $dotnet -Parent
-$env:DOTNET_ROOT_X64 = $env:DOTNET_ROOT
-$env:DOTNET_MULTILEVEL_LOOKUP = '0'
-$env:DOTNET_CLI_HOME = Join-Path $root '.tools\cli-home'
-$env:NUGET_PACKAGES = Join-Path $root '.tools\nuget'
+if ($RequireEmptyOutput -and (Test-Path -LiteralPath $destination) -and
+    @(Get-ChildItem -LiteralPath $destination -Force).Count -ne 0) {
+    throw 'Release output must be new or empty; existing artifacts will not be deleted or packaged.'
+}
+if ($useLocalSdk) {
+    $env:DOTNET_ROOT = Split-Path $dotnet -Parent
+    $env:DOTNET_ROOT_X64 = $env:DOTNET_ROOT
+    $env:DOTNET_MULTILEVEL_LOOKUP = '0'
+    $env:DOTNET_CLI_HOME = Join-Path $root '.tools\cli-home'
+    $env:NUGET_PACKAGES = Join-Path $root '.tools\nuget'
+}
+elseif ([string]::IsNullOrWhiteSpace($env:NUGET_PACKAGES)) {
+    $env:NUGET_PACKAGES = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.nuget\packages'
+}
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 $env:DOTNET_NOLOGO = '1'
 
 Push-Location $root
 try {
+    $sdkVersion = (Get-Content (Join-Path $root 'global.json') -Raw | ConvertFrom-Json).sdk.version
+    $actualSdk = & $dotnet --version
+    if ($LASTEXITCODE -ne 0 -or $actualSdk -ne $sdkVersion) { throw "The build requires SDK $sdkVersion from global.json." }
+    [string[]]$targeting = if ($IsWindows) { @() } else { @('-p:EnableWindowsTargeting=true') }
     $worker = Join-Path $root 'src\AudioTranscriber.Worker\AudioTranscriber.Worker.csproj'
-    $projects = @($project)
-    if (Test-Path $worker) { $projects += $worker }
+    if (-not (Test-Path $worker)) { throw 'The required speaker worker project is missing.' }
+    # The application already references the worker; one locked restore covers both dependency graphs.
+    & $dotnet restore $project --locked-mode --nologo @targeting
+    if ($LASTEXITCODE -ne 0) { throw 'Locked Windows x64 restore failed. Run Setup.ps1 after intentional dependency changes.' }
+    $projects = @($project, $worker)
     foreach ($item in $projects) {
-        & $dotnet restore $item --locked-mode --nologo
-        if ($LASTEXITCODE -ne 0) { throw 'Locked Windows x64 restore failed. Run Setup.ps1 after intentional dependency changes.' }
+        [string[]]$reuseBuild = if ($item -eq $worker) { @('--no-build') } else { @() }
         & $dotnet publish $item --configuration $Configuration --runtime win-x64 --self-contained true `
-            --no-restore --output $destination --nologo -p:PublishSingleFile=false
+            --no-restore --output $destination --nologo -p:PublishSingleFile=false @targeting @reuseBuild
         if ($LASTEXITCODE -ne 0) { throw "Windows x64 publish failed: $item" }
     }
     Copy-Item -LiteralPath (Join-Path $root 'README.md') -Destination $destination -Force

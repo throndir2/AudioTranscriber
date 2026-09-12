@@ -64,9 +64,19 @@ there. Keep the complete output directory together, including the worker and
 native runtime libraries. FFmpeg/FFprobe remain separately installed dependencies.
 The package includes documentation, model notices, dependency license files,
 and a package inventory under `licenses`.
+
 `Start-App.ps1 -Smoke` uses a fresh isolated directory under `artifacts\smoke`
 and reports its `app-smoke.json` path. `-DataRoot PATH` selects a custom data root;
 smoke mode rejects nonempty roots rather than running previously queued work.
+
+## GitHub releases
+
+The release-only workflow builds one self-contained Windows x64 ZIP on Ubuntu
+when a valid `vMAJOR.MINOR.PATCH` tag (optionally a prerelease) is pushed. It uses
+the pinned SDK, cached locked packages, and a single app/worker build graph; it
+does not run tests, benchmarks, or ordinary branch/PR CI. The ZIP and SHA256 file
+are published directly to the matching GitHub Release. See `docs\releases.md`
+for tag/rerun instructions, safeguards, and the locally verified Linux build.
 
 ## First session
 
