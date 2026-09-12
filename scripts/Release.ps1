@@ -79,7 +79,20 @@ function Get-ReleaseMarker([string]$VersionTag, [string]$SourceCommit) {
 
 function Get-OwnedRelease([object]$Version, [string]$SourceCommit) {
     $release = Invoke-ReleaseApi -Method GET -Route ("releases/tags/" + [Uri]::EscapeDataString($Version.Tag)) -AllowMissing
-    if ($null -eq $release) { return $null }
+    if ($null -eq $release) {
+        # GitHub's tag endpoint omits drafts, including the draft we just uploaded.
+        $candidates = [Collections.Generic.List[object]]::new()
+        for ($page = 1; ; $page++) {
+            $releases = @(Invoke-ReleaseApi -Method GET -Route "releases?per_page=100&page=$page")
+            foreach ($candidate in $releases) {
+                if ($candidate.tag_name -ceq $Version.Tag) { $candidates.Add($candidate) }
+            }
+            if ($releases.Count -lt 100) { break }
+        }
+        if ($candidates.Count -gt 1) { throw 'Multiple releases use this tag. Refusing ambiguous draft ownership.' }
+        if ($candidates.Count -eq 0) { return $null }
+        $release = $candidates[0]
+    }
     $marker = Get-ReleaseMarker $Version.Tag $SourceCommit
     if ($release.tag_name -cne $Version.Tag -or -not ([string]$release.body).Contains($marker) -or
         [bool]$release.prerelease -ne $Version.Prerelease) {

@@ -83,8 +83,10 @@ the release-inspection/publication steps, not the build command; checkout does
 not persist credentials. There is no PAT or third-party release action.
 
 The script creates a **draft for an already-existing tag** with an ownership
-marker containing that exact tag and commit. Both asset digests and the checksum
-content are verified using GitHub's SHA256 asset metadata before publishing.
+marker containing that exact tag and commit. GitHub's tag lookup omits drafts,
+so a missing tag lookup falls back to the authenticated, paginated release list.
+Ambiguous duplicate releases for the same tag are rejected. Both asset digests
+and the checksum content are verified using GitHub's SHA256 asset metadata before publishing.
 The remote tag is checked again immediately before and after publication.
 
 An interrupted upload leaves a draft. A rerun may replace only the two expected
@@ -98,6 +100,11 @@ Runs for the same tag share a concurrency group. `cancel-in-progress: false`
 prevents a later run from canceling a publish halfway through.
 
 ## Local validation boundary
+
+Run the offline release-discovery and draft-finalization regression tests with
+`pwsh -NoProfile -File .\tests\Release.Tests.ps1`. They exercise the production
+release functions with simulated GitHub responses, without network requests,
+SDK setup, asset uploads, or changes to releases.
 
 Release development validated the actual SDK 10.0.401 **Ubuntu 24.04** container
 path, including locked restore, both publishes, notices, and ZIP creation. The
