@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Threading;
+using AudioTranscriber.App.Mcp;
 using AudioTranscriber.Application;
 using AudioTranscriber.Storage;
 
@@ -26,6 +27,11 @@ public partial class App : System.Windows.Application
         try
         {
             options = StartupOptions.Parse(e.Args);
+            if (options.Mcp != McpMode.None)
+            {
+                await RunMcpAsync(options);
+                return;
+            }
             startupArguments = e.Args;
             if (options.Smoke && new LibraryStore(options.DataRoot).GetSessions(1).Count != 0)
                 throw new ArgumentException("Smoke mode requires an isolated library with no sessions, so existing queued audio can never upload.");
@@ -101,9 +107,38 @@ public partial class App : System.Windows.Application
                 catch (IOException) { }
                 catch (UnauthorizedAccessException) { }
             }
+            else if (e.Args.Any(arg => arg.StartsWith("--mcp", StringComparison.Ordinal)))
+                Console.Error.WriteLine($"AudioTranscriber MCP failed: {error.GetType().Name}: {error.Message}");
             else if (!e.Args.Contains("--smoke", StringComparer.Ordinal))
                 MessageBox.Show(message, "AudioTranscriber startup", MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown(1);
         }
+    }
+
+    /// <summary>Stdio MCP hooks. Headless hosts the real controller; UI drives a separate app window via UI Automation.</summary>
+    private async Task RunMcpAsync(StartupOptions options)
+    {
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        var input = Console.OpenStandardInput();
+        var output = Console.OpenStandardOutput();
+        if (options.Mcp == McpMode.Headless)
+        {
+            var controller = await Task.Run(() => new AppController(options.DataRoot));
+            try
+            {
+                var tools = new HeadlessMcpTools(controller);
+                await Task.Run(() => new McpStdioServer("audiotranscriber", HeadlessMcpTools.Instructions, tools.Tools)
+                    .RunAsync(input, output, CancellationToken.None));
+            }
+            finally { await controller.DisposeAsync(); }
+        }
+        else
+        {
+            UiMcpTools.EnableDpiAwareness();
+            var tools = new UiMcpTools(options.DataRoot, options.DataRootSpecified);
+            await Task.Run(() => new McpStdioServer("audiotranscriber-ui", UiMcpTools.Instructions, tools.Tools)
+                .RunAsync(input, output, CancellationToken.None));
+        }
+        Shutdown(0);
     }
 }

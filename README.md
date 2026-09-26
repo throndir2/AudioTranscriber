@@ -74,6 +74,14 @@ and a package inventory under `licenses`.
 and reports its `app-smoke.json` path. `-DataRoot PATH` selects a custom data root;
 smoke mode rejects nonempty roots rather than running previously queued work.
 
+## MCP hooks for agents
+
+The app exposes two stdio MCP servers for driving and testing it: `--mcp` (headless engine: record,
+import, transcribe, diarize, read transcripts) and `--mcp-ui` (launches the real window and clicks
+through it via UI Automation, with snapshots and screenshots). `.mcp.json` registers both through
+`scripts\Start-Mcp.ps1`; `scripts\New-SpeechFixture.ps1` generates two-speaker test audio. See
+`docs\mcp.md`.
+
 ## GitHub releases
 
 The release-only workflow builds one self-contained Windows x64 ZIP on Ubuntu
