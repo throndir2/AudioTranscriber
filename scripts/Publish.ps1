@@ -44,12 +44,16 @@ try {
     # The application already references the worker; one locked restore covers both dependency graphs.
     & $dotnet restore $project --locked-mode --nologo @targeting
     if ($LASTEXITCODE -ne 0) { throw 'Locked Windows x64 restore failed. Run Setup.ps1 after intentional dependency changes.' }
-    $projects = @($project, $worker)
-    foreach ($item in $projects) {
-        [string[]]$reuseBuild = if ($item -eq $worker) { @('--no-build') } else { @() }
+    # The worker must be rebuilt here: the app's build graph compiles it framework-dependent, and reusing
+    # that output (--no-build) ships a worker that fails with 0x80008096 (framework missing) on clean PCs.
+    foreach ($item in @($project, $worker)) {
         & $dotnet publish $item --configuration $Configuration --runtime win-x64 --self-contained true `
-            --no-restore --output $destination --nologo -p:PublishSingleFile=false @targeting @reuseBuild
+            --no-restore --output $destination --nologo -p:PublishSingleFile=false @targeting
         if ($LASTEXITCODE -ne 0) { throw "Windows x64 publish failed: $item" }
+    }
+    foreach ($name in @('AudioTranscriber.App', 'AudioTranscriber.Worker')) {
+        $runtimeConfig = Get-Content (Join-Path $destination "$name.runtimeconfig.json") -Raw | ConvertFrom-Json
+        if (-not $runtimeConfig.runtimeOptions.includedFrameworks) { throw "$name was not published self-contained." }
     }
     Copy-Item -LiteralPath (Join-Path $root 'README.md') -Destination $destination -Force
     Copy-Item -LiteralPath (Join-Path $root 'docs') -Destination $destination -Recurse -Force

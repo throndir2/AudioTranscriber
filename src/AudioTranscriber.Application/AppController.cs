@@ -230,9 +230,13 @@ public sealed class AppController : IAppController
     public string? WhisperModelPath => settings.WhisperModelPath is { } path && File.Exists(path) ? path : null;
     private string WhisperModelDirectory => Path.Combine(Path.GetDirectoryName(modelDirectory)!, "whisper");
 
-    public async Task InstallRecommendedWhisperModelAsync(IProgress<string>? progress = null, CancellationToken cancellationToken = default)
+    public Task InstallRecommendedWhisperModelAsync(IProgress<string>? progress = null, CancellationToken cancellationToken = default) =>
+        InstallWhisperModelAsync(LocalWhisperModelCatalog.Recommended.Id, progress, cancellationToken);
+
+    public async Task InstallWhisperModelAsync(string modelId, IProgress<string>? progress = null, CancellationToken cancellationToken = default)
     {
-        var model = LocalWhisperModelCatalog.Recommended;
+        var model = LocalWhisperModelCatalog.All.SingleOrDefault(item => item.Id == modelId)
+            ?? throw new ArgumentException("Unknown Whisper model. Choose one of: " + string.Join(", ", LocalWhisperModelCatalog.All.Select(item => item.Id)));
         var path = await VerifiedModelDownload.InstallWhisperAsync(model, WhisperModelDirectory, true,
             new Progress<long>(bytes => progress?.Report($"Downloading {model.FileName}: {bytes * 100 / model.Bytes}% ({bytes / 1048576:N0} / {model.Bytes / 1048576:N0} MiB)")),
             cancellationToken);
@@ -1078,7 +1082,8 @@ public sealed class AppController : IAppController
     private static (string Worker, string? Host) FindWorker()
     {
         var local = Path.Combine(AppContext.BaseDirectory, "AudioTranscriber.Worker.exe");
-        if (File.Exists(local)) return (local, null);
+        // Development builds copy the referenced worker's apphost without its assembly; only a complete worker is usable.
+        if (File.Exists(local) && File.Exists(Path.ChangeExtension(local, ".dll"))) return (local, null);
         var root = FindCheckout();
         if (root is not null)
         {

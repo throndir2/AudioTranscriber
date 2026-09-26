@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "audiotranscriber": {
+      "type": "stdio",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/Start-Mcp.ps1", "-Mode", "headless"],
+      "tools": ["*"]
+    },
+    "audiotranscriber-ui": {
+      "type": "stdio",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/Start-Mcp.ps1", "-Mode", "ui"],
+      "tools": ["*"]
+    }
+  }
+}
