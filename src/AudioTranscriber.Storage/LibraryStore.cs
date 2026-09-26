@@ -161,7 +161,12 @@ public sealed class LibraryStore
         Read("SELECT EXISTS(SELECT 1 FROM jobs WHERE chunk_id=$chunk AND provider=$provider AND state='Succeeded')",
             r => r.GetInt64(0) != 0, ("$chunk", chunkId), ("$provider", providerId)).Single();
 
-    public StoredJob? ClaimNextJob()
+    public bool HasJob(Guid chunkId, string providerId) =>
+        Read("SELECT EXISTS(SELECT 1 FROM jobs WHERE chunk_id=$chunk AND provider=$provider)",
+            r => r.GetInt64(0) != 0, ("$chunk", chunkId), ("$provider", providerId)).Single();
+
+    // provider/excludeProvider let independent scheduler lanes (e.g. speech vs. speaker analysis) claim disjoint work.
+    public StoredJob? ClaimNextJob(string? provider = null, string? excludeProvider = null)
     {
         lock (gate)
         {
@@ -174,8 +179,10 @@ public sealed class LibraryStore
                 WHERE j.state IN ('Pending','RetryWaiting') AND j.next_attempt <= $now
                 AND s.processing_state='Running'
                 AND (j.cloud=0 OR s.consent=1)
+                AND ($provider IS NULL OR j.provider=$provider)
+                AND ($exclude IS NULL OR j.provider<>$exclude)
                 ORDER BY j.rowid LIMIT 1
-                """, ("$now", now));
+                """, ("$now", now), ("$provider", provider), ("$exclude", excludeProvider));
             StoredJob? job;
             using (var reader = command.ExecuteReader()) job = reader.Read() ? ReadJob(reader) : null;
             if (job is null) return null;

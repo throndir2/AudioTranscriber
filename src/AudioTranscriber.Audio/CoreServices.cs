@@ -108,7 +108,7 @@ public sealed class WasapiAudioCaptureService : Core.IAudioCaptureService
         var mic = options.MicrophoneDeviceId is null ? null :
             new CaptureTrackOptions(options.MicrophoneTrackId ?? Guid.NewGuid(), options.MicrophoneDeviceId, false);
         capture = new(new(options.OutputDirectory, options.SessionId, output, mic, options.QueueCapacityBytes,
-            options.MinimumFreeBytes, options.ChunkDurationSeconds, options.MaximumChunkBytes));
+            options.MinimumFreeBytes, options.ChunkDurationSeconds, options.MaximumChunkBytes, options.PauseSplitAfterMilliseconds));
         capture.ChunkSealed += chunk => { OriginalSealed?.Invoke(chunk); ChunkSealed?.Invoke(chunk.ToCore()); };
         capture.LevelChanged += level => Levels?.Invoke(new(level.TrackId,
             CaptureSession.Qpc100ns() - capture.SessionQpcOrigin100ns, level.Peak, level.Rms));
@@ -183,7 +183,8 @@ public sealed class FfmpegMediaNormalizer(MediaTools? tools = null) : Core.IMedi
                         runIndex++;
                         var mappedContinuity = chunk.ContinuityId;
                         converter = new(new(options.OutputDirectory, original.SessionId, chunk.TrackId, runIndex,
-                            chunk.SourceFrameOffset, chunk.SessionStartTicks, original.Format, offset, options.CoreDurationSeconds), tools, lifetime.Token);
+                            chunk.SourceFrameOffset, chunk.SessionStartTicks, original.Format, offset, options.CoreDurationSeconds,
+                            options.SealAtSourceChunks), tools, lifetime.Token);
                         converter.ShardSealed += shard => channel.Writer.WriteAsync(
                             shard.ToCore(chunk.Format, mappedContinuity), lifetime.Token).AsTask().GetAwaiter().GetResult();
                     }

@@ -117,6 +117,8 @@ Declared sample count must match the file exactly. Every supplied input is
 between one sample and **60 seconds**. Callers split multi-hour recordings and
 process the session's registry serially; never pass a complete multi-hour array.
 The application normalizer's 24/30-second derivatives are suitable bounded inputs.
+The application groups short consecutive live chunks into windows of about 20
+seconds (at most 30) per speaker job, queued on the window's last chunk.
 Inputs below 30 seconds, including final short tails, are silence-padded to
 30 seconds **only inside inference**. All returned turns are clipped back to
 the real input and its owned core. This avoids sherpa's <=10-second

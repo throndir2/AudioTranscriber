@@ -3,7 +3,8 @@ using System.Collections.Immutable;
 namespace AudioTranscriber.Core;
 
 public sealed record NormalizationOptions(
-    string OutputDirectory, int CoreDurationSeconds = 24, long InitialNormalizedSample = 0);
+    string OutputDirectory, int CoreDurationSeconds = 24, long InitialNormalizedSample = 0,
+    bool SealAtSourceChunks = false);
 
 public sealed record MediaAudioStream(
     int Index, string Codec, AudioFormat? Format, double? StartSeconds,

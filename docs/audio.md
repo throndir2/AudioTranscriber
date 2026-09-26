@@ -86,7 +86,10 @@ make this explicit.
 
 Chunks rotate at both the configured duration (at most 30 seconds) and total WAV
 file size (at most 64 MiB, including header/padding). Offsets, frame counts and
-QPC values are 64-bit; rational conversion uses Int128 intermediates.
+QPC values are 64-bit; rational conversion uses Int128 intermediates. Live
+recordings use 6-second chunks with `PauseSplitAfterMilliseconds` = 1500: once a
+chunk holds 1.5 seconds it also seals after 400 ms of quiet (RMS below about
+-42 dBFS), and speech starting after a quiet stretch begins a fresh chunk.
 
 Active chunks have a `.wav.partial` and atomically replaced `.wav.journal.json`.
 The writer fsyncs data before updating the journal, at a default **one-second
@@ -149,7 +152,12 @@ One persistent FFmpeg process consumes native data bytes across all original
 chunks in a continuity run. The resampler is not restarted at WAV boundaries.
 Closing stdin and checking successful EOF flushes delayed samples before sealing
 the final derivative. Output is headerless signed PCM16 little-endian, mono,
-16 kHz, with default 24-second nonoverlapping shards. ASR orchestration can add
+16 kHz, with default 24-second nonoverlapping shards. With `SealAtInput`
+(used for recorded tracks), a shard also seals 200 ms before the end of each
+original chunk of more than 400 ms, so it is emitted without waiting for the
+next chunk (FFmpeg holds back under ~90 ms). The boundary depends only on chunk
+sizes, and `run.json` records the layout, so replay reproduces identical shards.
+ASR orchestration can add
 up to three seconds of left/right context while keeping input at most 30 seconds.
 The audio module does not add overlapping context or assign transcript ownership.
 
