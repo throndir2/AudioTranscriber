@@ -52,6 +52,7 @@ click name="Privacy / models" control_type=TabItem
 click name="Install small diarization models" control_type=Button   → click name=Yes
 click name="Start recording" control_type=Button → play_audio path=… → click name="Stop recording"
 read_grid name="Paged transcript"
+read_text name="Live activity log"                                   → recent job progress, transcript lines, live file writes
 ```
 
 ## Test audio

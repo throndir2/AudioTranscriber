@@ -5,6 +5,14 @@ namespace AudioTranscriber.App;
 
 public sealed record SpeakerChoice(string? Id, string Name);
 
+public enum ActivityKind { Info, Transcript, Error }
+
+public sealed record ActivityEntry(DateTime Time, ActivityKind Kind, string Text, string? Group = null)
+{
+    public string TimeText => Time.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+    public override string ToString() => $"{TimeText}  {Text}";
+}
+
 public sealed record TranscriptItem(TranscriptRow Row, string TrackName)
 {
     public string Timestamp => Row.Timestamp;
