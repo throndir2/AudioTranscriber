@@ -24,8 +24,9 @@ public sealed class UiMcpTools(string defaultDataRoot, bool dataRootSpecified)
     public IReadOnlyList<McpTool> Tools =>
     [
         McpTool.Create("launch_app", "Launch the AudioTranscriber desktop window and wait for it. Uses a fresh isolated data root unless data_root is given.",
-            async (args, token) => McpToolResult.Json(await LaunchAsync(args.String("data_root"), args.Int("timeout_seconds", 60), token)),
+            async (args, token) => McpToolResult.Json(await LaunchAsync(args.String("data_root"), args.String("whisper_model"), args.Int("timeout_seconds", 60), token)),
             ("data_root", "string", "Library folder (default: new temp folder)", false),
+            ("whisper_model", "string", "Existing ggml model to preselect in a new library, skipping the automatic 1.5 GiB default-model download", false),
             ("timeout_seconds", "integer", "Startup wait (default 60)", false)),
         McpTool.Create("attach_app", "Attach to an already running AudioTranscriber window (by pid or the first AudioTranscriber.App process).",
             args => McpToolResult.Json(Attach(args.Int("pid", 0))), ("pid", "integer", "Process id (optional)", false)),
@@ -109,12 +110,19 @@ public sealed class UiMcpTools(string defaultDataRoot, bool dataRootSpecified)
         return [.. list];
     }
 
-    private async Task<object> LaunchAsync(string? dataRoot, int timeoutSeconds, CancellationToken token)
+    private async Task<object> LaunchAsync(string? dataRoot, string? whisperModel, int timeoutSeconds, CancellationToken token)
     {
         if (app is { HasExited: false }) throw new InvalidOperationException($"The app is already running (pid {app.Id}). close_app first.");
         var root = Path.GetFullPath(dataRoot ?? (dataRootSpecified ? defaultDataRoot
             : Path.Combine(Path.GetTempPath(), "AudioTranscriber-mcp-ui", DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..6])));
         Directory.CreateDirectory(root);
+        var preferences = Path.Combine(root, "preferences.json");
+        if (whisperModel is not null && !File.Exists(preferences))
+        {
+            var model = Path.GetFullPath(whisperModel);
+            if (!File.Exists(model)) throw new FileNotFoundException("Whisper model not found: " + model);
+            File.WriteAllText(preferences, System.Text.Json.JsonSerializer.Serialize(new { WhisperModelPath = model }));
+        }
         var host = Environment.ProcessPath ?? throw new InvalidOperationException("Unknown host path.");
         var start = new ProcessStartInfo(host)
         {

@@ -10,6 +10,8 @@ desktop executable, so an agent (Copilot CLI, VS Code, Claude, …) can drive an
 
 Without `--data-root`, each MCP session uses a fresh isolated library under `%TEMP%`, so your personal
 library is never touched unless you name it explicitly. Only one process can own a library at a time.
+The desktop window downloads its default models (33 MB speaker models, 1.5 GiB Whisper large-v3-turbo) on
+first start; pass `launch_app whisper_model=PATH` to preselect an existing smaller model in a new library.
 
 ## Setup
 
