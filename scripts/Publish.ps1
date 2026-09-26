@@ -63,6 +63,53 @@ try {
         Copy-Item -Destination $modelNotices -Force
     Copy-Item -LiteralPath (Join-Path $root 'src\AudioTranscriber.Storage\NativeSqlite\README.md') `
         -Destination (Join-Path $licenses 'SQLite-provenance.md') -Force
+    # Bundle a pinned LGPL FFmpeg/FFprobe so recording normalization and imports work on a clean PC.
+    # BtbN keeps month-end autobuilds long-term; bump the URL and SHA-256 together.
+    $ffmpegUrl = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-08-31-13-27/ffmpeg-n9.0.1-11-ge47273f4d9-win64-lgpl-shared-9.0.zip'
+    $ffmpegSha256 = '83a824f0729a69d143c9865125bb86988a11dd388325f0033711045522068aa0'
+    $downloadCache = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { Join-Path $root '.tools\downloads' }
+    New-Item -ItemType Directory -Force $downloadCache | Out-Null
+    $ffmpegZip = Join-Path $downloadCache ([IO.Path]::GetFileName($ffmpegUrl))
+    if (-not (Test-Path -LiteralPath $ffmpegZip) -or (Get-FileHash -LiteralPath $ffmpegZip -Algorithm SHA256).Hash -ne $ffmpegSha256) {
+        Write-Host "Downloading pinned FFmpeg: $ffmpegUrl"
+        $previousProgress = $ProgressPreference
+        $ProgressPreference = 'SilentlyContinue'
+        try { Invoke-WebRequest -Uri $ffmpegUrl -OutFile $ffmpegZip } finally { $ProgressPreference = $previousProgress }
+    }
+    if ((Get-FileHash -LiteralPath $ffmpegZip -Algorithm SHA256).Hash -ne $ffmpegSha256) {
+        Remove-Item -LiteralPath $ffmpegZip -Force
+        throw 'The FFmpeg download does not match its pinned SHA-256.'
+    }
+    $ffmpegDestination = Join-Path $destination 'ffmpeg'
+    New-Item -ItemType Directory -Force $ffmpegDestination | Out-Null
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [IO.Compression.ZipFile]::OpenRead($ffmpegZip)
+    try {
+        foreach ($entry in $archive.Entries) {
+            if ($entry.FullName -match '^[^/]+/bin/(ffmpeg\.exe|ffprobe\.exe|[^/]+\.dll)$') {
+                [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, (Join-Path $ffmpegDestination $entry.Name), $true)
+            }
+            elseif ($entry.FullName -match '^[^/]+/LICENSE\.txt$') {
+                [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, (Join-Path $licenses 'FFmpeg-LICENSE.txt'), $true)
+            }
+        }
+    }
+    finally { $archive.Dispose() }
+    foreach ($tool in @('ffmpeg.exe', 'ffprobe.exe')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $ffmpegDestination $tool))) { throw "The pinned FFmpeg archive did not contain $tool." }
+    }
+    @(
+        '# Bundled FFmpeg'
+        ''
+        'The `ffmpeg` folder contains an unmodified LGPL-2.1-or-later shared build of FFmpeg'
+        '(ffmpeg.exe, ffprobe.exe and their libav* DLLs), launched as separate processes.'
+        ''
+        "- Archive: $ffmpegUrl"
+        "- SHA-256: $ffmpegSha256"
+        '- Build scripts: https://github.com/BtbN/FFmpeg-Builds'
+        '- Corresponding FFmpeg source: https://git.ffmpeg.org/ffmpeg.git (release/9.0, commit e47273f4d9)'
+        '- License text: FFmpeg-LICENSE.txt'
+    ) | Set-Content -LiteralPath (Join-Path $licenses 'FFmpeg-provenance.md') -Encoding utf8
     $inventory = [Collections.Generic.List[string]]::new()
     $packageNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($manifest in Get-ChildItem $destination -File -Filter '*.deps.json') {
@@ -88,6 +135,6 @@ try {
     }
     $inventory | Set-Content -LiteralPath (Join-Path $licenses 'PACKAGE-INVENTORY.txt') -Encoding utf8
     Write-Host "Published Windows x64 application to $destination"
-    Write-Host 'FFmpeg and optional model weights are not bundled automatically.'
+    Write-Host 'FFmpeg/FFprobe are bundled in the ffmpeg folder; optional model weights are not bundled.'
 }
 finally { Pop-Location }

@@ -39,6 +39,7 @@ public sealed class MainViewModel : ObservableObject
     private string queueSummary = "No session selected.";
     private string localModel = "No model selected in this window.";
     private string modelStatus = "";
+    private Prerequisites.Report prerequisites = new(null, null, true);
     private bool rememberKey;
     private int previousSucceeded = -1;
     private CaptureMeter pendingMeter = new(0, 0);
@@ -73,6 +74,8 @@ public sealed class MainViewModel : ObservableObject
         InstallModelsCommand = new AsyncCommand(InstallModelsAsync, () => !Busy && !closing);
         ChooseWhisperModelCommand = new RelayCommand(ChooseWhisperModel, () => !Busy && !closing);
         InstallWhisperModelCommand = new AsyncCommand(InstallWhisperModelAsync, () => !Busy && !closing);
+        InstallVcRuntimeCommand = new AsyncCommand(InstallVcRuntimeAsync, () => !Busy && !closing && !prerequisites.VcRuntimeReady);
+        RecheckPrerequisitesCommand = new RelayCommand(() => RefreshPrerequisites(announce: true), () => !closing);
         if (controller.WhisperModelPath is { } currentModel) localModel = DescribeModel(currentModel);
         DiarizeCommand = new AsyncCommand(() => RunForSessionAsync("Running local speaker analysis…",
             (id, token) => controller.DiarizeSessionAsync(id, token)), () => CanWorkWithSession() && controller.DiarizationModelsReady);
@@ -156,6 +159,9 @@ public sealed class MainViewModel : ObservableObject
     public string QueueSummary { get => queueSummary; private set => Set(ref queueSummary, value); }
     public string KeyStatus => controller.HasNvidiaKey ? "A key is available (never displayed)." : "No NVIDIA key. Recording and local work remain available.";
     public string ModelStatus { get => modelStatus; private set => Set(ref modelStatus, value); }
+    public string PrerequisiteStatus => prerequisites.Summary;
+    public bool PrerequisitesReady => prerequisites.AllReady;
+    public bool VcRuntimeMissing => !prerequisites.VcRuntimeReady;
     public string LocalModel { get => localModel; private set => Set(ref localModel, value); }
     public bool RememberKey { get => rememberKey; set => Set(ref rememberKey, value); }
     public string SessionName { get => sessionName; set => Set(ref sessionName, value); }
@@ -247,6 +253,8 @@ public sealed class MainViewModel : ObservableObject
     public ICommand InstallModelsCommand { get; }
     public ICommand ChooseWhisperModelCommand { get; }
     public ICommand InstallWhisperModelCommand { get; }
+    public ICommand InstallVcRuntimeCommand { get; }
+    public ICommand RecheckPrerequisitesCommand { get; }
     public ICommand DiarizeCommand { get; }
     public ICommand PauseCommand { get; }
     public ICommand ResumeCommand { get; }
@@ -360,9 +368,58 @@ public sealed class MainViewModel : ObservableObject
         RefreshDevices();
         RefreshLibrary();
         ModelStatus = controller.DiarizationModelsReady ? "Local diarization models are installed." : "Local diarization models are not installed.";
+        RefreshPrerequisites(announce: false);
         initialized = true;
         refreshTimer.Start();
     }
+
+    private void RefreshPrerequisites(bool announce)
+    {
+        prerequisites = Prerequisites.Check();
+        Changed(nameof(PrerequisiteStatus));
+        Changed(nameof(PrerequisitesReady));
+        Changed(nameof(VcRuntimeMissing));
+        CommandManager.InvalidateRequerySuggested();
+        if (!prerequisites.MediaToolsReady)
+            SetStatus("FFmpeg was not found, so recording normalization and imports would pause. " +
+                MediaToolLocatorMessage() + " See Privacy / models → Prerequisites.", true);
+        else if (!prerequisites.VcRuntimeReady)
+            SetStatus("The Microsoft Visual C++ runtime is missing or outdated, so local Whisper cannot run. Install it from Privacy / models → Prerequisites.", true);
+        else if (announce) SetStatus("All prerequisites are ready: FFmpeg, FFprobe, and the Visual C++ runtime were found.");
+    }
+
+    private string MediaToolLocatorMessage() =>
+        AudioTranscriber.Audio.MediaToolLocator.MissingMessage(prerequisites.FFmpeg is null ? "ffmpeg" : "ffprobe");
+
+    /// <summary>Called once after startup (never in smoke mode) to offer installing a missing runtime.</summary>
+    public Task OfferPrerequisiteInstallAsync()
+    {
+        if (prerequisites.VcRuntimeReady || closing) return Task.CompletedTask;
+        if (!dialogs.Confirm("Install the Microsoft Visual C++ runtime?",
+            "Local Whisper transcription needs the Microsoft Visual C++ 2015-2022 runtime (x64), which is missing or outdated on this PC.\n\n" +
+            "Download Microsoft's official installer (about 25 MB) and run it now? Windows will ask for administrator approval.\n\n" +
+            "Recording and NVIDIA transcription work without it. You can install it later from Privacy / models → Prerequisites."))
+            return Task.CompletedTask;
+        return InstallVcRuntimeCoreAsync();
+    }
+
+    private Task InstallVcRuntimeAsync()
+    {
+        if (!dialogs.Confirm("Install the Microsoft Visual C++ runtime?",
+            "Download Microsoft's official Visual C++ 2015-2022 runtime installer (x64, about 25 MB) and run it now? Windows will ask for administrator approval."))
+            return Task.CompletedTask;
+        return InstallVcRuntimeCoreAsync();
+    }
+
+    private Task InstallVcRuntimeCoreAsync() => RunAsync("Installing the Microsoft Visual C++ runtime…", async token =>
+    {
+        string result;
+        try { result = await Prerequisites.InstallVcRuntimeAsync(new Progress<string>(message => SetStatus(message)), token); }
+        catch (Exception error) when (error is System.Net.Http.HttpRequestException or IOException or InvalidDataException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        { result = "The Visual C++ runtime could not be installed automatically: " + error.Message; }
+        RefreshPrerequisites(announce: false);
+        SetStatus(result, !prerequisites.VcRuntimeReady);
+    });
 
     private void RefreshDevices()
     {

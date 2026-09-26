@@ -7,6 +7,84 @@ namespace AudioTranscriber.Audio;
 
 public sealed record MediaTools(string FFmpeg = "ffmpeg", string FFprobe = "ffprobe");
 
+/// <summary>
+/// Resolves bare tool names ("ffmpeg"/"ffprobe") to a concrete executable: the copy bundled in the release's
+/// ffmpeg folder first, then PATH (including the current registry PATH, which a long-running Explorer may not
+/// have picked up yet), then common package-manager locations such as WinGet.
+/// </summary>
+public static class MediaToolLocator
+{
+    public const string BundledFolder = "ffmpeg";
+
+    public static string Resolve(string executable)
+    {
+        if (string.IsNullOrWhiteSpace(executable) || !IsBareName(executable)) return executable;
+        return TryFind(executable) ?? throw new FileNotFoundException(MissingMessage(executable), ExecutableName(executable));
+    }
+
+    public static string? TryFind(string name)
+    {
+        var file = ExecutableName(name);
+        foreach (var directory in CandidateDirectories())
+        {
+            try
+            {
+                var path = Path.Combine(directory, file);
+                if (File.Exists(path)) return Path.GetFullPath(path);
+            }
+            catch (Exception error) when (error is ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException) { }
+        }
+        return null;
+    }
+
+    public static string MissingMessage(string name) =>
+        $"{ExecutableName(name)} was not found. Release packages include it in the '{BundledFolder}' folder next to " +
+        "AudioTranscriber.App.exe; re-extract the complete ZIP, or install FFmpeg (for example: winget install Gyan.FFmpeg) and restart the app.";
+
+    private static bool IsBareName(string executable) =>
+        executable.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, ':']) < 0;
+
+    private static string ExecutableName(string name) =>
+        OperatingSystem.IsWindows() && !name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? name + ".exe" : name;
+
+    private static IEnumerable<string> CandidateDirectories()
+    {
+        var baseDirectory = AppContext.BaseDirectory;
+        yield return Path.Combine(baseDirectory, BundledFolder);
+        yield return baseDirectory;
+        foreach (var target in new[] { EnvironmentVariableTarget.Process, EnvironmentVariableTarget.User, EnvironmentVariableTarget.Machine })
+        {
+            string? path;
+            try { path = Environment.GetEnvironmentVariable("PATH", target); }
+            catch (Exception error) when (error is System.Security.SecurityException or NotSupportedException) { continue; }
+            if (string.IsNullOrEmpty(path)) continue;
+            foreach (var entry in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                var expanded = Environment.ExpandEnvironmentVariables(entry.Trim('"'));
+                if (Path.IsPathFullyQualified(expanded)) yield return expanded;
+            }
+        }
+        if (!OperatingSystem.IsWindows()) yield break;
+        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        yield return Path.Combine(local, "Microsoft", "WinGet", "Links");
+        var packages = Path.Combine(local, "Microsoft", "WinGet", "Packages");
+        string[] wingetBins = [];
+        try
+        {
+            if (Directory.Exists(packages))
+                wingetBins = Directory.GetDirectories(packages, "*FFmpeg*")
+                    .SelectMany(package => Directory.GetDirectories(package))
+                    .Select(build => Path.Combine(build, "bin")).ToArray();
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+        foreach (var bin in wingetBins) yield return bin;
+        yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "scoop", "shims");
+        yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "chocolatey", "bin");
+        yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "ffmpeg", "bin");
+        yield return @"C:\ffmpeg\bin";
+    }
+}
+
 /// <summary>An owned, bounded-diagnostic process; disposing it kills its entire process tree.</summary>
 public sealed class OwnedMediaProcess : IAsyncDisposable
 {
@@ -26,7 +104,7 @@ public sealed class OwnedMediaProcess : IAsyncDisposable
     public OwnedMediaProcess(string executable, IEnumerable<string> arguments, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var info = new ProcessStartInfo(executable)
+        var info = new ProcessStartInfo(MediaToolLocator.Resolve(executable))
         {
             UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true

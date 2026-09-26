@@ -6,6 +6,26 @@ Recording and audio import do not require a NVIDIA key. Existing consented jobs
 may be resumed by the application controller; revoke consent or pause jobs when
 you do not want further processing.
 
+## Prerequisites
+
+Release ZIPs bundle FFmpeg/FFprobe (an unmodified LGPL shared build) in the
+`ffmpeg` folder next to `AudioTranscriber.App.exe`; keep that folder with the app.
+FFmpeg is resolved in this order: the bundled `ffmpeg` folder, the app folder,
+the process PATH, the current user/machine PATH from the registry (so a newly
+installed FFmpeg is found even if Explorer's environment is stale), then WinGet,
+Scoop, Chocolatey, and `C:\ffmpeg\bin`.
+
+Local Whisper needs Microsoft's Visual C++ 2015-2022 runtime (x64, 14.40 or
+newer). On startup the app checks both. If the runtime is missing or outdated it
+offers to download Microsoft's official installer and run it (Windows asks for
+administrator approval). **Privacy / models → Prerequisites** shows the current
+state, **Install Visual C++ runtime…**, and **Re-check prerequisites**. Recording
+and NVIDIA transcription do not need the Visual C++ runtime. A GPU driver with
+Vulkan is optional; without it Whisper uses the CPU.
+
+A session whose normalization paused because FFmpeg was missing keeps its original
+recording. Choose **Resume transcription** after fixing the prerequisite to replay it.
+
 ## Start and isolated smoke check
 
 From the worktree, use the pinned SDK and local caches:

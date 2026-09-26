@@ -68,7 +68,9 @@ directory. CI supplies its SDK and a fresh output directory:
 ```
 
 This publishes the self-contained Windows app and worker, framework/native
-libraries, README, model-license notices, package licenses, and provenance
+libraries, the pinned LGPL FFmpeg/FFprobe build (downloaded once from BtbN's
+GitHub releases, SHA-256-verified, cached in `.tools\downloads` or `RUNNER_TEMP`),
+README, model-license notices, package licenses, and provenance
 inventory. It does not install or execute the application.
 
 ## Release assets and reruns
@@ -81,9 +83,10 @@ Each GitHub Release receives exactly these two workflow-owned assets:
 The ZIP contains the complete Windows x64 distribution and a
 `BUILD-PROVENANCE.json` identifying its tag, commit, SDK, and platform. It omits
 other-architecture Whisper runtimes and the documentation's raw public benchmark
-transcripts/data. Model weights, FFmpeg, credentials, recordings, databases, and
-tool caches are not release payloads. Framework/runtime JSON and documentation
-remain included.
+transcripts/data. It bundles a pinned, SHA-256-verified LGPL FFmpeg/FFprobe build
+in `ffmpeg\` with its license and provenance under `licenses\`. Model weights,
+credentials, recordings, databases, and tool caches are not release payloads.
+Framework/runtime JSON and documentation remain included.
 
 Publishing uses GitHub's supported release API with the job's `GITHUB_TOKEN`:
 `contents: write` is the only permission granted. The token is supplied only to
