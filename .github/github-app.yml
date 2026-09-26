@@ -1,0 +1,13 @@
+instructions: |
+  Merge policy: auto-merge your own changes. When a change is done and quickly checked
+  locally, commit it, push the session branch, open a pull request against main, and
+  merge it right away with `gh pr merge --squash --delete-branch`. Do not wait for review
+  or approval. Nothing runs CI on PRs or pushes, so there are no checks to wait for.
+  If the merge hits a conflict, rebase on origin/main, fix the conflict, and merge.
+
+  Releases: after merging a user-facing change (or when asked), cut a release by
+  dispatching the build-only workflow from main:
+  `gh workflow run release.yml --ref main` (optional: `-f version=vX.Y.Z`; leaving it
+  empty bumps the patch). Do not add tests or validation jobs to any workflow.
+
+  Local build: run `.\scripts\Setup.ps1` once per worktree, then use `.tools\dotnet\dotnet.exe`.
