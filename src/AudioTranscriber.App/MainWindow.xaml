@@ -84,7 +84,7 @@
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
                             <StackPanel Margin="22">
                                 <TextBlock Text="Start with your audio" Style="{StaticResource Heading}" />
-                                <TextBlock Style="{StaticResource Help}" Text="Recording starts only with the button below. It works without cloud consent or a key. Output and optional microphone are archived as separate tracks; originals survive slow or unavailable transcription." />
+                                <TextBlock Style="{StaticResource Help}" Text="Just press Start recording: the defaults are ready (default output device, your microphone as a separate track, local Whisper, English). It works without cloud consent or a key. Output and microphone are archived as separate tracks; originals survive slow or unavailable transcription." />
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
@@ -149,6 +149,7 @@
                                     <Button Content="■  Stop recording" Style="{StaticResource StopButton}" Command="{Binding StopRecordingCommand}" />
                                     <Button Content="Refresh _devices" Command="{Binding RefreshDevicesCommand}" />
                                 </WrapPanel>
+                                <TextBlock Text="{Binding SetupStatus}" Visibility="{Binding HasSetupStatus, Converter={StaticResource BoolVisibility}}" Foreground="{StaticResource Accent}" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,4,0,6" AutomationProperties.LiveSetting="Polite" />
                                 <TextBlock Text="Stop waits for original tails to seal. Transcription pause/cancel are separate controls in Jobs. Endpoint loss is an error, never a silent switch to a different device." Style="{StaticResource Help}" />
                                 <Separator Margin="0,8,0,18" />
                                 <TextBlock Text="Bring an existing recording" FontSize="18" FontWeight="SemiBold" />
@@ -291,7 +292,7 @@
                                         </Style>
                                     </TextBlock.Style>
                                 </TextBlock>
-                                <TextBlock Style="{StaticResource Help}" Text="FFmpeg and FFprobe ship in the release's ffmpeg folder (LGPL build); an FFmpeg on PATH or installed with WinGet is also found. Local Whisper needs Microsoft's Visual C++ 2015-2022 runtime (x64)." />
+                                <TextBlock Style="{StaticResource Help}" Text="FFmpeg and FFprobe ship in the release's ffmpeg folder (LGPL build); an FFmpeg on PATH or installed with WinGet is also found. Local Whisper needs Microsoft's Visual C++ 2015-2022 runtime (x64); if it is missing, the app runs Microsoft's installer on startup (approve the Windows prompt)." />
                                 <WrapPanel>
                                     <Button Content="Install Visual C++ runtime…" Command="{Binding InstallVcRuntimeCommand}" Visibility="{Binding VcRuntimeMissing, Converter={StaticResource BoolVisibility}}" />
                                     <Button Content="Re-check prerequisites" Command="{Binding RecheckPrerequisitesCommand}" />
@@ -329,7 +330,7 @@
                                 <TextBlock Text="Memory-only by default. The password field is cleared after use. No keys in configuration, logs, command-line arguments, transcripts, or exports. Graph authentication is separate." Style="{StaticResource Help}" />
                                 <Separator Margin="0,8,0,16" />
                                 <TextBlock Text="Automatic local speaker analysis" FontSize="18" FontWeight="SemiBold" />
-                                <TextBlock Style="{StaticResource Help}" Text="Explicit download: about 33.49 MB total. Segmentation is MIT (CNRS 2023); embedding is CC BY 4.0 with retained attribution and package notices. Official release artifacts need no Hugging Face token; the original HF segmentation model is gated. Nothing downloads on startup." />
+                                <TextBlock Style="{StaticResource Help}" Text="About 33.49 MB total, downloaded automatically on first start so speakers are labeled by default. Segmentation is MIT (CNRS 2023); embedding is CC BY 4.0 with retained attribution and package notices. Official release artifacts need no Hugging Face token. Use the button below to retry if the automatic download failed." />
                                 <TextBlock Text="{Binding ModelStatus}" TextWrapping="Wrap" FontWeight="SemiBold" />
                                 <WrapPanel>
                                     <Button Content="Install small diarization models…" Command="{Binding InstallModelsCommand}" />
@@ -338,7 +339,8 @@
                                 <TextBlock Style="{StaticResource Help}" Text="Automatic labels are not verified participant identities. Short turns, overlap, changing character voices, and crowded windows can remain uncertain. More session speakers are possible, but the segmentation model has local-window limits. Manual rename and assignment are available in Transcript." />
                                 <Separator Margin="0,8,0,16" />
                                 <TextBlock Text="Local Whisper" FontSize="18" FontWeight="SemiBold" />
-                                <TextBlock Style="{StaticResource Help}" Text="Recommended: Whisper large-v3-turbo (about 1.51 GiB, MIT). It is close to large-v3 accuracy at several times the speed. It runs on your GPU through Vulkan when a GPU driver is present (NVIDIA, AMD, or Intel), otherwise on the CPU. The runtime used is shown in the status bar after each chunk. Nothing downloads until you click install. Whisper transcribes all voices but does not label speakers; use speaker analysis above for that." />
+                                <TextBlock Style="{StaticResource Help}" Text="Default: Whisper large-v3-turbo (about 1.51 GiB, MIT), downloaded and SHA256-verified automatically on first start. You can record while it downloads; queued audio is transcribed as soon as it is ready. It runs on your GPU through Vulkan when a GPU driver is present (NVIDIA, AMD, or Intel), otherwise on the CPU. The runtime used is shown in the status bar after each chunk. Whisper transcribes all voices but does not label speakers; speaker analysis above does that." />
+                                <TextBlock Text="{Binding SetupStatus}" Visibility="{Binding HasSetupStatus, Converter={StaticResource BoolVisibility}}" Foreground="{StaticResource Accent}" FontWeight="SemiBold" TextWrapping="Wrap" />
                                 <WrapPanel>
                                     <Button Content="Install recommended model (large-v3-turbo)…" Command="{Binding InstallWhisperModelCommand}" />
                                     <Button Content="Choose existing Whisper model…" Command="{Binding ChooseWhisperModelCommand}" />

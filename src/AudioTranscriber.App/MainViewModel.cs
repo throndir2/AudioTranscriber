@@ -21,9 +21,14 @@ public sealed class MainViewModel : ObservableObject
     private StoredSession? selectedSession;
     private ProviderOption? selectedProvider;
     private DeviceChoice? outputDevice, microphoneDevice;
-    private string sessionName = $"Session {DateTime.Now:yyyy-MM-dd HH:mm}";
+    private string sessionName = DefaultSessionName();
+    private bool sessionNameIsDefault = true;
     private string language = "en";
     private bool microphoneEnabled, newCloudConsent, selectedCloudConsent;
+    private bool? savedMicrophoneEnabled;
+    private bool microphoneDefaulted, vcInstalling, shownDiarizationReady;
+    private string? shownWhisperPath;
+    private string setupStatus = "";
     private double outputLevel, microphoneLevel;
     private string search = "", seek = "", appliedSearch = "";
     private SpeakerChoice? speakerFilter, assignmentSpeaker;
@@ -65,6 +70,7 @@ public sealed class MainViewModel : ObservableObject
         selectedProvider = Providers.FirstOrDefault(x => !x.IsCloud);
         if (selectedProvider is null)
             selectedProvider = Providers.FirstOrDefault();
+        LoadRecordingPreferences();
         RefreshDevicesCommand = new AsyncCommand(() => RunAsync("Enumerating audio endpoints…", _ =>
         {
             RefreshDevices();
@@ -76,12 +82,12 @@ public sealed class MainViewModel : ObservableObject
         ImportAudioCommand = new AsyncCommand(ImportAudioAsync, () => !Busy && HasNewSessionDetails && !closing);
         ImportVttCommand = new AsyncCommand(ImportVttAsync, CanWorkWithSession);
         FetchTeamsCommand = new AsyncCommand(FetchTeamsAsync, CanWorkWithSession);
-        InstallModelsCommand = new AsyncCommand(InstallModelsAsync, () => !Busy && !closing);
+        InstallModelsCommand = new AsyncCommand(InstallModelsAsync, () => !Busy && !closing && !controller.ModelSetupRunning);
         ChooseWhisperModelCommand = new RelayCommand(ChooseWhisperModel, () => !Busy && !closing);
-        InstallWhisperModelCommand = new AsyncCommand(InstallWhisperModelAsync, () => !Busy && !closing);
-        InstallVcRuntimeCommand = new AsyncCommand(InstallVcRuntimeAsync, () => !Busy && !closing && !prerequisites.VcRuntimeReady);
+        InstallWhisperModelCommand = new AsyncCommand(InstallWhisperModelAsync, () => !Busy && !closing && !controller.ModelSetupRunning);
+        InstallVcRuntimeCommand = new AsyncCommand(InstallVcRuntimeAsync, () => !Busy && !closing && !vcInstalling && !prerequisites.VcRuntimeReady);
         RecheckPrerequisitesCommand = new RelayCommand(() => RefreshPrerequisites(announce: true), () => !closing);
-        if (controller.WhisperModelPath is { } currentModel) localModel = DescribeModel(currentModel);
+        if (controller.WhisperModelPath is { } currentModel) { localModel = DescribeModel(currentModel); shownWhisperPath = currentModel; }
         DiarizeCommand = new AsyncCommand(() => RunForSessionAsync("Running local speaker analysis…",
             (id, token) => controller.DiarizeSessionAsync(id, token)), () => CanWorkWithSession() && controller.DiarizationModelsReady);
         PauseCommand = new RelayCommand(() => SessionAction(controller.PauseTranscription,
@@ -132,7 +138,7 @@ public sealed class MainViewModel : ObservableObject
         controller.Notification += OnNotification;
         controller.LevelsChanged += OnLevelsChanged;
         refreshTimer = new DispatcherTimer(TimeSpan.FromSeconds(3), DispatcherPriority.Background,
-            (_, _) => { if (initialized && !closing) { Guard(RefreshLibrary); UpdateLiveFile(); } }, dispatcher);
+            (_, _) => { if (initialized && !closing) { Guard(RefreshLibrary); Guard(RefreshSetup); UpdateLiveFile(); } }, dispatcher);
         refreshTimer.Stop();
         updateStatus = updater.IsSupported
             ? updater.StagedTag is { } staged ? $"{staged} is downloaded and installs when you close the app." : "Updates have not been checked yet."
@@ -251,7 +257,13 @@ public sealed class MainViewModel : ObservableObject
     public bool VcRuntimeMissing => !prerequisites.VcRuntimeReady;
     public string LocalModel { get => localModel; private set => Set(ref localModel, value); }
     public bool RememberKey { get => rememberKey; set => Set(ref rememberKey, value); }
-    public string SessionName { get => sessionName; set => Set(ref sessionName, value); }
+    public string SessionName
+    {
+        get => sessionName;
+        set { if (Set(ref sessionName, value)) sessionNameIsDefault = false; }
+    }
+    public string SetupStatus { get => setupStatus; private set { if (Set(ref setupStatus, value)) Changed(nameof(HasSetupStatus)); } }
+    public bool HasSetupStatus => SetupStatus.Length > 0;
     public string Language { get => language; set => Set(ref language, value); }
     public bool NewCloudConsent { get => newCloudConsent; set => Set(ref newCloudConsent, value); }
     public bool SelectedCloudConsent { get => selectedCloudConsent; set => Set(ref selectedCloudConsent, value); }
@@ -449,12 +461,76 @@ public sealed class MainViewModel : ObservableObject
 
     private sealed record LiveFileSettings(string Path, bool Enabled);
 
+    private sealed record RecordingPreferences(bool? MicrophoneEnabled, string? ProviderId, string? Language);
+
+    private string RecordingPreferencesPath => Path.Combine(controller.Store.RootDirectory, "recording-defaults.json");
+
+    private void LoadRecordingPreferences()
+    {
+        try
+        {
+            if (!File.Exists(RecordingPreferencesPath)) return;
+            var saved = System.Text.Json.JsonSerializer.Deserialize<RecordingPreferences>(File.ReadAllText(RecordingPreferencesPath));
+            if (saved is null) return;
+            if (Providers.FirstOrDefault(x => x.Id == saved.ProviderId) is { } provider) selectedProvider = provider;
+            if (!string.IsNullOrWhiteSpace(saved.Language)) language = saved.Language;
+            savedMicrophoneEnabled = saved.MicrophoneEnabled;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Text.Json.JsonException) { }
+    }
+
+    private void SaveRecordingPreferences()
+    {
+        try
+        {
+            File.WriteAllText(RecordingPreferencesPath, System.Text.Json.JsonSerializer.Serialize(
+                new RecordingPreferences(MicrophoneEnabled, SelectedProvider?.Id, Language.Trim())));
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+    }
+
+    private static string DefaultSessionName() => $"Session {DateTime.Now:yyyy-MM-dd HH:mm}";
+
+    private string TakeSessionName()
+    {
+        if (sessionNameIsDefault)
+        {
+            sessionName = DefaultSessionName();
+            Changed(nameof(SessionName));
+        }
+        return SessionName.Trim();
+    }
+
+    private void ResetSessionName()
+    {
+        sessionName = DefaultSessionName();
+        sessionNameIsDefault = true;
+        Changed(nameof(SessionName));
+    }
+
+    private void RefreshSetup()
+    {
+        SetupStatus = controller.SetupStatus ?? "";
+        if (controller.WhisperModelPath is { } path && path != shownWhisperPath)
+        {
+            shownWhisperPath = path;
+            LocalModel = DescribeModel(path);
+        }
+        var ready = controller.DiarizationModelsReady;
+        if (ready != shownDiarizationReady)
+        {
+            shownDiarizationReady = ready;
+            ModelStatus = ready ? "Local diarization models are installed." : "Local diarization models are not installed.";
+        }
+    }
+
     public async Task InitializeAsync()
     {
         await Task.Yield();
         RefreshDevices();
         RefreshLibrary();
         ModelStatus = controller.DiarizationModelsReady ? "Local diarization models are installed." : "Local diarization models are not installed.";
+        shownDiarizationReady = controller.DiarizationModelsReady;
         RefreshPrerequisites(announce: false);
         initialized = true;
         refreshTimer.Start();
@@ -478,16 +554,38 @@ public sealed class MainViewModel : ObservableObject
     private string MediaToolLocatorMessage() =>
         AudioTranscriber.Audio.MediaToolLocator.MissingMessage(prerequisites.FFmpeg is null ? "ffmpeg" : "ffprobe");
 
-    /// <summary>Called once after startup (never in smoke mode) to offer installing a missing runtime.</summary>
-    public Task OfferPrerequisiteInstallAsync()
+    /// <summary>
+    /// Called once after startup (never in smoke mode) so Start recording works with no configuration:
+    /// downloads the default Whisper and speaker models and installs a missing Visual C++ runtime.
+    /// </summary>
+    public Task RunAutomaticSetupAsync()
     {
-        if (prerequisites.VcRuntimeReady || closing) return Task.CompletedTask;
-        if (!dialogs.Confirm("Install the Microsoft Visual C++ runtime?",
-            "Local Whisper transcription needs the Microsoft Visual C++ 2015-2022 runtime (x64), which is missing or outdated on this PC.\n\n" +
-            "Download Microsoft's official installer (about 25 MB) and run it now? Windows will ask for administrator approval.\n\n" +
-            "Recording and NVIDIA transcription work without it. You can install it later from Privacy / models → Prerequisites."))
-            return Task.CompletedTask;
-        return InstallVcRuntimeCoreAsync();
+        if (closing) return Task.CompletedTask;
+        _ = controller.EnsureDefaultModelsAsync();
+        Guard(RefreshSetup);
+        CommandManager.InvalidateRequerySuggested();
+        return prerequisites.VcRuntimeReady ? Task.CompletedTask : AutoInstallVcRuntimeAsync();
+    }
+
+    private async Task AutoInstallVcRuntimeAsync()
+    {
+        vcInstalling = true;
+        CommandManager.InvalidateRequerySuggested();
+        string result;
+        try
+        {
+            result = await Prerequisites.InstallVcRuntimeAsync(new Progress<string>(message =>
+            {
+                if (!closing) SetStatus("Setting up local transcription: " + message);
+            }), CancellationToken.None);
+        }
+        catch (Exception error) when (error is System.Net.Http.HttpRequestException or IOException or InvalidDataException or InvalidOperationException or System.ComponentModel.Win32Exception or TaskCanceledException)
+        { result = "The Visual C++ runtime could not be installed automatically: " + error.Message + " Install it from Privacy / models → Prerequisites."; }
+        finally { vcInstalling = false; }
+        if (closing) return;
+        RefreshPrerequisites(announce: false);
+        SetStatus(result, !prerequisites.VcRuntimeReady);
+        if (prerequisites.VcRuntimeReady) Guard(controller.RetryBlockedLocalWork);
     }
 
     private Task InstallVcRuntimeAsync()
@@ -506,6 +604,7 @@ public sealed class MainViewModel : ObservableObject
         { result = "The Visual C++ runtime could not be installed automatically: " + error.Message; }
         RefreshPrerequisites(announce: false);
         SetStatus(result, !prerequisites.VcRuntimeReady);
+        if (prerequisites.VcRuntimeReady) controller.RetryBlockedLocalWork();
     });
 
     private void RefreshDevices()
@@ -516,6 +615,12 @@ public sealed class MainViewModel : ObservableObject
         Replace(MicrophoneDevices, controller.GetMicrophoneDevices());
         OutputDevice = OutputDevices.FirstOrDefault(x => x.Id == outputId) ?? OutputDevices.FirstOrDefault();
         MicrophoneDevice = MicrophoneDevices.FirstOrDefault(x => x.Id == microphoneId) ?? MicrophoneDevices.FirstOrDefault();
+        if (!microphoneDefaulted)
+        {
+            // Capture your own voice by default when a microphone exists; a saved choice wins.
+            microphoneDefaulted = true;
+            MicrophoneEnabled = (savedMicrophoneEnabled ?? true) && MicrophoneDevices.Count > 0;
+        }
         if (OutputDevices.Count == 0)
             SetStatus("No active output endpoint. Imports still work; connect an output device and refresh.", true);
     }
@@ -586,14 +691,16 @@ public sealed class MainViewModel : ObservableObject
             SetStatus("Select an available microphone or turn off the separate microphone track.", true);
             return;
         }
-        var name = SessionName.Trim();
+        var name = TakeSessionName();
         var locale = Language.Trim();
         var microphoneId = MicrophoneEnabled ? MicrophoneDevice?.Id : null;
         var consent = provider.IsCloud && NewCloudConsent;
+        SaveRecordingPreferences();
         await RunAsync("Starting the explicitly selected audio devices…", async token =>
         {
             NewCloudConsent = false;
             var session = await controller.StartRecordingAsync(name, output.Id, microphoneId, provider.Id, locale, consent, token);
+            if (sessionNameIsDefault) ResetSessionName();
             if (LiveFileEnabled) StartLiveFile(session.Id);
             RefreshLibrary();
             SelectedSession = Sessions.FirstOrDefault(x => x.Id == session.Id) ?? session;
@@ -624,9 +731,10 @@ public sealed class MainViewModel : ObservableObject
     {
         var path = dialogs.OpenAudio();
         if (path is null || SelectedProvider is not { } provider) return;
-        var name = SessionName.Trim();
+        var name = TakeSessionName();
         var locale = Language.Trim();
         var consent = provider.IsCloud && NewCloudConsent;
+        SaveRecordingPreferences();
         await RunAsync("Probing the selected media file…", async token =>
         {
             var probe = await controller.ProbeMediaAsync(path, token);
@@ -636,6 +744,7 @@ public sealed class MainViewModel : ObservableObject
             SetStatus($"Importing stream {stream.Index}. Retaining a managed original; preparing audio…");
             NewCloudConsent = false;
             var session = await controller.ImportAudioAsync(name, path, stream.Index, provider.Id, locale, consent, token);
+            if (sessionNameIsDefault) ResetSessionName();
             if (LiveFileEnabled) StartLiveFile(session.Id);
             RefreshLibrary();
             SelectedSession = Sessions.FirstOrDefault(x => x.Id == session.Id) ?? session;

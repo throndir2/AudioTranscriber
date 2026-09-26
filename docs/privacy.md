@@ -11,9 +11,11 @@ was opened or a model was selected.
 
 Recording, retaining originals, importing files, playback, editing, and local
 speaker analysis do not require NVIDIA credentials. A missing local model must
-not cause a recording to be sent to a cloud service. Local Whisper models are
-optional downloads; their download size and license should be reviewed before
-installation.
+not cause a recording to be sent to a cloud service. On first start the desktop
+app downloads the default local models from their pinned public sources
+(Whisper large-v3-turbo, about 1.51 GiB, MIT; speaker models, about 33.49 MB,
+MIT / CC BY 4.0), verifies their SHA256, and stores them locally. No audio is
+sent while doing so.
 
 Release builds check `api.github.com` for a newer AudioTranscriber release
 (shortly after startup and every six hours) and download it from GitHub. That

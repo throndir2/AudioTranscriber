@@ -182,8 +182,12 @@ implementation; no Whisper weights were downloaded.
 
 Use `LocalWhisperModelCatalog.All` to show the size/license **before**
 `VerifiedModelDownload.InstallWhisperAsync(model, directory,
-explicitlyApproved: true, progress, cancellationToken)`. There is **no model
-download at startup or simply on provider construction**. The separate downloader
+explicitlyApproved: true, progress, cancellationToken)`. Provider construction
+never downloads. The desktop app (not smoke mode or tests) calls
+`AppController.EnsureDefaultModelsAsync()` on startup, which installs the
+recommended large-v3-turbo model through this downloader when no model is
+present; local Whisper jobs queued meanwhile wait and run once it is verified.
+The downloader
 streams into an owned partial file, enforces exact bytes, checks SHA256, and
 atomically renames only a verified file.
 The installer retains the full OpenAI MIT license and model origin/hash alongside
