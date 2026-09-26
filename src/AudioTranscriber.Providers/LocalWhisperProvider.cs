@@ -12,6 +12,7 @@ public sealed class LocalWhisperProvider : ITranscriptionProvider
     private readonly SemaphoreSlim gate = new(1, 1);
     private WhisperFactory? factory;
     private string? modelHash;
+    private string runtime = "not-loaded";
     private bool disposed;
     public ProviderDescriptor Descriptor { get; } = new(
         "local-whisper", "Local Whisper (optional model)", "user-installed-whisper.cpp",
@@ -46,7 +47,8 @@ public sealed class LocalWhisperProvider : ITranscriptionProvider
                 var catalogModel = LocalWhisperModelCatalog.All.FirstOrDefault(m => m.FileName == Path.GetFileName(modelPath));
                 if (catalogModel is not null && (catalogModel.Bytes != file.Length || catalogModel.Sha256 != modelHash))
                     throw new ProviderException(ProviderFailureKind.LocalModelMissing, "local-model-integrity-mismatch");
-                factory = WhisperFactory.FromPath(modelPath);
+                factory = WhisperFactory.FromPath(modelPath, new WhisperFactoryOptions { UseGpu = true, UseFlashAttention = true });
+                runtime = Whisper.net.LibraryLoader.RuntimeOptions.LoadedLibrary?.ToString() ?? "unknown";
             }
             if (!WhisperFactory.GetSupportedLanguages().Contains(language))
                 throw new ProviderException(ProviderFailureKind.InvalidRequest, "unsupported-language");
@@ -73,6 +75,7 @@ public sealed class LocalWhisperProvider : ITranscriptionProvider
             }
             cancellationToken.ThrowIfCancellationRequested();
             diagnostics.Add("word-timing-unavailable");
+            diagnostics.Add("whisper-runtime:" + runtime);
             return new(Descriptor.Id, "whisper.cpp:sha256:" + modelHash,
                 segments.Count == 0 ? TranscriptionStatus.Empty : TranscriptionStatus.Succeeded,
                 segments.ToImmutable(), JsonSerializer.Serialize(evidence), diagnostics.ToImmutable());

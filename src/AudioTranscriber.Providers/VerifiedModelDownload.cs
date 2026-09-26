@@ -21,8 +21,13 @@ public static class LocalWhisperModelCatalog
         new LocalWhisperModel("small", "ggml-small.bin", 487601967,
             "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b"),
         new LocalWhisperModel("large-v3", "ggml-large-v3.bin", 3095033483,
-            "64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2")
+            "64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2"),
+        new LocalWhisperModel("large-v3-turbo", "ggml-large-v3-turbo.bin", 1624555275,
+            "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69")
     });
+
+    // Near large-v3 accuracy at several times the speed; the default for local transcription.
+    public static LocalWhisperModel Recommended => All.Single(model => model.Id == "large-v3-turbo");
 }
 
 public static class VerifiedModelDownload

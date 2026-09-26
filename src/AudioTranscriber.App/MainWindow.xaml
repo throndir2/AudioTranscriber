@@ -309,9 +309,12 @@
                                 </WrapPanel>
                                 <TextBlock Style="{StaticResource Help}" Text="Automatic labels are not verified participant identities. Short turns, overlap, changing character voices, and crowded windows can remain uncertain. More session speakers are possible, but the segmentation model has local-window limits. Manual rename and assignment are available in Transcript." />
                                 <Separator Margin="0,8,0,16" />
-                                <TextBlock Text="Optional local Whisper" FontSize="18" FontWeight="SemiBold" />
-                                <TextBlock Style="{StaticResource Help}" Text="Select an existing compatible whisper.cpp model file. No large model is downloaded automatically. Model files range from roughly 75 MiB for tiny to several GiB for large models; inspect the exact release size, model license, and runtime license before downloading. Upstream OpenAI Whisper uses the MIT license. Larger does not guarantee better results for your recording." />
-                                <Button Content="Choose existing Whisper model…" Command="{Binding ChooseWhisperModelCommand}" HorizontalAlignment="Left" />
+                                <TextBlock Text="Local Whisper" FontSize="18" FontWeight="SemiBold" />
+                                <TextBlock Style="{StaticResource Help}" Text="Recommended: Whisper large-v3-turbo (about 1.51 GiB, MIT). It is close to large-v3 accuracy at several times the speed. It runs on your GPU through Vulkan when a GPU driver is present (NVIDIA, AMD, or Intel), otherwise on the CPU. The runtime used is shown in the status bar after each chunk. Nothing downloads until you click install. Whisper transcribes all voices but does not label speakers; use speaker analysis above for that." />
+                                <WrapPanel>
+                                    <Button Content="Install recommended model (large-v3-turbo)…" Command="{Binding InstallWhisperModelCommand}" />
+                                    <Button Content="Choose existing Whisper model…" Command="{Binding ChooseWhisperModelCommand}" />
+                                </WrapPanel>
                                 <TextBlock Text="{Binding LocalModel}" TextWrapping="Wrap" />
                                 <TextBlock Text="{Binding DataRoot, StringFormat=Local library: {0}}" Style="{StaticResource Help}" Margin="0,24,0,8" />
                             </StackPanel>

@@ -284,6 +284,11 @@
         "resolved": "1.9.1",
         "contentHash": "Ut5tZyCUwXMVdThoLvdvQ7GyLwjRMreR/p3LuMJvRiXidQ2AXxx2Tv8UOGtMxvL395AC3+IkHdN/kMfd+EPSEw=="
       },
+      "Whisper.net.Runtime.Vulkan": {
+        "type": "Transitive",
+        "resolved": "1.9.1",
+        "contentHash": "2kynHvbAczuEYHKRIR9NYg8xiXaGZHW3hb1Ts+N2dNcmVpA87xJWxA07yDiFnf5+vXz428wK57YWNvxqTJdkKw=="
+      },
       "xunit.abstractions": {
         "type": "Transitive",
         "resolved": "2.0.3",
@@ -368,7 +373,8 @@
           "Grpc.Net.Client": "[2.83.0, )",
           "System.Security.Cryptography.ProtectedData": "[10.0.0, )",
           "Whisper.net": "[1.9.1, )",
-          "Whisper.net.Runtime": "[1.9.1, )"
+          "Whisper.net.Runtime": "[1.9.1, )",
+          "Whisper.net.Runtime.Vulkan": "[1.9.1, )"
         }
       },
       "audiotranscriber.storage": {

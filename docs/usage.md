@@ -142,10 +142,21 @@ Short turns, overlap, crowded windows, and character voices can remain uncertain
 The model's local-window limits do not impose a three-person maximum on an entire
 session, and labels are not verified identities.
 
-Local Whisper uses an explicitly selected, existing compatible model file.
-Nothing downloads a large Whisper model automatically. Verify exact file size
-and the model/runtime licenses before obtaining one: tiny is roughly 75 MiB,
-whereas large models can occupy several GiB. Upstream OpenAI Whisper is MIT.
+Local Whisper's recommended model is **large-v3-turbo** (1,624,555,275 bytes,
+MIT). It's close to large-v3 accuracy at several times the speed. On the
+**Privacy & models** tab, **Install recommended model (large-v3-turbo)…**
+downloads it after a confirmation, verifies its SHA256, and selects it. If
+`ggml-large-v3-turbo.bin` is already in the app's `whisper` model folder, it is
+selected automatically at startup. You can also pick any existing compatible
+model file. Nothing downloads without your click.
+
+Inference uses the GPU through **Vulkan** when a Vulkan-capable driver is
+present (NVIDIA, AMD, or Intel). A dedicated GPU is preferred over an integrated
+one. Otherwise it falls back to the CPU. After each chunk, the status bar
+diagnostics show `whisper-runtime:Vulkan` or `whisper-runtime:Cpu`. CUDA
+runtimes are not bundled because they would require the CUDA Toolkit. Whisper
+transcribes every voice in the mix but does not label speakers; speaker analysis
+does that separately. Overlapping speech can be merged or dropped.
 The selected file name, path, and size—not any secret—are shown.
 
 In the checkout, `.\scripts\Install-WhisperModel.ps1 -List` lists pinned model
