@@ -279,6 +279,20 @@
                     <TabItem Header="_Privacy / models">
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
                             <StackPanel Margin="22">
+                                <TextBlock Text="Prerequisites" Style="{StaticResource Heading}" />
+                                <TextBlock Text="{Binding PrerequisiteStatus}" TextWrapping="Wrap" FontWeight="SemiBold">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Style.Triggers><DataTrigger Binding="{Binding PrerequisitesReady}" Value="False"><Setter Property="Foreground" Value="#A52232" /></DataTrigger></Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                                <TextBlock Style="{StaticResource Help}" Text="FFmpeg and FFprobe ship in the release's ffmpeg folder (LGPL build); an FFmpeg on PATH or installed with WinGet is also found. Local Whisper needs Microsoft's Visual C++ 2015-2022 runtime (x64)." />
+                                <WrapPanel>
+                                    <Button Content="Install Visual C++ runtime…" Command="{Binding InstallVcRuntimeCommand}" Visibility="{Binding VcRuntimeMissing, Converter={StaticResource BoolVisibility}}" />
+                                    <Button Content="Re-check prerequisites" Command="{Binding RecheckPrerequisitesCommand}" />
+                                </WrapPanel>
+                                <Separator Margin="0,8,0,16" />
                                 <TextBlock Text="Your data, your decision" Style="{StaticResource Heading}" />
                                 <TextBlock Text="{Binding ConsentSummary}" FontWeight="SemiBold" />
                                 <TextBlock Style="{StaticResource Help}" Text="Consent applies only to the selected session's configured NVIDIA provider and audio tracks. NVIDIA service terms/logging and finite account/model quotas apply. Upload only permitted audio, with no personal or confidential data. Revocation stops future uploads, but cannot recall already sent audio. Choosing local Whisper never opts into cloud on an error." />

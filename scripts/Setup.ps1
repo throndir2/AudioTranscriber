@@ -86,7 +86,7 @@ try {
     }
     foreach ($tool in @('ffmpeg', 'ffprobe')) {
         if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
-            Write-Warning "$tool is not on PATH. Install a suitable trusted FFmpeg distribution before importing or normalizing audio."
+            Write-Warning "$tool is not on PATH. Development runs need FFmpeg installed (for example: winget install Gyan.FFmpeg); release ZIPs bundle it."
         }
     }
     Write-Host 'Setup complete. No global SDK, API keys, audio capture, or model downloads were configured.'

@@ -47,10 +47,13 @@ host. Native apphost/image-loading failures were observed intermittently on the
 development machine despite valid on-disk bytes; this is not evidence of a model
 or source-code defect. Published executables are a separate validation target.
 
-FFmpeg and FFprobe must be on PATH for media operations. Use a trusted
-distribution and check its actual build/license terms before redistribution;
-the application does not implicitly bundle or install FFmpeg. No model weights,
-API keys, recording, or cloud upload are required by setup.
+FFmpeg and FFprobe are resolved from the bundled `ffmpeg` folder of a release,
+then PATH (including the current registry PATH), then WinGet/Scoop/Chocolatey
+locations. Release ZIPs bundle a pinned, SHA-256-verified LGPL FFmpeg build, so a
+clean PC needs no separate install; for development, `Setup.ps1` warns when FFmpeg
+is not on PATH. Local Whisper also needs the Microsoft Visual C++ 2015-2022 x64
+runtime; the app checks it on startup and offers Microsoft's official installer.
+No model weights, API keys, recording, or cloud upload are required by setup.
 
 Targeted validation and direct local SDK invocation:
 
@@ -61,7 +64,8 @@ Targeted validation and direct local SDK invocation:
 
 Publish output is `artifacts\publish\win-x64`; launch `AudioTranscriber.App.exe`
 there. Keep the complete output directory together, including the worker and
-native runtime libraries. FFmpeg/FFprobe remain separately installed dependencies.
+native runtime libraries. FFmpeg/FFprobe are bundled in the `ffmpeg` folder
+(LGPL build; license and provenance under `licenses`).
 The package includes documentation, model notices, dependency license files,
 and a package inventory under `licenses`.
 

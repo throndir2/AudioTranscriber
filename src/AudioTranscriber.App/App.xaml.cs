@@ -27,6 +27,7 @@ public partial class App : System.Windows.Application
             window.Show();
             await viewModel.InitializeAsync();
             await System.Windows.Threading.Dispatcher.Yield(DispatcherPriority.ContextIdle);
+            if (!options.Smoke) _ = viewModel.OfferPrerequisiteInstallAsync();
             if (options.Smoke)
             {
                 for (var tab = 0; tab < window.MainTabs.Items.Count; tab++)
@@ -36,6 +37,7 @@ public partial class App : System.Windows.Application
                 }
                 window.MainTabs.SelectedIndex = 0;
                 await System.Windows.Threading.Dispatcher.Yield(DispatcherPriority.ContextIdle);
+                var prerequisites = Prerequisites.Check();
                 var smoke = new
                 {
                     loaded = window.IsLoaded && window.IsVisible,
@@ -47,6 +49,9 @@ public partial class App : System.Windows.Application
                     tabCount = window.MainTabs.Items.Count,
                     captureStarted = controller.IsRecording,
                     cloudUploadRequested = false,
+                    ffmpegPath = prerequisites.FFmpeg,
+                    ffprobePath = prerequisites.FFprobe,
+                    vcRuntimeReady = prerequisites.VcRuntimeReady,
                     checkedAtUtc = DateTimeOffset.UtcNow,
                     note = "Real WPF startup, endpoint enumeration and empty SQLite library only. No capture, playback, model download, Graph sign-in, or NVIDIA request."
                 };

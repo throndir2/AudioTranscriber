@@ -140,8 +140,10 @@ function Get-ReleasePackageFiles([string]$Directory) {
         if ($relative.StartsWith('runtimes/', [StringComparison]::Ordinal) -and
             -not $relative.StartsWith('runtimes/win-x64/', [StringComparison]::Ordinal) -and
             -not $relative.StartsWith('runtimes/vulkan/win-x64/', [StringComparison]::Ordinal)) { continue }
+        $bundledFFmpeg = $relative -cmatch '^ffmpeg/(ffmpeg\.exe|ffprobe\.exe|[A-Za-z0-9_.-]+\.dll)$'
         if ($relative -match '(^|/)(\.tools|\.models|\.git|obj|bin|sessions)(/|$)' -or
-            $file.Name -match '^\.env|^appsettings.*\.json$|^transcript[._-]|^(ffmpeg|ffprobe)(\.exe)?$' -or
+            $file.Name -match '^\.env|^appsettings.*\.json$|^transcript[._-]' -or
+            ($file.Name -match '^(ffmpeg|ffprobe)(\.exe)?$' -and -not $bundledFFmpeg) -or
             $file.Extension -match '^\.(onnx|bin|gguf|ggml|pt|pth|safetensors|wav|w64|rf64|flac|mp3|aac|aiff?|wma|pcm|pcm16|ogg|m4a|m4b|mp4|mkv|webm|srt|vtt|sqlite3?|db|dpapi|key|pfx|p12|csv)$' -or
             ($file.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
             throw "Unexpected private data, model, tool, or non-release file in publish output: $relative"
@@ -153,6 +155,7 @@ function Get-ReleasePackageFiles([string]$Directory) {
         'AudioTranscriber.Worker.exe','AudioTranscriber.Worker.dll','AudioTranscriber.Worker.deps.json','AudioTranscriber.Worker.runtimeconfig.json',
         'coreclr.dll','hostpolicy.dll','wpfgfx_cor3.dll','e_sqlite3.dll','sherpa-onnx-c-api.dll','onnxruntime.dll',
         'runtimes/win-x64/whisper.dll','runtimes/vulkan/win-x64/whisper.dll','runtimes/vulkan/win-x64/ggml-vulkan-whisper.dll',
+        'ffmpeg/ffmpeg.exe','ffmpeg/ffprobe.exe','licenses/FFmpeg-LICENSE.txt','licenses/FFmpeg-provenance.md',
         'README.md','licenses/PACKAGE-INVENTORY.txt','licenses/SQLite-provenance.md',
         'licenses/models/Segmentation-original-MIT.txt','licenses/models/WeSpeaker-NOTICE.txt'
     )) {
@@ -240,7 +243,7 @@ function Publish-OwnedRelease([object]$Version, [string]$SourceCommit, [string]$
             $release = Invoke-ReleaseApi -Method POST -Route 'releases' -Body @{
                 tag_name = $Version.Tag; target_commitish = $SourceCommit; name = "AudioTranscriber $($Version.Tag)"
                 draft = $true; prerelease = $Version.Prerelease; make_latest = 'false'
-                body = "$(Get-ReleaseMarker $Version.Tag $SourceCommit)`n`nWindows x64 self-contained application and speaker worker.`n`nSource commit: $SourceCommit`n`nFFmpeg and optional model weights are not bundled. See the included README and licenses."
+                body = "$(Get-ReleaseMarker $Version.Tag $SourceCommit)`n`nWindows x64 self-contained application and speaker worker.`n`nSource commit: $SourceCommit`n`nFFmpeg/FFprobe (LGPL build) are bundled in the ffmpeg folder. Optional model weights are downloaded from inside the app. See the included README and licenses."
             }
         }
         # Only these two named assets of our matching draft may be replaced after an interrupted upload.
