@@ -42,6 +42,18 @@ public sealed class PersistenceTests : IDisposable
     }
 
     [Fact]
+    public void UnattributedMicrophoneRowsAreLabeledAsTheLocalUser()
+    {
+        var mic = new StoredTrack(Guid.NewGuid(), session.Id, "Microphone", "Local microphone", null, 0, null);
+        store.AddTrack(mic);
+        store.ImportCue(session.Id, track.Id, "other", new(0, 100, "roll initiative", null, "Segment", "Synthetic"));
+        store.ImportCue(session.Id, mic.Id, "me", new(200, 300, "I attack", null, "Segment", "Synthetic"));
+        var rows = store.GetTranscriptPage(session.Id);
+        Assert.Equal("Unknown", rows.Single(row => row.Id == "other").SpeakerName);
+        Assert.Equal("Me (mic)", rows.Single(row => row.Id == "me").SpeakerName);
+    }
+
+    [Fact]
     public void SearchCorrectionsNamesAndPagingPreserveRawText()
     {
         store.UpsertSpeaker(new("s1", session.Id, "Speaker 1", null, "Synthetic"));

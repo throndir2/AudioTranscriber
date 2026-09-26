@@ -137,7 +137,7 @@
                                         <CheckBox Content="Include a separate _microphone track" IsChecked="{Binding MicrophoneEnabled}" Margin="0,0,0,2" />
                                         <ComboBox ItemsSource="{Binding MicrophoneDevices}" DisplayMemberPath="Name" SelectedItem="{Binding MicrophoneDevice}" IsEnabled="{Binding MicrophoneEnabled}" AutomationProperties.Name="Optional separate microphone device" />
                                         <ProgressBar Value="{Binding MicrophoneLevel, Mode=OneWay}" Minimum="0" Maximum="1" Height="12" Margin="0,0,8,0" AutomationProperties.Name="Microphone capture peak level" />
-                                        <TextBlock Text="Microphone level · not included in loopback" FontSize="12" Style="{StaticResource Help}" />
+                                        <TextBlock Text="Microphone level · not included in loopback. Use headphones: speaker audio picked up by the mic is transcribed twice." FontSize="12" Style="{StaticResource Help}" />
                                     </StackPanel>
                                 </Grid>
                                 <WrapPanel>
