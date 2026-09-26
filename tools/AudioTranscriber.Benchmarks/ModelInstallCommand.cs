@@ -25,7 +25,7 @@ public static class ModelInstallCommand
         if (options.Help)
         {
             await output.WriteLineAsync("install-model --list");
-            await output.WriteLineAsync("install-model --model tiny|base|small|large-v3 --directory PATH");
+            await output.WriteLineAsync("install-model --model tiny|base|small|large-v3|large-v3-turbo --directory PATH");
             await output.WriteLineAsync("Add --accept-model-license --accept-download-bytes EXACT_BYTES only after reviewing the model disclosure.");
             await output.WriteLineAsync("No model is downloaded without both acknowledgments. This command never reads NVIDIA credentials or sends audio.");
             return 0;

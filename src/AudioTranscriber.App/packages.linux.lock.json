@@ -2,6 +2,12 @@
   "version": 1,
   "dependencies": {
     "net10.0-windows7.0": {
+      "Whisper.net.Runtime.Vulkan": {
+        "type": "Direct",
+        "requested": "[1.9.1, )",
+        "resolved": "1.9.1",
+        "contentHash": "2kynHvbAczuEYHKRIR9NYg8xiXaGZHW3hb1Ts+N2dNcmVpA87xJWxA07yDiFnf5+vXz428wK57YWNvxqTJdkKw=="
+      },
       "Google.Protobuf": {
         "type": "Transitive",
         "resolved": "3.36.1",
@@ -283,7 +289,8 @@
           "Grpc.Net.Client": "[2.83.0, )",
           "System.Security.Cryptography.ProtectedData": "[10.0.0, )",
           "Whisper.net": "[1.9.1, )",
-          "Whisper.net.Runtime": "[1.9.1, )"
+          "Whisper.net.Runtime": "[1.9.1, )",
+          "Whisper.net.Runtime.Vulkan": "[1.9.1, )"
         }
       },
       "audiotranscriber.storage": {

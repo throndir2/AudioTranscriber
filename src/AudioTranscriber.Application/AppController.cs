@@ -64,7 +64,7 @@ public sealed class AppController : IAppController
     public IReadOnlyList<ProviderOption> Providers { get; } = NvidiaModelCatalog.All
         .Select(model => new ProviderOption(model.Id, model.DisplayName, true,
             model.VerifiedWordTiming ? "Word timestamps when returned" : "Coarse audio-chunk timestamps"))
-        .Append(new("local-whisper", "Local Whisper (requires a model)", false, "Segment timestamps"))
+        .Append(new("local-whisper", "Local Whisper · large-v3-turbo recommended (GPU via Vulkan when available)", false, "Segment timestamps"))
         .ToArray();
     public event Action<AppNotification>? Notification;
     public event Action<CaptureMeter>? LevelsChanged;
@@ -90,6 +90,11 @@ public sealed class AppController : IAppController
         var checkout = FindCheckout();
         modelDirectory = checkout is null ? Path.Combine(root, "models", "diarization")
             : Path.Combine(checkout, ".models", "diarization");
+        if (settings.WhisperModelPath is null || !File.Exists(settings.WhisperModelPath))
+        {
+            var recommended = Path.Combine(WhisperModelDirectory, LocalWhisperModelCatalog.Recommended.FileName);
+            if (File.Exists(recommended)) settings = settings with { WhisperModelPath = recommended };
+        }
         if (File.Exists(credentialPath))
         {
             Task.Run(() => credentials.LoadForCurrentUserAsync(credentialPath)).GetAwaiter().GetResult();
@@ -144,6 +149,19 @@ public sealed class AppController : IAppController
         if (!File.Exists(path)) throw new FileNotFoundException("Choose an existing local Whisper model.");
         UpdateSettings(current => current with { WhisperModelPath = Path.GetFullPath(path) });
         Notify("Local Whisper model selected. It will load only when local transcription is requested.");
+    }
+
+    public string? WhisperModelPath => settings.WhisperModelPath is { } path && File.Exists(path) ? path : null;
+    private string WhisperModelDirectory => Path.Combine(Path.GetDirectoryName(modelDirectory)!, "whisper");
+
+    public async Task InstallRecommendedWhisperModelAsync(IProgress<string>? progress = null, CancellationToken cancellationToken = default)
+    {
+        var model = LocalWhisperModelCatalog.Recommended;
+        var path = await VerifiedModelDownload.InstallWhisperAsync(model, WhisperModelDirectory, true,
+            new Progress<long>(bytes => progress?.Report($"Downloading {model.FileName}: {bytes * 100 / model.Bytes}% ({bytes / 1048576:N0} / {model.Bytes / 1048576:N0} MiB)")),
+            cancellationToken);
+        SetLocalWhisperModel(path);
+        progress?.Report($"{model.FileName} installed, verified, and selected.");
     }
 
     public async Task InstallDiarizationModelsAsync(IProgress<string>? progress = null, CancellationToken cancellationToken = default)

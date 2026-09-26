@@ -72,6 +72,8 @@ public sealed class MainViewModel : ObservableObject
         FetchTeamsCommand = new AsyncCommand(FetchTeamsAsync, CanWorkWithSession);
         InstallModelsCommand = new AsyncCommand(InstallModelsAsync, () => !Busy && !closing);
         ChooseWhisperModelCommand = new RelayCommand(ChooseWhisperModel, () => !Busy && !closing);
+        InstallWhisperModelCommand = new AsyncCommand(InstallWhisperModelAsync, () => !Busy && !closing);
+        if (controller.WhisperModelPath is { } currentModel) localModel = DescribeModel(currentModel);
         DiarizeCommand = new AsyncCommand(() => RunForSessionAsync("Running local speaker analysis…",
             (id, token) => controller.DiarizeSessionAsync(id, token)), () => CanWorkWithSession() && controller.DiarizationModelsReady);
         PauseCommand = new RelayCommand(() => SessionAction(controller.PauseTranscription,
@@ -244,6 +246,7 @@ public sealed class MainViewModel : ObservableObject
     public ICommand FetchTeamsCommand { get; }
     public ICommand InstallModelsCommand { get; }
     public ICommand ChooseWhisperModelCommand { get; }
+    public ICommand InstallWhisperModelCommand { get; }
     public ICommand DiarizeCommand { get; }
     public ICommand PauseCommand { get; }
     public ICommand ResumeCommand { get; }
@@ -535,8 +538,26 @@ public sealed class MainViewModel : ObservableObject
         Guard(() =>
         {
             controller.SetLocalWhisperModel(path);
-            LocalModel = $"{Path.GetFileName(path)} · {new FileInfo(path).Length / (1024d * 1024d):N1} MiB\n{path}";
+            LocalModel = DescribeModel(path);
             SetStatus("Local Whisper model selected. Local-only errors never enable NVIDIA uploads.");
+        });
+    }
+
+    private static string DescribeModel(string path) =>
+        $"{Path.GetFileName(path)} · {new FileInfo(path).Length / (1024d * 1024d):N1} MiB\n{path}";
+
+    private Task InstallWhisperModelAsync()
+    {
+        var model = AudioTranscriber.Providers.LocalWhisperModelCatalog.Recommended;
+        if (!dialogs.Confirm("Install the recommended Whisper model?",
+            $"Download {model.FileName} ({model.Bytes:N0} bytes, about {model.Bytes / 1073741824d:N2} GiB) from the pinned whisper.cpp Hugging Face revision?\n\n" +
+            "Whisper large-v3-turbo: near large-v3 accuracy at several times the speed. MIT license (OpenAI Whisper; GGML conversion by whisper.cpp contributors). SHA256 is verified before use and the model is selected automatically.\n\nNo audio is uploaded."))
+            return Task.CompletedTask;
+        return RunAsync("Downloading the recommended local Whisper model…", async token =>
+        {
+            await controller.InstallRecommendedWhisperModelAsync(new Progress<string>(message => LocalModel = message), token);
+            if (controller.WhisperModelPath is { } path) LocalModel = DescribeModel(path);
+            SetStatus("Whisper large-v3-turbo installed and selected for local transcription.");
         });
     }
 

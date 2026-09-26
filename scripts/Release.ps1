@@ -138,7 +138,8 @@ function Get-ReleasePackageFiles([string]$Directory) {
         # Keep documentation, not the public benchmark's verbatim transcripts; ship only the requested native architecture.
         if ($relative.StartsWith('docs/', [StringComparison]::Ordinal) -and $file.Extension -ne '.md') { continue }
         if ($relative.StartsWith('runtimes/', [StringComparison]::Ordinal) -and
-            -not $relative.StartsWith('runtimes/win-x64/', [StringComparison]::Ordinal)) { continue }
+            -not $relative.StartsWith('runtimes/win-x64/', [StringComparison]::Ordinal) -and
+            -not $relative.StartsWith('runtimes/vulkan/win-x64/', [StringComparison]::Ordinal)) { continue }
         if ($relative -match '(^|/)(\.tools|\.models|\.git|obj|bin|sessions)(/|$)' -or
             $file.Name -match '^\.env|^appsettings.*\.json$|^transcript[._-]|^(ffmpeg|ffprobe)(\.exe)?$' -or
             $file.Extension -match '^\.(onnx|bin|gguf|ggml|pt|pth|safetensors|wav|w64|rf64|flac|mp3|aac|aiff?|wma|pcm|pcm16|ogg|m4a|m4b|mp4|mkv|webm|srt|vtt|sqlite3?|db|dpapi|key|pfx|p12|csv)$' -or
@@ -151,7 +152,8 @@ function Get-ReleasePackageFiles([string]$Directory) {
         'AudioTranscriber.App.exe','AudioTranscriber.App.dll','AudioTranscriber.App.deps.json','AudioTranscriber.App.runtimeconfig.json',
         'AudioTranscriber.Worker.exe','AudioTranscriber.Worker.dll','AudioTranscriber.Worker.deps.json','AudioTranscriber.Worker.runtimeconfig.json',
         'coreclr.dll','hostpolicy.dll','wpfgfx_cor3.dll','e_sqlite3.dll','sherpa-onnx-c-api.dll','onnxruntime.dll',
-        'runtimes/win-x64/whisper.dll','README.md','licenses/PACKAGE-INVENTORY.txt','licenses/SQLite-provenance.md',
+        'runtimes/win-x64/whisper.dll','runtimes/vulkan/win-x64/whisper.dll','runtimes/vulkan/win-x64/ggml-vulkan-whisper.dll',
+        'README.md','licenses/PACKAGE-INVENTORY.txt','licenses/SQLite-provenance.md',
         'licenses/models/Segmentation-original-MIT.txt','licenses/models/WeSpeaker-NOTICE.txt'
     )) {
         if (-not $files.ContainsKey($required)) { throw "Incomplete Windows package: $required is missing." }

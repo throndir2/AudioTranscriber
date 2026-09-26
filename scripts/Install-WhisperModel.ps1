@@ -2,7 +2,7 @@
 param(
     [Parameter(Mandatory, ParameterSetName = 'List')][switch]$List,
     [Parameter(Mandatory, ParameterSetName = 'Install')]
-    [ValidateSet('tiny', 'base', 'small', 'large-v3')][string]$Model,
+    [ValidateSet('tiny', 'base', 'small', 'large-v3', 'large-v3-turbo')][string]$Model,
     [Parameter(ParameterSetName = 'Install')][string]$ModelDirectory = '.models\whisper',
     [Parameter(ParameterSetName = 'Install')][switch]$AcceptModelLicense,
     [Parameter(ParameterSetName = 'Install')][ValidateRange(1, [long]::MaxValue)][long]$AcceptDownloadBytes

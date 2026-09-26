@@ -120,8 +120,16 @@ capped transient retries after rechecking consent.
 It loads a local GGML model lazily on the first request, hashes it for observed
 identity, converts the same validated PCM16 samples to normalized floats, and
 invokes **Whisper.net 1.9.1 / Whisper.net.Runtime 1.9.1**, source commit
-`98278acc38ae23590cdfa9859f78f089abae52a7`. Native CPU inference is serialized;
-the pinned native whisper.cpp gitlink is
+`98278acc38ae23590cdfa9859f78f089abae52a7`. Inference is serialized. The
+factory uses `UseGpu = true` and `UseFlashAttention = true`. The bundled
+**Whisper.net.Runtime.Vulkan 1.9.1** is tried before the CPU runtime. It needs
+only the GPU driver's `vulkan-1.dll`, and ggml prefers dedicated GPUs over
+integrated ones. The loaded runtime is reported as the `whisper-runtime:<name>`
+diagnostic. CUDA runtimes are not bundled. Local measurement: large-v3-turbo on a
+22 s chunk took about 6.8 s on Vulkan (Intel UHD 770 iGPU) and about 6.5 s on
+the CPU (i7-13700K, 8 threads). A dedicated GPU should be much faster, but the
+RTX card was not enumerated during testing, so that is unmeasured. The pinned
+native whisper.cpp gitlink is
 `f24588a272ae8e23280d9c220536437164e6ed28` (MIT, ggml authors).
 Segment timing is retained, words/confidence are not fabricated.
 `WithLanguage` and `WithNoContext` are used; `WithTranslate` is never enabled.
@@ -192,6 +200,12 @@ GGML converted by whisper.cpp contributors:
 | base | 147,951,465 | `60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe` |
 | small | 487,601,967 | `1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b` |
 | large-v3 | 3,095,033,483 | `64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2` |
+| large-v3-turbo (recommended) | 1,624,555,275 | `1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69` |
+
+`LocalWhisperModelCatalog.Recommended` is large-v3-turbo: large-v3's encoder
+with a 4-layer decoder, roughly 5–8× faster at near-equal accuracy. The desktop
+app installs it on request into the sibling `whisper` directory of the
+diarization model directory, and auto-selects it there at startup.
 
 Download origin: `ggerganov/whisper.cpp` on Hugging Face, revision
 `5359861c739e955e79d9a303bcbc70fb988958b1`.
