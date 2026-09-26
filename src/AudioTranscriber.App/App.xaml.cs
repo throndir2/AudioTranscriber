@@ -8,6 +8,16 @@ namespace AudioTranscriber.App;
 
 public partial class App : System.Windows.Application
 {
+    private MainViewModel? mainViewModel;
+    private string[] startupArguments = [];
+    private bool smokeMode = true;
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        if (!smokeMode) mainViewModel?.ApplyPendingUpdate(startupArguments);
+        base.OnExit(e);
+    }
+
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -16,6 +26,7 @@ public partial class App : System.Windows.Application
         try
         {
             options = StartupOptions.Parse(e.Args);
+            startupArguments = e.Args;
             if (options.Smoke && new LibraryStore(options.DataRoot).GetSessions(1).Count != 0)
                 throw new ArgumentException("Smoke mode requires an isolated library with no sessions, so existing queued audio can never upload.");
             controller = new AppController(options.DataRoot);
@@ -27,7 +38,13 @@ public partial class App : System.Windows.Application
             window.Show();
             await viewModel.InitializeAsync();
             await System.Windows.Threading.Dispatcher.Yield(DispatcherPriority.ContextIdle);
-            if (!options.Smoke) _ = viewModel.OfferPrerequisiteInstallAsync();
+            if (!options.Smoke)
+            {
+                mainViewModel = viewModel;
+                smokeMode = false;
+                _ = viewModel.OfferPrerequisiteInstallAsync();
+                viewModel.StartUpdateChecks();
+            }
             if (options.Smoke)
             {
                 for (var tab = 0; tab < window.MainTabs.Items.Count; tab++)

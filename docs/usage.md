@@ -26,6 +26,27 @@ Vulkan is optional; without it Whisper uses the CPU.
 A session whose normalization paused because FFmpeg was missing keeps its original
 recording. Choose **Resume transcription** after fixing the prerequisite to replay it.
 
+## Updates
+
+Release builds update themselves from the repository's **latest GitHub release**
+(drafts and prereleases are ignored). The installed version comes from the
+`BUILD-PROVENANCE.json` shipped in the release ZIP; development builds never
+update. With **Automatically download new releases and install them when the app
+closes** on (the default), the app checks shortly after startup and every six
+hours, downloads `AudioTranscriber-<tag>-win-x64.zip` into
+`%LOCALAPPDATA%\AudioTranscriber.Updates`, and verifies it against both GitHub's
+asset SHA-256 digest and the published `.sha256` file before unpacking.
+
+Nothing is replaced while the app runs. **Restart to update** (top bar, or
+Privacy / models → Updates) closes the app through the normal safe shutdown, then
+a helper waits for it to exit, copies the new files over the application folder,
+and reopens it with the same arguments. Otherwise the update installs the next
+time you close the app. Only the application folder changes; the library,
+recordings, settings, and models are untouched. A folder that needs administrator
+rights (for example under Program Files) triggers a Windows approval prompt.
+The helper logs to `%LOCALAPPDATA%\AudioTranscriber.Updates\update.log`.
+Turn the checkbox off to only check when you choose **Check for updates now**.
+
 ## Start and isolated smoke check
 
 From the worktree, use the pinned SDK and local caches:

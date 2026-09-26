@@ -88,6 +88,12 @@ in `ffmpeg\` with its license and provenance under `licenses\`. Model weights,
 credentials, recordings, databases, and tool caches are not release payloads.
 Framework/runtime JSON and documentation remain included.
 
+The in-app updater relies on this layout: it reads the tag from
+`BUILD-PROVENANCE.json`, looks for `AudioTranscriber-<tag>-win-x64.zip` and its
+`.sha256` on the latest (non-draft, non-prerelease) release, and verifies both
+hashes. Keep the asset names and provenance file stable. The GitHub API it uses
+is unauthenticated, so the repository must be public for updates to be found.
+
 Publishing uses GitHub's supported release API with the job's `GITHUB_TOKEN`:
 `contents: write` is the only permission granted. The token is supplied only to
 the release-inspection/publication steps, not the build command; checkout does
