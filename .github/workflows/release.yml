@@ -47,6 +47,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           INPUT_VERSION: ${{ inputs.version }}
         run: |
+          # Dot-source first: the script's $Tag parameter would otherwise reset $tag (names are case-insensitive).
+          . ./scripts/Release.ps1
           $repo = $env:GITHUB_REPOSITORY
           $tag = "$env:INPUT_VERSION".Trim()
           if (-not $tag) {
@@ -56,7 +58,6 @@ jobs:
             $tag = if ($highest -match '^v(\d+)\.(\d+)\.(\d+)$') { "v$($Matches[1]).$($Matches[2]).$([int]$Matches[3] + 1)" } else { 'v0.1.0' }
           }
           if (-not $tag.StartsWith('v')) { $tag = "v$tag" }
-          . ./scripts/Release.ps1
           [void](Get-ReleaseVersion $tag)
           $existing = gh api "repos/$repo/git/ref/tags/$tag" --jq '.object.sha' 2>$null
           if ("$existing" -notmatch '^[0-9a-f]{40}$') {
