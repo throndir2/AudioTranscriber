@@ -42,7 +42,7 @@ public partial class App : System.Windows.Application
             {
                 mainViewModel = viewModel;
                 smokeMode = false;
-                _ = viewModel.OfferPrerequisiteInstallAsync();
+                _ = viewModel.RunAutomaticSetupAsync();
                 viewModel.StartUpdateChecks();
             }
             if (options.Smoke)

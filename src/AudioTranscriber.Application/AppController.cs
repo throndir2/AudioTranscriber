@@ -31,6 +31,9 @@ public sealed class AppController : IAppController
     private readonly Dictionary<string, ITranscriptionProvider> providerCache = new();
     private readonly System.Diagnostics.Stopwatch recordingClock = new();
     private readonly object settingsGate = new();
+    private readonly object setupGate = new();
+    private Task? modelSetup;
+    private volatile string? setupStatus;
     private readonly FileStream libraryLock;
     private readonly string modelDirectory;
     private readonly string settingsPath;
@@ -148,7 +151,80 @@ public sealed class AppController : IAppController
     {
         if (!File.Exists(path)) throw new FileNotFoundException("Choose an existing local Whisper model.");
         UpdateSettings(current => current with { WhisperModelPath = Path.GetFullPath(path) });
-        Notify("Local Whisper model selected. It will load only when local transcription is requested.");
+        Store.ReleaseProviderJobs("local-whisper");
+        wake.Release();
+        Notify("Local Whisper model selected. Queued local transcription continues with it.");
+    }
+
+    public string? SetupStatus => setupStatus;
+    public bool ModelSetupRunning => modelSetup is { IsCompleted: false };
+
+    /// <summary>Downloads the default speaker and Whisper models when missing, then releases work that waited for them.</summary>
+    public Task EnsureDefaultModelsAsync()
+    {
+        lock (setupGate)
+        {
+            if (modelSetup is { IsCompleted: false } running) return running;
+            return modelSetup = Task.Run(SetupDefaultModelsAsync);
+        }
+    }
+
+    public void RetryBlockedLocalWork()
+    {
+        if (WhisperModelPath is not null) Store.ReleaseProviderJobs("local-whisper");
+        if (DiarizationModelsReady) Store.ReleaseProviderJobs(DiarizationProvider);
+        wake.Release();
+    }
+
+    private async Task SetupDefaultModelsAsync()
+    {
+        var token = shutdown.Token;
+        try
+        {
+            if (!DiarizationModelsReady)
+            {
+                setupStatus = "Downloading the speaker-labeling models (33 MB)…";
+                await DiarizationModels.InstallAsync(modelDirectory, null, token);
+                Notify("Speaker-labeling models downloaded and verified.");
+            }
+            Store.ReleaseProviderJobs(DiarizationProvider);
+            wake.Release();
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { setupStatus = null; return; }
+        catch (Exception error)
+        {
+            Notify("Speaker-labeling models could not be downloaded automatically (" + error.Message +
+                "). Transcription still works; retry from Privacy / models.", true);
+        }
+        try
+        {
+            if (WhisperModelPath is null)
+            {
+                var model = LocalWhisperModelCatalog.Recommended;
+                var totalMiB = model.Bytes / 1048576;
+                setupStatus = $"Downloading the Whisper transcription model ({totalMiB:N0} MiB)…";
+                var path = await VerifiedModelDownload.InstallWhisperAsync(model, WhisperModelDirectory, true,
+                    new InlineProgress<long>(bytes => setupStatus =
+                        $"Downloading the Whisper transcription model: {bytes * 100 / model.Bytes}% ({bytes / 1048576:N0} / {totalMiB:N0} MiB). " +
+                        "Recording works now; queued audio is transcribed as soon as it finishes."), token);
+                if (WhisperModelPath is null) UpdateSettings(current => current with { WhisperModelPath = path });
+                Notify("Whisper large-v3-turbo downloaded and verified. Queued audio is being transcribed.");
+            }
+            Store.ReleaseProviderJobs("local-whisper");
+            wake.Release();
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception error)
+        {
+            Notify("The Whisper model could not be downloaded automatically (" + error.Message +
+                "). Recording still works; install it from Privacy / models and queued audio is transcribed afterward.", true);
+        }
+        finally { setupStatus = null; }
+    }
+
+    private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
     }
 
     public string? WhisperModelPath => settings.WhisperModelPath is { } path && File.Exists(path) ? path : null;
@@ -169,7 +245,9 @@ public sealed class AppController : IAppController
         await DiarizationModels.InstallAsync(modelDirectory,
             new Progress<long>(bytes => progress?.Report($"Downloading/verifying diarization artifact: {bytes:N0} bytes")), cancellationToken);
         progress?.Report("Segmentation and speaker embedding models are installed and hash-verified.");
-        Notify("Speaker models are ready for new audio. Choose Analyze speakers on a session to resume its previously blocked speaker analysis.");
+        Store.ReleaseProviderJobs(DiarizationProvider);
+        wake.Release();
+        Notify("Speaker models are ready. Speaker analysis that was waiting for them continues automatically.");
     }
 
     public async Task<MediaProbeSummary> ProbeMediaAsync(string path, CancellationToken cancellationToken = default)
@@ -732,10 +810,22 @@ public sealed class AppController : IAppController
             {
                 if (!DiarizationModelsReady)
                 {
-                    Store.FailJob(job, "Install the explicitly disclosed local diarization models to assign automatic speakers.", "Blocked");
+                    if (ModelSetupRunning)
+                    {
+                        Store.DeferJob(job, "Waiting for the speaker-labeling models to download.", TimeSpan.FromSeconds(30));
+                        if (DiarizationModelsReady) Store.ReleaseProviderJobs(DiarizationProvider);
+                        return;
+                    }
+                    Store.FailJob(job, "Install the local speaker-labeling models (Privacy / models) to assign automatic speakers.", "Blocked");
                     return;
                 }
                 await ProcessDiarizationAsync(job, chunk, cancellationToken);
+                return;
+            }
+            if (job.ProviderId == "local-whisper" && providerOverride is null && WhisperModelPath is null && ModelSetupRunning)
+            {
+                Store.DeferJob(job, "Waiting for the Whisper model download to finish; transcription starts automatically.", TimeSpan.FromSeconds(60));
+                if (WhisperModelPath is not null) Store.ReleaseProviderJobs("local-whisper");
                 return;
             }
             var provider = CreateProvider(job.ProviderId);
@@ -933,7 +1023,7 @@ public sealed class AppController : IAppController
         {
             if (string.IsNullOrWhiteSpace(settings.WhisperModelPath))
                 throw new TranscriptionProviderException(new(ProviderErrorCode.ModelUnavailable,
-                    "Choose a local Whisper model first. No cloud fallback or model download was performed."));
+                    "No local Whisper model is installed yet. Install the recommended model from Privacy / models; this audio is transcribed automatically afterward. No cloud fallback was used."));
             return new LocalWhisperProvider(settings.WhisperModelPath);
         }
         return new NvidiaRivaProvider(NvidiaModelCatalog.Get(id), credentials, new ConsentReader(Store));
@@ -1022,6 +1112,7 @@ public sealed class AppController : IAppController
                 wake.Release();
                 await scheduler;
                 await Task.WhenAll(mediaTasks.Values);
+                if (modelSetup is { } setup) await Task.WhenAny(setup, Task.Delay(TimeSpan.FromSeconds(10)));
             }
             finally
             {

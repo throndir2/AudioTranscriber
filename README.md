@@ -12,7 +12,7 @@ leaves the original recording on disk.
 | --- | --- |
 | Recording | Visible Start/Stop, selected WASAPI endpoint, separate optional mic, native-format rotated WAVs, explicit gaps/overflow/disk errors |
 | Long imports | FFprobe audio-stream selection, managed original copy, continuous FFmpeg normalization, resumable durable work |
-| Recognition | Three NVIDIA Riva routes; optional local Whisper; source-language ASR, no translation or automatic paid fallback |
+| Recognition | Local Whisper large-v3-turbo by default (auto-downloaded); three optional NVIDIA Riva routes; source-language ASR, no translation or automatic paid fallback |
 | Speakers | Local segmentation plus clean-turn embeddings and persistent IDs; editable names; overlap/short-turn uncertainty |
 | Transcript | SQLite FTS, bounded pages, speaker filtering, corrections separate from source text, timestamp seek and playback |
 | Exchange | Text, JSON, SRT, WebVTT; local voice-tag VTT import; configured delegated Teams transcript retrieval |
@@ -52,8 +52,9 @@ then PATH (including the current registry PATH), then WinGet/Scoop/Chocolatey
 locations. Release ZIPs bundle a pinned, SHA-256-verified LGPL FFmpeg build, so a
 clean PC needs no separate install; for development, `Setup.ps1` warns when FFmpeg
 is not on PATH. Local Whisper also needs the Microsoft Visual C++ 2015-2022 x64
-runtime; the app checks it on startup and offers Microsoft's official installer.
-No model weights, API keys, recording, or cloud upload are required by setup.
+runtime; the app checks it on startup and runs Microsoft's official installer if
+it is missing. Setup itself requires no model weights, API keys, recording, or
+cloud upload; the desktop app downloads its default models on first start.
 
 Targeted validation and direct local SDK invocation:
 
@@ -88,25 +89,30 @@ app closes (or on **Restart to update**). See `docs\usage.md` → Updates.
 
 ## First session
 
-1. Choose the output device you actually hear. Enable a microphone only when you
-   want a separate local microphone track; loopback alone omits it.
-2. Install the explicitly disclosed **33.49 MB** local speaker models if automatic
-   speaker assignment is wanted. They do not require a Hugging Face account.
-   No model is downloaded simply by opening the app.
-3. Select a provider and source language. The hosted catalog initially enables
-   verified English locales; local Whisper accepts its supported language codes.
-   For NVIDIA, supply a memory-only key or explicitly choose Windows-protected
-   persistence, and grant session upload consent only for permitted audio.
-4. Start recording or import a local file. Stop seals original audio and
-   normalization tails; transcription can continue afterward. Pause, Cancel,
-   and Resume control durable processing separately from recording.
-5. Search the transcript, rename speakers, edit corrections, and double-click a
-   row to seek. An unknown or overlapping voice is not a confirmed identity.
+Download the release ZIP, extract it, run `AudioTranscriber.App.exe`, and click
+**Start recording**. Everything has a working default:
 
-Optional local Whisper weights are selected explicitly; sizes and licenses are
-listed by `scripts\Install-WhisperModel.ps1`. Larger models exceed 1 GiB and are
-never implicit downloads. After installation, select the local model file in the
-desktop settings. See `docs\providers.md`.
+- Output: the default Windows output device. Microphone: your default microphone
+  as a separate track when one exists (use headphones to avoid double transcription).
+- Transcription: local Whisper **large-v3-turbo** in English, on the GPU via Vulkan
+  when available. The model (about 1.51 GiB) and the small speaker-labeling models
+  (33.49 MB) download and verify automatically on first start; you can record
+  meanwhile and queued audio is transcribed as soon as they are ready.
+- If the Microsoft Visual C++ runtime is missing, its official installer runs on
+  startup (approve the Windows prompt).
+- No cloud upload, key, or consent is needed. Provider, language, and microphone
+  choices are remembered from your last recording.
+
+Optional: pick an NVIDIA provider, supply a memory-only key (or Windows-protected
+persistence), and grant session upload consent only for permitted audio. Stop
+seals original audio; transcription continues afterward. Pause, Cancel, and
+Resume control durable processing separately from recording. Search the
+transcript, rename speakers, edit corrections, and double-click a row to seek.
+An unknown or overlapping voice is not a confirmed identity.
+
+Other Whisper weights can be installed with `scripts\Install-WhisperModel.ps1`
+(sizes and licenses are listed there) and selected in the desktop settings.
+See `docs\providers.md`.
 
 ## What the initial public comparison showed
 

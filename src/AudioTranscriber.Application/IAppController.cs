@@ -26,6 +26,10 @@ public interface IAppController : IAsyncDisposable
     void ClearNvidiaKey();
     void SetLocalWhisperModel(string path);
     string? WhisperModelPath { get; }
+    string? SetupStatus { get; }
+    bool ModelSetupRunning { get; }
+    Task EnsureDefaultModelsAsync();
+    void RetryBlockedLocalWork();
     Task InstallRecommendedWhisperModelAsync(IProgress<string>? progress = null, CancellationToken cancellationToken = default);
     Task InstallDiarizationModelsAsync(IProgress<string>? progress = null, CancellationToken cancellationToken = default);
     Task<MediaProbeSummary> ProbeMediaAsync(string path, CancellationToken cancellationToken = default);

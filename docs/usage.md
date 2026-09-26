@@ -1,10 +1,15 @@
 # Windows desktop usage
 
-AudioTranscriber is a native .NET 10 x64 WPF application. It does not start audio
-capture, download models, or request a new cloud consent when its window opens.
-Recording and audio import do not require a NVIDIA key. Existing consented jobs
-may be resumed by the application controller; revoke consent or pause jobs when
-you do not want further processing.
+AudioTranscriber is a native .NET 10 x64 WPF application. It works out of the
+box: open it and click **Start recording**. Defaults are the default Windows
+output device, your default microphone as a separate track (when one exists),
+local Whisper, and English. It never starts audio capture or requests cloud
+consent when its window opens. On first start it downloads and verifies the
+default local models (Whisper large-v3-turbo and the small speaker models) in the
+background; you can record meanwhile and queued audio is transcribed once they
+are ready. Recording and audio import do not require a NVIDIA key. Existing
+consented jobs may be resumed by the application controller; revoke consent or
+pause jobs when you do not want further processing.
 
 ## Prerequisites
 
@@ -17,8 +22,8 @@ Scoop, Chocolatey, and `C:\ffmpeg\bin`.
 
 Local Whisper needs Microsoft's Visual C++ 2015-2022 runtime (x64, 14.40 or
 newer). On startup the app checks both. If the runtime is missing or outdated it
-offers to download Microsoft's official installer and run it (Windows asks for
-administrator approval). **Privacy / models → Prerequisites** shows the current
+downloads Microsoft's official installer and runs it automatically (approve the
+Windows administrator prompt). **Privacy / models → Prerequisites** shows the current
 state, **Install Visual C++ runtime…**, and **Re-check prerequisites**. Recording
 and NVIDIA transcription do not need the Visual C++ runtime. A GPU driver with
 Vulkan is optional; without it Whisper uses the CPU.
@@ -79,14 +84,15 @@ provider accuracy, or live Graph access.
 
 ## Record or import
 
-1. Open **Record / import**. Enter a name, select the provider, and enter its
-   supported source language. Nothing silently translates the transcript.
+1. Open **Record / import**. Every field has a default: a timestamped session
+   name, local Whisper, and `en`. Provider, language, and the microphone choice
+   are remembered from your last recording. Nothing silently translates the transcript.
    Examples include Parakeet `en-GB`, Canary `en-US`, and Whisper `en`; consult the
    provider's supported locales for other languages.
 2. Leave cloud consent off for private/local work. Missing local models do not
    enable a NVIDIA provider or change cloud consent.
-3. Select the exact Windows output endpoint. Optionally enable a **separate
-   microphone track**; loopback does not implicitly contain your microphone.
+3. The default Windows output endpoint is preselected. The **separate
+   microphone track** is on by default when a microphone exists; loopback does not implicitly contain your microphone.
    Mic rows that speaker analysis hasn't attributed show as **Me (mic)**, so the
    live file separates your lines from everyone else's. Use headphones:
    there is no echo cancellation, so speaker audio the mic picks up is
@@ -176,24 +182,28 @@ model string property, logs it, exports it, or accepts it as an argument.
 
 ## Local models
 
-**Install small diarization models** explicitly confirms approximately 33.49 MB
-(33,488,994 bytes) of official release artifacts: MIT CNRS 2023 segmentation and
-CC BY 4.0 embedding, with attribution/package notices. Those artifacts do not need
-a Hugging Face token; the original HF segmentation distribution is gated.
-Progress comes from the actual installer. Once ready, **Analyze selected session
-speakers** runs automatic local diarization.
+The small speaker models (approximately 33.49 MB, 33,488,994 bytes of official
+release artifacts: MIT CNRS 2023 segmentation and CC BY 4.0 embedding, with
+attribution/package notices) download automatically on first start, so speakers
+are labeled by default. They do not need a Hugging Face token. If the automatic
+download fails, **Install small diarization models** retries it. Speaker analysis
+that waited for the models continues automatically once they are ready;
+**Analyze selected session speakers** re-runs it for a session.
 
 Short turns, overlap, crowded windows, and character voices can remain uncertain.
 The model's local-window limits do not impose a three-person maximum on an entire
 session, and labels are not verified identities.
 
-Local Whisper's recommended model is **large-v3-turbo** (1,624,555,275 bytes,
-MIT). It's close to large-v3 accuracy at several times the speed. On the
-**Privacy & models** tab, **Install recommended model (large-v3-turbo)…**
-downloads it after a confirmation, verifies its SHA256, and selects it. If
+Local Whisper's default model is **large-v3-turbo** (1,624,555,275 bytes,
+MIT). It's close to large-v3 accuracy at several times the speed. The app
+downloads it automatically on first start, verifies its SHA256, and selects it;
+progress appears under **Start recording**. Local Whisper jobs queued while it
+downloads wait and then run automatically. If the download fails, **Install
+recommended model (large-v3-turbo)…** on **Privacy & models** retries it, and
+blocked audio is transcribed once a model is installed. If
 `ggml-large-v3-turbo.bin` is already in the app's `whisper` model folder, it is
-selected automatically at startup. You can also pick any existing compatible
-model file. Nothing downloads without your click.
+selected at startup without downloading. You can also pick any existing
+compatible model file.
 
 Inference uses the GPU through **Vulkan** when a Vulkan-capable driver is
 present (NVIDIA, AMD, or Intel). A dedicated GPU is preferred over an integrated
@@ -208,8 +218,7 @@ In the checkout, `.\scripts\Install-WhisperModel.ps1 -List` lists pinned model
 sizes, licenses, and SHA256 values without downloading anything. Its installer
 requires explicit license acceptance and acceptance of the exact download byte
 count; see [provider setup](providers.md). After an explicitly requested install,
-select the resulting `.bin` file in the desktop picker. Opening the UI or choosing
-the local provider does not run this installer.
+select the resulting `.bin` file in the desktop picker.
 
 ## WebVTT and configured Teams retrieval
 

@@ -277,6 +277,21 @@ public sealed class LibraryStore
             ("$id", job.Id), ("$lease", job.LeaseToken));
     }
 
+    /// <summary>Returns a claimed job to the queue without counting the claim as an attempt.</summary>
+    public void DeferJob(StoredJob job, string reason, TimeSpan delay) =>
+        Write("""
+            UPDATE jobs SET state='Pending',error=$error,attempts=MAX(0,attempts-1),lease=NULL,lease_until=NULL,next_attempt=$next
+            WHERE id=$id AND state='Running' AND lease=$lease
+            """, ("$error", reason), ("$next", DateTimeOffset.UtcNow.Add(delay).ToUnixTimeMilliseconds()),
+            ("$id", job.Id), ("$lease", job.LeaseToken));
+
+    /// <summary>Makes blocked or deferred jobs for a provider runnable now, across all sessions.</summary>
+    public void ReleaseProviderJobs(string providerId) =>
+        Write("""
+            UPDATE jobs SET state='Pending',next_attempt=0,error=NULL,lease=NULL,lease_until=NULL
+            WHERE provider=$provider AND state IN ('Blocked','Pending','RetryWaiting')
+            """, ("$provider", providerId));
+
     public void PauseJobs(Guid sessionId) =>
         SetProcessingState(sessionId, "Paused",
             "UPDATE jobs SET state='Paused',lease=NULL,lease_until=NULL WHERE session_id=$session AND state IN ('Pending','RetryWaiting','Running')");
