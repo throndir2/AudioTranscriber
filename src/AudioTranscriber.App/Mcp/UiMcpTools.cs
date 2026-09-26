@@ -41,9 +41,10 @@ public sealed class UiMcpTools(string defaultDataRoot, bool dataRootSpecified)
             ("max_rows", "integer", "Rows shown per list/grid (default 15)", false)),
         McpTool.Create("find", "Find elements by name text and/or control type; returns refs usable by other tools.",
             args => McpToolResult.Json(Find(args).Take(args.Int("limit", 20)).Select(Describe)), TargetParameters("limit", "Maximum results (default 20)")),
-        McpTool.Create("click", "Click an element: invokes buttons, selects tabs/list items, toggles checkboxes, expands combos. mouse=true sends a real mouse click.",
-            async (args, token) => McpToolResult.Text(await ClickAsync(Resolve(args), args.Bool("mouse", false), args.Bool("double", false), token)),
-            [.. TargetParameters(), ("mouse", "boolean", "Use a real mouse click at the element center", false), ("double", "boolean", "Double-click (implies mouse)", false)]),
+        McpTool.Create("click", "Click an element: invokes buttons, selects tabs/list items, toggles checkboxes, expands combos. mouse=true sends a real mouse click; right=true a real right-click (opens context menus).",
+            async (args, token) => McpToolResult.Text(await ClickAsync(Resolve(args), args.Bool("mouse", false), args.Bool("double", false), args.Bool("right", false), token)),
+            [.. TargetParameters(), ("mouse", "boolean", "Use a real mouse click at the element center", false), ("double", "boolean", "Double-click (implies mouse)", false),
+                ("right", "boolean", "Right-click (implies mouse); context menus then appear in snapshot", false)]),
         McpTool.Create("set_text", "Set the text of an edit box (ValuePattern).",
             args =>
             {
@@ -369,13 +370,14 @@ public sealed class UiMcpTools(string defaultDataRoot, bool dataRootSpecified)
     private static Task RunUiAsync(Action action, CancellationToken token) =>
         Task.Run(action, token).WaitAsync(TimeSpan.FromSeconds(15), token);
 
-    private async Task<string> ClickAsync(AutomationElement element, bool mouse, bool doubleClick, CancellationToken token)
+    private async Task<string> ClickAsync(AutomationElement element, bool mouse, bool doubleClick, bool right, CancellationToken token)
     {
         if (!element.Current.IsEnabled) throw new InvalidOperationException(Label(element) + " is disabled.");
+        mouse |= doubleClick || right;
         // Win32 dialog buttons (message boxes, file pickers): the managed UIA proxy needs foreground focus, WM_COMMAND does not.
-        if (!mouse && !doubleClick && Native.TryClickDialogButton(new IntPtr(element.Current.NativeWindowHandle)))
+        if (!mouse && Native.TryClickDialogButton(new IntPtr(element.Current.NativeWindowHandle)))
             return "Clicked dialog button " + Label(element);
-        if (!mouse && !doubleClick)
+        if (!mouse)
         {
             if (element.TryGetCurrentPattern(InvokePattern.Pattern, out var invoke))
             {
@@ -403,8 +405,8 @@ public sealed class UiMcpTools(string defaultDataRoot, bool dataRootSpecified)
             : new System.Windows.Point(element.Current.BoundingRectangle.Left + element.Current.BoundingRectangle.Width / 2,
                 element.Current.BoundingRectangle.Top + element.Current.BoundingRectangle.Height / 2);
         Native.Focus(MainWindow());
-        Native.Click((int)point.X, (int)point.Y, doubleClick ? 2 : 1);
-        return $"Mouse-clicked {Label(element)} at {(int)point.X},{(int)point.Y}";
+        Native.Click((int)point.X, (int)point.Y, doubleClick ? 2 : 1, right);
+        return $"Mouse-{(right ? "right-" : "")}clicked {Label(element)} at {(int)point.X},{(int)point.Y}";
     }
 
     private async Task<string> SelectOptionAsync(AutomationElement element, string option, CancellationToken token)
@@ -508,7 +510,7 @@ public sealed class UiMcpTools(string defaultDataRoot, bool dataRootSpecified)
     private string PressKeys(string keys)
     {
         var main = MainWindow();
-        var window = Windows().FirstOrDefault(item => main is null || !Automation.Compare(item, main)) ?? main;
+        var window = Windows().FirstOrDefault(item => (main is null || !Automation.Compare(item, main)) && item.Current.Name.Length > 0) ?? main;
         Native.Focus(window);
         Native.SendChord(keys);
         return $"Sent {keys} to \"{window?.Current.Name}\"";
@@ -601,13 +603,14 @@ public sealed class UiMcpTools(string defaultDataRoot, bool dataRootSpecified)
             Thread.Sleep(100);
         }
 
-        public static void Click(int x, int y, int clicks)
+        public static void Click(int x, int y, int clicks, bool right = false)
         {
             SetCursorPos(x, y);
             Thread.Sleep(50);
             for (var i = 0; i < clicks; i++)
             {
-                Send(Mouse(0x0002), Mouse(0x0004));
+                if (right) Send(Mouse(0x0008), Mouse(0x0010));
+                else Send(Mouse(0x0002), Mouse(0x0004));
                 Thread.Sleep(60);
             }
         }
@@ -624,13 +627,19 @@ public sealed class UiMcpTools(string defaultDataRoot, bool dataRootSpecified)
         {
             "enter" or "return" => 0x0D, "escape" or "esc" => 0x1B, "tab" => 0x09, "space" => 0x20, "backspace" => 0x08,
             "delete" or "del" => 0x2E, "up" => 0x26, "down" => 0x28, "left" => 0x25, "right" => 0x27, "home" => 0x24, "end" => 0x23,
-            "alt" => 0x12, "ctrl" or "control" => 0x11, "shift" => 0x10, "f4" => 0x73, "f5" => 0x74,
+            "alt" => 0x12, "ctrl" or "control" => 0x11, "shift" => 0x10, "f2" => 0x71, "f4" => 0x73, "f5" => 0x74, "f10" => 0x79,
+            "apps" or "menu" => 0x5D,
             var single when single.Length == 1 && char.IsLetterOrDigit(single[0]) => char.ToUpperInvariant(single[0]),
             _ => throw new ArgumentException("Unsupported key: " + key)
         };
 
         private static INPUT Mouse(uint flags) => new() { Type = 0, Data = new() { Mouse = new() { Flags = flags } } };
-        private static INPUT Key(ushort code, bool up) => new() { Type = 1, Data = new() { Keyboard = new() { Key = code, Flags = up ? 2u : 0u } } };
+        // Navigation keys need the extended flag; otherwise Shift+arrow arrives as a NumLock keypad key without Shift.
+        private static INPUT Key(ushort code, bool up) => new()
+        {
+            Type = 1,
+            Data = new() { Keyboard = new() { Key = code, Flags = (up ? 2u : 0u) | (code is >= 0x21 and <= 0x2E or 0x5D ? 1u : 0u) } }
+        };
         private static void Send(params INPUT[] inputs) => SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
 
         public static byte[] CaptureWindow(IntPtr handle, int maxWidth)

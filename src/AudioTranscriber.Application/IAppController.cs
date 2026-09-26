@@ -44,6 +44,12 @@ public interface IAppController : IAsyncDisposable
     Task FetchTeamsTranscriptAsync(Guid sessionId, TeamsTranscriptRequest request,
         Func<DeviceSignInPrompt, Task> showSignIn, CancellationToken cancellationToken = default);
     Task DiarizeSessionAsync(Guid sessionId, CancellationToken cancellationToken = default);
+    // Finds a session speaker by name (case-insensitive) or creates a user-named one.
+    StoredSpeaker GetOrCreateSpeaker(Guid sessionId, string name);
+    // Manually labels rows (null = Unknown). With speaker models installed, the rows' voice is learned in the background.
+    void AssignSpeaker(Guid sessionId, IReadOnlyCollection<string> segmentIds, string? speakerId);
+    // Renames a speaker; a name another speaker already has merges the two. Returns the surviving speaker ID.
+    Task<string> RenameSpeakerAsync(Guid sessionId, string speakerId, string name, CancellationToken cancellationToken = default);
     void PauseTranscription(Guid sessionId);
     void ResumeTranscription(Guid sessionId);
     void CancelTranscription(Guid sessionId);

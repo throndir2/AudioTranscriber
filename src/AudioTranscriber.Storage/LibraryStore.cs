@@ -432,6 +432,85 @@ public sealed class LibraryStore
     public void AssignSpeaker(string id, string? speakerId) =>
         Write("UPDATE segments SET speaker_id=$speaker,uncertain=0,manual_speaker=1 WHERE id=$id", ("$speaker", speakerId), ("$id", id));
 
+    public void AssignSpeaker(Guid sessionId, IReadOnlyCollection<string> segmentIds, string? speakerId)
+    {
+        ArgumentNullException.ThrowIfNull(segmentIds);
+        lock (gate)
+        {
+            using var connection = Open();
+            using var transaction = connection.BeginTransaction();
+            foreach (var id in segmentIds)
+                Execute(connection, "UPDATE segments SET speaker_id=$speaker,uncertain=0,manual_speaker=1 WHERE id=$id AND session_id=$session",
+                    ("$speaker", speakerId), ("$id", id), ("$session", sessionId));
+            transaction.Commit();
+        }
+    }
+
+    public IReadOnlyList<TranscriptRow> GetSegments(Guid sessionId, IReadOnlyCollection<string> segmentIds)
+    {
+        ArgumentNullException.ThrowIfNull(segmentIds);
+        var rows = new List<TranscriptRow>();
+        foreach (var id in segmentIds)
+            rows.AddRange(Read(TranscriptSelect + " WHERE t.session_id=$session AND t.id=$id", ReadTranscript,
+                ("$session", sessionId), ("$id", id)));
+        return rows.OrderBy(row => row.StartTicks).ThenBy(row => row.Id, StringComparer.Ordinal).ToArray();
+    }
+
+    /// <summary>Creates a user-named speaker with no voice profile yet.</summary>
+    public StoredSpeaker CreateSpeaker(Guid sessionId, string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("A speaker name is required.");
+        var speaker = new StoredSpeaker(Guid.NewGuid().ToString("D"), sessionId, name.Trim(), null, "Named by you");
+        UpsertSpeaker(speaker);
+        return speaker;
+    }
+
+    /// <summary>Folds one speaker into another: rows and turns move over, the source row is removed.</summary>
+    public void MergeSpeakers(Guid sessionId, string fromSpeakerId, string intoSpeakerId, string name, string? registryJson)
+    {
+        if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("A speaker name is required.");
+        if (fromSpeakerId == intoSpeakerId) throw new ArgumentException("A speaker cannot be merged into itself.");
+        lock (gate)
+        {
+            using var connection = Open();
+            using var transaction = connection.BeginTransaction();
+            Execute(connection, "UPDATE segments SET speaker_id=$into WHERE session_id=$session AND speaker_id=$from",
+                ("$into", intoSpeakerId), ("$from", fromSpeakerId), ("$session", sessionId));
+            Execute(connection, "UPDATE turns SET speaker_id=$into WHERE speaker_id=$from AND track_id IN (SELECT id FROM tracks WHERE session_id=$session)",
+                ("$into", intoSpeakerId), ("$from", fromSpeakerId), ("$session", sessionId));
+            Execute(connection, "DELETE FROM speakers WHERE session_id=$session AND id=$from", ("$from", fromSpeakerId), ("$session", sessionId));
+            if (Execute(connection, "UPDATE speakers SET name=$name WHERE session_id=$session AND id=$into",
+                    ("$name", name.Trim()), ("$into", intoSpeakerId), ("$session", sessionId)) != 1)
+                throw new InvalidOperationException("The speaker to keep does not exist.");
+            if (registryJson is not null)
+                Execute(connection, "UPDATE sessions SET registry=$registry WHERE id=$session", ("$registry", registryJson), ("$session", sessionId));
+            transaction.Commit();
+        }
+    }
+
+    public IReadOnlyList<StoredJob> GetProviderJobs(Guid sessionId, string providerId) =>
+        Read("SELECT * FROM jobs WHERE session_id=$session AND provider=$provider ORDER BY rowid", ReadJob,
+            ("$session", sessionId), ("$provider", providerId));
+
+    /// <summary>Runs completed jobs again (for example speaker analysis after the voice profiles improved).</summary>
+    public int RequeueJobs(IReadOnlyCollection<Guid> jobIds)
+    {
+        ArgumentNullException.ThrowIfNull(jobIds);
+        lock (gate)
+        {
+            using var connection = Open();
+            using var transaction = connection.BeginTransaction();
+            var count = 0;
+            foreach (var id in jobIds)
+                count += Execute(connection, """
+                    UPDATE jobs SET state='Pending',next_attempt=0,error=NULL,lease=NULL,lease_until=NULL
+                    WHERE id=$id AND state='Succeeded'
+                    """, ("$id", id));
+            transaction.Commit();
+            return count;
+        }
+    }
+
     public void ApplyAutomaticSpeakerAssignments(IReadOnlyList<(string SegmentId, string? SpeakerId, bool Uncertain)> assignments)
     {
         ArgumentNullException.ThrowIfNull(assignments);
@@ -581,7 +660,7 @@ public sealed class LibraryStore
     private static TranscriptRow ReadTranscript(SqliteDataReader r) =>
         new(S(r, "id"), G(r, "session_id"), G(r, "track_id"), L(r, "start_ticks"), L(r, "end_ticks"),
             S(r, "raw_text"), N(r, "correction"), N(r, "speaker_id"), S(r, "speaker_name"), S(r, "granularity"),
-            S(r, "provenance"), L(r, "uncertain") != 0);
+            S(r, "provenance"), L(r, "uncertain") != 0, L(r, "manual_speaker") != 0);
 
     private const string TranscriptSelect = """
         SELECT t.*,coalesce(s.name,CASE WHEN t.speaker_id IS NOT NULL THEN t.speaker_id WHEN (SELECT kind FROM tracks WHERE id=t.track_id)='Microphone' THEN 'Me (mic)' ELSE 'Unknown' END) AS speaker_name

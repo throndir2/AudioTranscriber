@@ -176,6 +176,27 @@ public sealed class DiarizationPersistenceTests : IDisposable
     }
 
     [Fact]
+    public void MergingSpeakersMovesRowsAndTurnsAndDropsTheMergedName()
+    {
+        store.UpsertSpeaker(new("auto", session.Id, "Speaker 2", null, "Synthetic"));
+        var named = store.CreateSpeaker(session.Id, "Zira");
+        store.ImportCue(session.Id, track.Id, "a", new(0, 100, "one", "auto", "Word", "Synthetic"));
+        store.ImportCue(session.Id, track.Id, "b", new(100, 200, "two", null, "Word", "Synthetic"));
+        store.ReplaceTurns(track.Id, 0, 200, [new(track.Id, 0, 100, "auto", false, false)]);
+        store.AssignSpeaker(session.Id, ["b"], named.Id);
+
+        store.MergeSpeakers(session.Id, "auto", named.Id, "Zira", null);
+
+        var rows = store.GetTranscriptPage(session.Id).ToDictionary(row => row.Id);
+        Assert.Equal(named.Id, rows["a"].SpeakerId);
+        Assert.False(rows["a"].ManualSpeaker);
+        Assert.True(rows["b"].ManualSpeaker);
+        Assert.Equal("Zira", rows["a"].SpeakerName);
+        Assert.Equal(named.Id, Assert.Single(store.GetTurns(track.Id, 0, 200)).SpeakerId);
+        Assert.Equal("Zira", Assert.Single(store.GetSpeakers(session.Id)).Name);
+    }
+
+    [Fact]
     public void AutomaticAssignmentsPreserveManualNamesAndExplicitUnknownAfterRestart()
     {
         foreach (var id in new[] { "manual", "automatic", "unknown" })

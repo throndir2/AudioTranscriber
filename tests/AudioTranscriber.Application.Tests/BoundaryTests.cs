@@ -34,6 +34,20 @@ public sealed class BoundaryTests
     }
 
     [Fact]
+    public void GrazingNeighbourTurnDoesNotHideTheDominantSpeaker()
+    {
+        var track = Guid.NewGuid();
+        long S(double seconds) => (long)(seconds * TimeSpan.TicksPerSecond);
+        var turns = new StoredTurn[]
+        {
+            new(track, S(24.03), S(27.84), "zira", false, false),
+            new(track, S(29.36), S(34.85), "david", false, false)
+        };
+        Assert.Equal(("zira", false), TranscriptMerger.MatchSpeaker(S(24.0), S(29.46), turns));
+        Assert.Equal((null, true), TranscriptMerger.MatchSpeaker(S(26.0), S(32.0), turns));
+    }
+
+    [Fact]
     public void CoarseResultsCannotSilentlyDeduplicateOverlap()
     {
         Assert.Throws<InvalidDataException>(() => TranscriptMerger.MergeSegments(

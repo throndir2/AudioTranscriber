@@ -84,14 +84,16 @@ public static class CoreRegistrySerializer
     }
 
     internal static SpeakerRegistrySnapshot ToSnapshot(SpeakerRegistry state, SpeakerRegistrySnapshot previous,
-        DiarizationRequest request, IReadOnlyList<SpeakerEvidence> evidence, IReadOnlyList<SpeakerMatch> matches)
+        DiarizationRequest request, IReadOnlyList<SpeakerEvidence> evidence, IReadOnlyList<SpeakerMatch> matches,
+        Func<int, SpeakerIdentity?>? newIdentity = null)
     {
         var entries = new List<SpeakerRegistryEntry>();
         foreach (var profile in state.Speakers)
         {
             var number = int.Parse(profile.SpeakerId.AsSpan(7));
             var old = previous.Speakers.FirstOrDefault(e => e.Identity.Number == number);
-            var identity = old?.Identity ?? new SpeakerIdentity(Guid.NewGuid(), request.SessionId, number, $"Speaker {number}");
+            var identity = old?.Identity ?? newIdentity?.Invoke(number)
+                ?? new SpeakerIdentity(Guid.NewGuid(), request.SessionId, number, $"Speaker {number}");
             var duration = evidence.Where(e => matches.Any(m => m.LocalSpeaker == e.LocalSpeaker && m.SpeakerId == profile.SpeakerId))
                 .Sum(e => e.CleanSpeechSeconds);
             var representatives = profile.Representatives.Select(vector =>

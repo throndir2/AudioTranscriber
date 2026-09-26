@@ -72,13 +72,21 @@ public static class TranscriptMerger
     public static (string? Speaker, bool Uncertain) MatchSpeaker(long start, long end, IReadOnlyList<StoredTurn> turns)
     {
         var evidenceEnd = Math.Max(end, start + 1);
-        var intersecting = turns.Where(turn => turn.StartTicks < evidenceEnd && turn.EndTicks > start).ToArray();
-        if (intersecting.Length == 0 || intersecting.Any(turn => turn.Overlap || turn.Uncertain || turn.SpeakerId is null))
-            return (null, true);
-        var speakers = intersecting.Select(turn => turn.SpeakerId).Distinct().ToArray();
-        if (speakers.Length != 1) return (null, true);
-        var covered = intersecting.Sum(turn => Math.Max(0, Math.Min(evidenceEnd, turn.EndTicks) - Math.Max(start, turn.StartTicks)));
-        return covered >= (evidenceEnd - start) * 0.6 ? (speakers[0], false) : (null, true);
+        long unknown = 0;
+        var bySpeaker = new Dictionary<string, long>(StringComparer.Ordinal);
+        foreach (var turn in turns)
+        {
+            var covered = Math.Min(evidenceEnd, turn.EndTicks) - Math.Max(start, turn.StartTicks);
+            if (covered <= 0) continue;
+            if (turn.Overlap || turn.Uncertain || turn.SpeakerId is null) unknown += covered;
+            else bySpeaker[turn.SpeakerId] = bySpeaker.GetValueOrDefault(turn.SpeakerId) + covered;
+        }
+        if (bySpeaker.Count == 0) return (null, true);
+        var (speaker, dominant) = bySpeaker.MaxBy(pair => pair.Value);
+        var speech = unknown + bySpeaker.Values.Sum();
+        // Recognizer segment edges often graze a neighbour's turn by a few frames. Attribute the line when one
+        // speaker clearly dominates its detected speech; overlap, unknown or mixed speech keeps it unattributed.
+        return dominant >= speech * 0.8 && dominant >= (evidenceEnd - start) * 0.4 ? (speaker, false) : (null, true);
     }
 
     private static void ValidateTimes(RecognitionWindow window, long startMilliseconds, long endMilliseconds)

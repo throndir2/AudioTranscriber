@@ -75,6 +75,25 @@ public sealed class DesktopDialogs(Func<Window> owner)
         MessageBox.Show(owner(), message, title, MessageBoxButton.YesNo, MessageBoxImage.Question,
             MessageBoxResult.No) == MessageBoxResult.Yes;
 
+    /// <summary>Asks for a speaker name; existing names are offered but any text is accepted.</summary>
+    public string? PromptSpeakerName(string title, string message, string initial, IEnumerable<string> suggestions, string affirmative)
+    {
+        var window = Dialog(title, 460);
+        var panel = new StackPanel { Margin = new Thickness(22) };
+        panel.Children.Add(Help(message));
+        var input = new ComboBox { IsEditable = true, ItemsSource = suggestions.ToArray(), Text = initial, IsTextSearchEnabled = false };
+        System.Windows.Automation.AutomationProperties.SetName(input, "Speaker name");
+        panel.Children.Add(input);
+        panel.Children.Add(Buttons(window, affirmative, () => !string.IsNullOrWhiteSpace(input.Text)));
+        window.Content = panel;
+        window.Loaded += (_, _) =>
+        {
+            input.Focus();
+            (input.Template.FindName("PART_EditableTextBox", input) as TextBox)?.SelectAll();
+        };
+        return window.ShowDialog() == true ? input.Text.Trim() : null;
+    }
+
     public MediaStreamChoice? ChooseStream(MediaProbeSummary probe)
     {
         var window = Dialog("Choose the audio stream", 620);

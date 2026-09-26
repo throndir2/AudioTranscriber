@@ -117,7 +117,9 @@ Optional: pick an NVIDIA provider, supply a memory-only key (or Windows-protecte
 persistence), and grant session upload consent only for permitted audio. Stop
 seals original audio; transcription continues afterward. Pause, Cancel, and
 Resume control durable processing separately from recording. Search the
-transcript, rename speakers, edit corrections, and double-click a row to seek.
+transcript, right-click lines to set who is speaking (labeled lines teach the voice
+model, and giving two speakers the same name merges them), edit corrections, and
+double-click a row to play it.
 An unknown or overlapping voice is not a confirmed identity.
 
 Other Whisper weights can be installed with `scripts\Install-WhisperModel.ps1`

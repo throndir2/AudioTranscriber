@@ -7,7 +7,7 @@ namespace AudioTranscriber.Diarization;
 
 /// <summary>In-process engine for the isolated worker and tests, not UI-process inference.</summary>
 public sealed class SherpaDiarizationService(DiarizationModelPaths models, SpeakerMatchingOptions? matchingOptions = null)
-    : IDiarizationService
+    : IDiarizationService, ISpeakerEnrollmentService
 {
     public const int MaximumSeconds = 60;
     public const string AlgorithmVersion = "sherpa-1.13.8-clean-registry-v1";
@@ -27,71 +27,9 @@ public sealed class SherpaDiarizationService(DiarizationModelPaths models, Speak
             ObjectDisposedException.ThrowIf(disposed, this);
             options.Validate();
             var state = CoreRegistrySerializer.ToState(registry);
-            if (diarizer is null)
-            {
-                await DiarizationModels.VerifyAsync(models, cancellationToken);
-                cancellationToken.ThrowIfCancellationRequested();
-                var config = new OfflineSpeakerDiarizationConfig();
-                config.Segmentation.Pyannote.Model = Path.GetFullPath(models.SegmentationModelPath);
-                config.Segmentation.NumThreads = 2;
-                config.Embedding.Model = Path.GetFullPath(models.EmbeddingModelPath);
-                config.Embedding.NumThreads = 2;
-                config.Clustering.NumClusters = -1;
-                config.Clustering.Threshold = 0.5f;
-                diarizer = new OfflineSpeakerDiarization(config);
-                extractor = new SpeakerEmbeddingExtractor(config.Embedding);
-                if (diarizer.SampleRate != 16000 || extractor.Dim != Embeddings.Dimension)
-                    throw new InvalidDataException("Native diarization model format is incompatible.");
-            }
-            var samples = await ReadSamplesAsync(request, cancellationToken);
-            cancellationToken.ThrowIfCancellationRequested();
-            // Sherpa skips clustering at <=10 seconds. Silence-pad short tails to a bounded 30-second call.
-            var input = samples.Length < 30 * 16000 ? new float[30 * 16000] : samples;
-            if (!ReferenceEquals(input, samples)) samples.CopyTo(input, 0);
-            var nativeTurns = diarizer.Process(input);
-            cancellationToken.ThrowIfCancellationRequested();
-            if (nativeTurns.Length > 2048) throw new InvalidDataException("Native diarization returned too many turns.");
-            var duration = request.SampleCount / 16000.0;
-            if (nativeTurns.Any(t => !float.IsFinite(t.Start) || !float.IsFinite(t.End) || t.Speaker < 0))
-                throw new InvalidDataException("Native diarization returned invalid intervals.");
-            var turns = nativeTurns.Select(t => new LocalSpeakerTurn(Math.Max(0, t.Start), Math.Min(duration, t.End), t.Speaker))
-                .Where(t => t.EndSeconds > t.StartSeconds).Distinct().OrderBy(t => t.StartSeconds).ToArray();
-            var evidence = new List<SpeakerEvidence>();
+            var (samples, turns) = await SegmentAsync(request, cancellationToken);
             var diagnostics = new List<string> { AlgorithmVersion };
-            foreach (var local in turns.Select(t => t.LocalSpeaker).Distinct().Order())
-            {
-                var vectors = new List<float[]>();
-                double seconds = 0;
-                var evidenceStart = double.PositiveInfinity;
-                double evidenceEnd = 0;
-                foreach (var clean in CleanSpeech.Intervals(turns, local).Take(3))
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    var start = (int)Math.Ceiling(clean.StartSeconds * 16000);
-                    var end = Math.Min(samples.Length, Math.Min((int)Math.Floor(clean.EndSeconds * 16000), start + 8 * 16000));
-                    if (end - start < 1.5 * 16000) continue;
-                    var isolated = samples.AsSpan(start, end - start).ToArray();
-                    using var stream = extractor!.CreateStream();
-                    stream.AcceptWaveform(16000, isolated);
-                    stream.InputFinished();
-                    if (!extractor.IsReady(stream)) continue;
-                    vectors.Add(Embeddings.Normalize(extractor.Compute(stream)));
-                    seconds += isolated.Length / 16000.0;
-                    evidenceStart = Math.Min(evidenceStart, start / 16000.0);
-                    evidenceEnd = Math.Max(evidenceEnd, end / 16000.0);
-                }
-                if (seconds < options.MinimumCleanSpeechSeconds || vectors.Count == 0) continue;
-                // A locally mixed cluster must not poison the persistent centroid.
-                if (vectors.Any(a => vectors.Any(b => Embeddings.Cosine(a, b) < options.NewSpeakerThreshold)))
-                {
-                    diagnostics.Add($"LocalSpeaker{local}:InconsistentCleanEvidence");
-                    continue;
-                }
-                var average = new float[Embeddings.Dimension];
-                foreach (var vector in vectors)
-                    for (var i = 0; i < average.Length; i++) average[i] += vector[i];
-                evidence.Add(new(local, Embeddings.Normalize(average), seconds, evidenceStart, evidenceEnd));
-            }
+            var evidence = ExtractEvidence(samples, turns, diagnostics, cancellationToken);
             var matches = new SpeakerReconciler(options).Reconcile(state, turns, evidence, cancellationToken);
             var snapshot = CoreRegistrySerializer.ToSnapshot(state, registry, request, evidence, matches);
             var coreStart = request.CoreStartSample / 16000.0;
@@ -132,6 +70,164 @@ public sealed class SherpaDiarizationService(DiarizationModelPaths models, Speak
             return new(output.OrderBy(t => t.StartTicks).ThenBy(t => t.EndTicks).ToImmutableArray(), snapshot, diagnostics.ToImmutableArray());
         }
         finally { gate.Release(); }
+    }
+
+    /// <summary>Adds the dominant clean voice in the request audio to the named identity (created if missing).</summary>
+    public async Task<DiarizationResult> EnrollAsync(DiarizationRequest request, SpeakerRegistrySnapshot registry,
+        SpeakerEnrollment enrollment, CancellationToken cancellationToken = default)
+    {
+        ValidateRequest(request, registry);
+        ValidateEnrollment(enrollment);
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            options.Validate();
+            var state = CoreRegistrySerializer.ToState(registry);
+            var (samples, turns) = await SegmentAsync(request, cancellationToken);
+            var diagnostics = new List<string> { AlgorithmVersion, "UserEnrollment" };
+            var best = ExtractEvidence(samples, turns, diagnostics, cancellationToken)
+                .OrderByDescending(e => e.CleanSpeechSeconds).FirstOrDefault();
+            if (best is null)
+            {
+                diagnostics.Add("EnrollmentSkipped:InsufficientCleanSpeech");
+                return new([], registry, diagnostics.ToImmutableArray());
+            }
+            var vector = best.Embedding;
+            var target = registry.Speakers.FirstOrDefault(e => e.Identity.Id == enrollment.SpeakerId);
+            var targetProfile = target is null ? null : state.ResolveAlias($"Speaker{target.Identity.Number}");
+            // Report another profile that already confidently owns this voice, so the caller can offer a merge.
+            var mergedTargets = state.Aliases.Keys.Select(state.ResolveAlias).ToHashSet();
+            var ranked = state.Speakers.Where(p => p.SpeakerId != targetProfile).Select(p => (p.SpeakerId, Score:
+                    mergedTargets.Contains(p.SpeakerId)
+                        ? p.Representatives.Max(r => Embeddings.Cosine(r, vector))
+                        : (Embeddings.Cosine(p.Centroid, vector) + p.Representatives.Max(r => Embeddings.Cosine(r, vector))) / 2))
+                .OrderByDescending(p => p.Score).ToArray();
+            if (ranked.Length > 0 && ranked[0].Score >= options.MatchThreshold &&
+                ranked[0].Score - (ranked.Length > 1 ? ranked[1].Score : -1) >= options.RunnerUpMargin)
+            {
+                var similarNumber = int.Parse(ranked[0].SpeakerId.AsSpan(7));
+                var similar = registry.Speakers.First(e => e.Identity.Number == similarNumber).Identity;
+                diagnostics.Add($"SimilarTo:{similar.Id:D}:{ranked[0].Score.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture)}");
+            }
+            SpeakerIdentity? created = null;
+            string profileId;
+            if (target is not null)
+            {
+                profileId = targetProfile!;
+                var index = state.Speakers.FindIndex(p => p.SpeakerId == profileId);
+                var profile = state.Speakers[index];
+                var weight = Math.Min(profile.ObservationCount, 20);
+                state.Speakers[index] = profile with
+                {
+                    Centroid = Embeddings.Normalize(profile.Centroid.Zip(vector, (a, b) => a * weight + b).ToArray()),
+                    Representatives = Embeddings.SelectRepresentatives(profile.Representatives.Append(vector)),
+                    ObservationCount = Math.Min(1_000_000, profile.ObservationCount + 1)
+                };
+            }
+            else
+            {
+                if (state.Speakers.Count + state.Aliases.Count >= SpeakerRegistry.MaximumSpeakers || state.NextSpeakerNumber >= 1_000_000)
+                {
+                    diagnostics.Add("EnrollmentSkipped:RegistryFull");
+                    return new([], registry, diagnostics.ToImmutableArray());
+                }
+                var number = state.NextSpeakerNumber++;
+                profileId = $"Speaker{number}";
+                state.Speakers.Add(new(profileId, vector, [vector.ToArray()], 1));
+                created = new SpeakerIdentity(enrollment.SpeakerId, request.SessionId, number, enrollment.DisplayName.Trim(),
+                    Provenance: "User-labeled voice sample");
+            }
+            state.Revision++;
+            var snapshot = CoreRegistrySerializer.ToSnapshot(state, registry, request, [best],
+                [new SpeakerMatch(best.LocalSpeaker, profileId, null, "UserEnrolled")],
+                number => created is not null && created.Number == number ? created : null);
+            diagnostics.Add($"Enrolled:{best.CleanSpeechSeconds:0.0}s");
+            return new([], snapshot, diagnostics.ToImmutableArray());
+        }
+        finally { gate.Release(); }
+    }
+
+    public static void ValidateEnrollment(SpeakerEnrollment enrollment)
+    {
+        if (enrollment is null || enrollment.SpeakerId == Guid.Empty || string.IsNullOrWhiteSpace(enrollment.DisplayName) ||
+            enrollment.DisplayName.Length > 1024)
+            throw new ArgumentException("Speaker enrollment requires a speaker ID and display name.");
+    }
+
+    private async Task<(float[] Samples, LocalSpeakerTurn[] Turns)> SegmentAsync(DiarizationRequest request, CancellationToken cancellationToken)
+    {
+        if (diarizer is null)
+        {
+            await DiarizationModels.VerifyAsync(models, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            var config = new OfflineSpeakerDiarizationConfig();
+            config.Segmentation.Pyannote.Model = Path.GetFullPath(models.SegmentationModelPath);
+            config.Segmentation.NumThreads = 2;
+            config.Embedding.Model = Path.GetFullPath(models.EmbeddingModelPath);
+            config.Embedding.NumThreads = 2;
+            config.Clustering.NumClusters = -1;
+            config.Clustering.Threshold = 0.5f;
+            diarizer = new OfflineSpeakerDiarization(config);
+            extractor = new SpeakerEmbeddingExtractor(config.Embedding);
+            if (diarizer.SampleRate != 16000 || extractor.Dim != Embeddings.Dimension)
+                throw new InvalidDataException("Native diarization model format is incompatible.");
+        }
+        var samples = await ReadSamplesAsync(request, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        // Sherpa skips clustering at <=10 seconds. Silence-pad short tails to a bounded 30-second call.
+        var input = samples.Length < 30 * 16000 ? new float[30 * 16000] : samples;
+        if (!ReferenceEquals(input, samples)) samples.CopyTo(input, 0);
+        var nativeTurns = diarizer.Process(input);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (nativeTurns.Length > 2048) throw new InvalidDataException("Native diarization returned too many turns.");
+        var duration = request.SampleCount / 16000.0;
+        if (nativeTurns.Any(t => !float.IsFinite(t.Start) || !float.IsFinite(t.End) || t.Speaker < 0))
+            throw new InvalidDataException("Native diarization returned invalid intervals.");
+        var turns = nativeTurns.Select(t => new LocalSpeakerTurn(Math.Max(0, t.Start), Math.Min(duration, t.End), t.Speaker))
+            .Where(t => t.EndSeconds > t.StartSeconds).Distinct().OrderBy(t => t.StartSeconds).ToArray();
+        return (samples, turns);
+    }
+
+    private List<SpeakerEvidence> ExtractEvidence(float[] samples, LocalSpeakerTurn[] turns, List<string> diagnostics,
+        CancellationToken cancellationToken)
+    {
+        var evidence = new List<SpeakerEvidence>();
+        foreach (var local in turns.Select(t => t.LocalSpeaker).Distinct().Order())
+        {
+            var vectors = new List<float[]>();
+            double seconds = 0;
+            var evidenceStart = double.PositiveInfinity;
+            double evidenceEnd = 0;
+            foreach (var clean in CleanSpeech.Intervals(turns, local).Take(3))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var start = (int)Math.Ceiling(clean.StartSeconds * 16000);
+                var end = Math.Min(samples.Length, Math.Min((int)Math.Floor(clean.EndSeconds * 16000), start + 8 * 16000));
+                if (end - start < 1.5 * 16000) continue;
+                var isolated = samples.AsSpan(start, end - start).ToArray();
+                using var stream = extractor!.CreateStream();
+                stream.AcceptWaveform(16000, isolated);
+                stream.InputFinished();
+                if (!extractor.IsReady(stream)) continue;
+                vectors.Add(Embeddings.Normalize(extractor.Compute(stream)));
+                seconds += isolated.Length / 16000.0;
+                evidenceStart = Math.Min(evidenceStart, start / 16000.0);
+                evidenceEnd = Math.Max(evidenceEnd, end / 16000.0);
+            }
+            if (seconds < options.MinimumCleanSpeechSeconds || vectors.Count == 0) continue;
+            // A locally mixed cluster must not poison the persistent centroid.
+            if (vectors.Any(a => vectors.Any(b => Embeddings.Cosine(a, b) < options.NewSpeakerThreshold)))
+            {
+                diagnostics.Add($"LocalSpeaker{local}:InconsistentCleanEvidence");
+                continue;
+            }
+            var average = new float[Embeddings.Dimension];
+            foreach (var vector in vectors)
+                for (var i = 0; i < average.Length; i++) average[i] += vector[i];
+            evidence.Add(new(local, Embeddings.Normalize(average), seconds, evidenceStart, evidenceEnd));
+        }
+        return evidence;
     }
 
     public static void ValidateRequest(DiarizationRequest request, SpeakerRegistrySnapshot registry)

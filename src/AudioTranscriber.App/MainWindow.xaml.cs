@@ -21,6 +21,7 @@ public partial class MainWindow : Window
         this.viewModel = viewModel;
         DataContext = viewModel;
         Closing += OnClosing;
+        viewModel.TranscriptReloaded += RestoreTranscriptSelection;
         viewModel.ActivityLog.CollectionChanged += (_, e) =>
         {
             // Defer until the ListBox has processed the change; scrolling inside the event corrupts its generator.
@@ -52,6 +53,84 @@ public partial class MainWindow : Window
                 ? VisualTreeHelper.GetParent(source) : LogicalTreeHelper.GetParent(source);
         if (source is DataGridRow && viewModel.PlayRowCommand.CanExecute(null))
             viewModel.PlayRowCommand.Execute(null);
+    }
+
+    private void TranscriptSelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        viewModel.UpdateSelection(TranscriptGrid.SelectedItems.OfType<TranscriptItem>());
+
+    // Page reloads rebuild the rows; put a multi-line selection back.
+    private void RestoreTranscriptSelection(bool scrollToTop)
+    {
+        var ids = viewModel.SelectedRows.Select(row => row.Row.Id).ToHashSet();
+        viewModel.RestoringSelection = true;
+        try
+        {
+            foreach (var item in viewModel.Transcript)
+                if (ids.Contains(item.Row.Id) && !TranscriptGrid.SelectedItems.Contains(item)) TranscriptGrid.SelectedItems.Add(item);
+        }
+        finally { viewModel.RestoringSelection = false; }
+        viewModel.UpdateSelection(TranscriptGrid.SelectedItems.OfType<TranscriptItem>());
+        if (scrollToTop && viewModel.Transcript.Count > 0)
+            Dispatcher.BeginInvoke(() =>
+            {
+                if (viewModel.Transcript.Count > 0) TranscriptGrid.ScrollIntoView(viewModel.Transcript[0]);
+            }, System.Windows.Threading.DispatcherPriority.Background);
+    }
+
+    // Right-clicking a line outside the selection selects just that line, like Explorer.
+    private void TranscriptRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        var source = e.OriginalSource as DependencyObject;
+        while (source is not null && source is not DataGridRow)
+            source = source is Visual or System.Windows.Media.Media3D.Visual3D
+                ? VisualTreeHelper.GetParent(source) : LogicalTreeHelper.GetParent(source);
+        if (source is DataGridRow { IsSelected: false } row)
+        {
+            TranscriptGrid.SelectedItems.Clear();
+            row.IsSelected = true;
+            row.Focus();
+        }
+    }
+
+    private void TranscriptContextMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        var menu = TranscriptGrid.ContextMenu;
+        menu.Items.Clear();
+        var rows = viewModel.SelectedRows;
+        if (rows.Count == 0) { e.Handled = true; return; }
+        var ids = rows.Select(row => row.Row.SpeakerId).Distinct().ToArray();
+        var shared = ids.Length == 1 ? ids[0] : null;
+        var count = rows.Count == 1 ? "this line" : $"{rows.Count} lines";
+
+        var set = new MenuItem { Header = $"Set speaker for {count}" };
+        foreach (var speaker in viewModel.Speakers.GroupBy(x => x.Name.Trim(), StringComparer.OrdinalIgnoreCase).Select(group => group.First())
+                     .OrderBy(x => x.Name, StringComparer.CurrentCultureIgnoreCase))
+        {
+            var id = speaker.Id;
+            set.Items.Add(Item(speaker.Name, () => viewModel.AssignSelection(id, null), isChecked: ids.Length == 1 && shared == id));
+        }
+        if (set.Items.Count > 0) set.Items.Add(new Separator());
+        set.Items.Add(Item("New speaker…", viewModel.AssignSelectionToNewSpeaker));
+        set.Items.Add(Item("Unknown / unassigned", () => viewModel.AssignSelection(null, null)));
+        menu.Items.Add(set);
+        menu.Items.Add(Item("Type a speaker name…", viewModel.AssignSelectionToNewSpeaker));
+        if (shared is not null && viewModel.Speakers.FirstOrDefault(x => x.Id == shared) is { } current)
+            menu.Items.Add(Item($"Rename \"{current.Name}\" everywhere…", () => _ = viewModel.RenameSpeakerInteractiveAsync(current.Id)));
+        menu.Items.Add(new Separator());
+        menu.Items.Add(Item("▶ Play line", viewModel.PlaySelectedRow, enabled: rows.Count == 1));
+        menu.Items.Add(Item("Edit text", () =>
+        {
+            SelectedLineTab.IsSelected = true;
+            Dispatcher.BeginInvoke(() => { CorrectionInput.Focus(); CorrectionInput.SelectAll(); }, System.Windows.Threading.DispatcherPriority.Input);
+        }, enabled: rows.Count == 1));
+    }
+
+    private static MenuItem Item(string header, Action action, bool isChecked = false, bool enabled = true)
+    {
+        // Underscores in speaker names are literal, not access keys.
+        var item = new MenuItem { Header = header.Replace("_", "__"), IsChecked = isChecked, IsEnabled = enabled };
+        item.Click += (_, _) => action();
+        return item;
     }
 
     private async void OnClosing(object? sender, CancelEventArgs e)

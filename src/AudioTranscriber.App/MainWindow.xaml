@@ -9,7 +9,7 @@
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
-        <Border Background="#172C40" Padding="24,13">
+        <Border Background="#172C40" Padding="20,8">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
@@ -17,10 +17,10 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <StackPanel>
-                    <TextBlock Text="AudioTranscriber" FontSize="25" FontWeight="SemiBold" Foreground="White" />
-                    <TextBlock Text="Originals first. Source-language transcripts. Explicit cloud consent." Foreground="#D9E5ED" Margin="0,3,0,0" />
-                </StackPanel>
+                <WrapPanel VerticalAlignment="Center">
+                    <TextBlock Text="AudioTranscriber" FontSize="20" FontWeight="SemiBold" Foreground="White" Margin="0,0,14,0" />
+                    <TextBlock Text="Originals first. Source-language transcripts. Explicit cloud consent." Foreground="#D9E5ED" VerticalAlignment="Bottom" Margin="0,0,0,2" />
+                </WrapPanel>
                 <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="16,0">
                     <TextBlock Text="{Binding CaptureState}" FontWeight="Bold" Foreground="White" AutomationProperties.LiveSetting="Polite" />
                     <TextBlock Text="{Binding RecordingSession}" Foreground="#D9E5ED" MaxWidth="360" TextTrimming="CharacterEllipsis" />
@@ -33,10 +33,10 @@
                         ToolTip="A verified update is downloaded. Closes the app (finishing any recording safely), installs the update, and reopens it. Otherwise it installs the next time you close the app." />
             </Grid>
         </Border>
-        <Grid Grid.Row="1" Margin="16">
+        <Grid Grid.Row="1" Margin="12">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="240" />
-                <ColumnDefinition Width="14" />
+                <ColumnDefinition Width="12" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
             <Border Background="White" CornerRadius="8" BorderBrush="#D6E0E8" BorderThickness="1" Padding="12">
@@ -74,10 +74,18 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
-                <StackPanel Margin="2,0,0,12">
-                    <TextBlock Text="{Binding SelectedSession.Name, TargetNullValue=Make room for a clearer transcript}" FontSize="23" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                    <TextBlock Text="{Binding SessionSummary}" Foreground="{StaticResource Muted}" Margin="0,4,0,0" />
-                    <TextBlock Text="{Binding SessionError}" Foreground="#A52232" TextWrapping="Wrap" Margin="0,4,0,0" AutomationProperties.LiveSetting="Polite" />
+                <StackPanel Margin="2,0,0,8">
+                    <TextBlock Text="{Binding SelectedSession.Name, TargetNullValue=Make room for a clearer transcript}" FontSize="20" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding SessionSummary}" Foreground="{StaticResource Muted}" Margin="0,2,0,0" />
+                    <TextBlock Text="{Binding SessionError}" Foreground="#A52232" TextWrapping="Wrap" Margin="0,4,0,0" AutomationProperties.LiveSetting="Polite">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                <Style.Triggers>
+                                    <Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed" /></Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
                 </StackPanel>
                 <TabControl x:Name="MainTabs" Grid.Row="1" Background="White" BorderBrush="#D6E0E8">
                     <TabItem Header="_Record / import">
@@ -198,104 +206,137 @@
                         </ScrollViewer>
                     </TabItem>
                     <TabItem Header="_Transcript">
-                        <Grid Margin="16">
+                        <Grid Margin="12,10">
+                            <Grid.Resources>
+                                <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                    <Setter Property="Padding" Value="10,4" />
+                                    <Setter Property="MinHeight" Value="30" />
+                                    <Setter Property="Margin" Value="0,2,6,2" />
+                                </Style>
+                                <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+                                    <Setter Property="MinHeight" Value="30" />
+                                    <Setter Property="Padding" Value="6,3" />
+                                    <Setter Property="Margin" Value="0,2,6,2" />
+                                </Style>
+                                <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
+                                    <Setter Property="MinHeight" Value="30" />
+                                    <Setter Property="Padding" Value="6,3" />
+                                    <Setter Property="Margin" Value="0,2,6,2" />
+                                </Style>
+                                <Style TargetType="TabItem" BasedOn="{StaticResource {x:Type TabItem}}">
+                                    <Setter Property="Padding" Value="10,3" />
+                                </Style>
+                            </Grid.Resources>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
-                                <RowDefinition Height="*" MinHeight="80" />
+                                <RowDefinition Height="2*" MinHeight="90" />
                                 <RowDefinition Height="Auto" />
-                                <RowDefinition Height="180" />
+                                <RowDefinition Height="*" MinHeight="112" />
                             </Grid.RowDefinitions>
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" /><ColumnDefinition Width="180" /><ColumnDefinition Width="130" /><ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel>
-                                    <TextBlock Text="Search effective text" />
-                                    <TextBox Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Search transcript text">
-                                        <TextBox.InputBindings><KeyBinding Key="Return" Command="{Binding SearchCommand}" /></TextBox.InputBindings>
-                                    </TextBox>
-                                </StackPanel>
-                                <StackPanel Grid.Column="1">
-                                    <TextBlock Text="Speaker filter" />
-                                    <ComboBox ItemsSource="{Binding SpeakerFilters}" DisplayMemberPath="Name" SelectedItem="{Binding SpeakerFilter}" AutomationProperties.Name="Transcript speaker filter" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="2">
-                                    <TextBlock Text="Jump hh:mm:ss" />
-                                    <TextBox Text="{Binding Seek, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Jump to transcript timestamp" />
-                                </StackPanel>
-                                <WrapPanel Grid.Column="3" VerticalAlignment="Bottom" Margin="0,0,0,4">
-                                    <Button Content="_Find / jump" Command="{Binding SearchCommand}" />
-                                    <Button Content="Clear" Command="{Binding ClearSearchCommand}" />
-                                </WrapPanel>
-                            </Grid>
-                            <DockPanel Grid.Row="1" Margin="0,0,0,6">
-                                <Button DockPanel.Dock="Right" Content="_Export…" Command="{Binding ExportCommand}" />
+                            <DockPanel LastChildFill="True">
+                                <Button DockPanel.Dock="Right" Content="Clear" Command="{Binding ClearSearchCommand}" Margin="0,2,0,2" />
+                                <Button DockPanel.Dock="Right" Content="_Find / jump" Command="{Binding SearchCommand}" />
+                                <TextBox DockPanel.Dock="Right" Width="86" Text="{Binding Seek, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Jump to transcript timestamp" ToolTip="Jump to a time: seconds, mm:ss or hh:mm:ss">
+                                    <TextBox.InputBindings><KeyBinding Key="Return" Command="{Binding SearchCommand}" /></TextBox.InputBindings>
+                                </TextBox>
+                                <TextBlock DockPanel.Dock="Right" Text="Jump" Margin="6,0,6,0" />
+                                <ComboBox DockPanel.Dock="Right" Width="170" ItemsSource="{Binding SpeakerFilters}" DisplayMemberPath="Name" SelectedItem="{Binding SpeakerFilter}" AutomationProperties.Name="Transcript speaker filter" />
+                                <TextBlock DockPanel.Dock="Right" Text="Speaker" Margin="6,0,6,0" />
+                                <TextBlock DockPanel.Dock="Left" Text="Search" Margin="0,0,6,0" />
+                                <TextBox Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Search transcript text">
+                                    <TextBox.InputBindings><KeyBinding Key="Return" Command="{Binding SearchCommand}" /></TextBox.InputBindings>
+                                </TextBox>
+                            </DockPanel>
+                            <DockPanel Grid.Row="1" Margin="0,2,0,4">
+                                <Button DockPanel.Dock="Right" Content="_Export…" Command="{Binding ExportCommand}" Margin="0,2,0,2" />
                                 <Button DockPanel.Dock="Right" Content="Stop live file" Command="{Binding StopLiveFileCommand}" />
                                 <Button DockPanel.Dock="Right" Content="_Live file" Command="{Binding LiveMirrorSelectedCommand}" ToolTip="Continuously mirror this session's transcript to the unlocked live text file chosen on Record / import." />
-                                <Button DockPanel.Dock="Right" Content="Analyze speakers" Command="{Binding DiarizeCommand}" ToolTip="Runs real local automatic diarization; explicitly install the small models first." />
-                                <TextBlock Text="Only 200 rows per keyset page. Double-click a row to play its own track." FontSize="12" TextWrapping="Wrap" Foreground="{StaticResource Muted}" />
+                                <Button DockPanel.Dock="Right" Content="Analyze speakers" Command="{Binding DiarizeCommand}" ToolTip="Re-checks every line's speaker with the current voice profiles (including voices learned from lines you labeled). Runs locally." />
+                                <Button DockPanel.Dock="Right" Content="Next →" Command="{Binding NextPageCommand}" />
+                                <Button DockPanel.Dock="Right" Content="← Prev" Command="{Binding PreviousPageCommand}" ToolTip="Previous page" />
+                                <TextBlock Text="{Binding PageSummary}" FontSize="12" TextTrimming="CharacterEllipsis" Foreground="{StaticResource Muted}" ToolTip="{Binding PageSummary}" />
                             </DockPanel>
                             <DataGrid x:Name="TranscriptGrid" Grid.Row="2" ItemsSource="{Binding Transcript}" SelectedItem="{Binding SelectedRow}"
-                                      MouseDoubleClick="TranscriptDoubleClick" AutomationProperties.Name="Paged transcript">
+                                      SelectionMode="Extended" RowHeight="30" ColumnHeaderHeight="30"
+                                      MouseDoubleClick="TranscriptDoubleClick" SelectionChanged="TranscriptSelectionChanged"
+                                      PreviewMouseRightButtonDown="TranscriptRightButtonDown" ContextMenuOpening="TranscriptContextMenuOpening"
+                                      AutomationProperties.Name="Paged transcript"
+                                      AutomationProperties.HelpText="Right-click lines to set or rename the speaker. Ctrl/Shift-click to select several. Double-click plays a line.">
+                                <DataGrid.Resources>
+                                    <!-- Keep selected lines visibly highlighted while the editor below has focus. -->
+                                    <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightBrushKey}" Color="#CFE3F7" />
+                                    <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightTextBrushKey}" Color="#172C40" />
+                                </DataGrid.Resources>
+                                <DataGrid.ContextMenu>
+                                    <ContextMenu AutomationProperties.Name="Transcript line actions" />
+                                </DataGrid.ContextMenu>
                                 <DataGrid.Columns>
-                                    <DataGridTextColumn Header="Time" Binding="{Binding Timestamp}" Width="86" />
-                                    <DataGridTextColumn Header="Track" Binding="{Binding TrackName}" Width="100" />
-                                    <DataGridTextColumn Header="Speaker" Binding="{Binding Speaker}" Width="110" />
+                                    <DataGridTextColumn Header="Time" Binding="{Binding Timestamp}" Width="76" />
+                                    <DataGridTextColumn Header="Track" Binding="{Binding TrackName}" Width="90" />
+                                    <DataGridTextColumn Header="Speaker" Binding="{Binding Speaker}" Width="120" />
                                     <DataGridTextColumn Header="Transcript" Binding="{Binding Text}" Width="*" MinWidth="160" />
-                                    <DataGridTextColumn Header="Timing" Binding="{Binding Timing}" Width="88" />
-                                    <DataGridTextColumn Header="Attribution" Binding="{Binding Attribution}" Width="140" />
+                                    <DataGridTextColumn Header="Timing" Binding="{Binding Timing}" Width="76" />
+                                    <DataGridTextColumn Header="Attribution" Binding="{Binding Attribution}" Width="120" />
                                 </DataGrid.Columns>
                             </DataGrid>
-                            <DockPanel Grid.Row="3" Margin="0,6">
-                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                                    <Button Content="← Previous" Command="{Binding PreviousPageCommand}" />
-                                    <Button Content="Next →" Command="{Binding NextPageCommand}" />
-                                </StackPanel>
-                                <TextBlock Text="{Binding PageSummary}" FontSize="12" />
-                            </DockPanel>
+                            <GridSplitter Grid.Row="3" Height="6" HorizontalAlignment="Stretch" VerticalAlignment="Center" Background="Transparent"
+                                          ResizeDirection="Rows" ResizeBehavior="PreviousAndNext" Cursor="SizeNS" Focusable="False"
+                                          ToolTip="Drag to resize the transcript and the line editor" />
                             <TabControl Grid.Row="4">
-                                <TabItem Header="Correction / source">
-                                    <Grid Margin="10">
-                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                                        <TextBlock Text="{Binding RowDetails}" TextWrapping="Wrap" FontSize="12" Margin="0,0,0,6" />
+                                <TabItem Header="Selected line" x:Name="SelectedLineTab">
+                                    <Grid Margin="8,6">
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                                        <DockPanel>
+                                            <Button DockPanel.Dock="Right" Content="■ Stop" Command="{Binding StopPlaybackCommand}" ToolTip="Stop playback" Margin="0,2,0,2" />
+                                            <Button DockPanel.Dock="Right" Content="▶ Play" Command="{Binding PlayRowCommand}" ToolTip="Play this line from its own track" />
+                                            <Button DockPanel.Dock="Right" Content="Restore raw" Command="{Binding RestoreRawCommand}" ToolTip="Drop your correction and show the recognized text again" />
+                                            <Button DockPanel.Dock="Right" Content="Save text" Command="{Binding SaveCorrectionCommand}" ToolTip="Save the corrected text (left box). The recognized text (right box) is kept." />
+                                            <TextBlock Text="{Binding SelectionSummary}" Margin="0,0,6,0" ToolTip="{Binding RowDetails}" />
+                                            <ComboBox Width="180" IsEditable="True" IsTextSearchEnabled="False" ItemsSource="{Binding SpeakerNames}"
+                                                      Text="{Binding LineSpeaker, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Speaker for selected lines"
+                                                      ToolTip="Pick a speaker or type a new name, then press Enter or Set speaker">
+                                                <ComboBox.InputBindings><KeyBinding Key="Return" Command="{Binding SetLineSpeakerCommand}" /></ComboBox.InputBindings>
+                                            </ComboBox>
+                                            <Button Content="Set speaker" Command="{Binding SetLineSpeakerCommand}" HorizontalAlignment="Left"
+                                                    ToolTip="Label the selected line(s). The app learns this voice and re-checks lines that are still Unknown." />
+                                        </DockPanel>
                                         <Grid Grid.Row="1">
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                            <TextBox Text="{Binding Correction, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Editable transcript correction" />
-                                            <TextBox Grid.Column="1" Text="{Binding RawText, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Background="#F3F6F9" AutomationProperties.Name="Preserved raw recognition" />
+                                            <TextBox Text="{Binding Correction, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                                                     VerticalContentAlignment="Top" AutomationProperties.Name="Editable transcript correction" x:Name="CorrectionInput"
+                                                     ToolTip="Edit the line's text here, then Save text" />
+                                            <TextBox Grid.Column="1" Text="{Binding RawText, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                                                     VerticalContentAlignment="Top" Background="#F3F6F9" AutomationProperties.Name="Preserved raw recognition" ToolTip="{Binding RowDetails}" Margin="0,2,0,2" />
                                         </Grid>
-                                        <WrapPanel Grid.Row="2">
-                                            <Button Content="Save correction" Command="{Binding SaveCorrectionCommand}" />
-                                            <Button Content="Restore raw text" Command="{Binding RestoreRawCommand}" />
-                                            <Button Content="▶ Play row" Command="{Binding PlayRowCommand}" />
-                                            <Button Content="■ Stop playback" Command="{Binding StopPlaybackCommand}" />
-                                        </WrapPanel>
                                     </Grid>
                                 </TabItem>
                                 <TabItem Header="Speaker names">
-                                    <StackPanel Margin="10">
-                                        <TextBlock Text="Names are display labels, not verified identities. Manual assignment is optional and does not replace automatic diarization." Style="{StaticResource Help}" />
-                                        <WrapPanel>
-                                            <ComboBox Width="190" ItemsSource="{Binding Speakers}" SelectedItem="{Binding ManagedSpeaker}" DisplayMemberPath="Name" AutomationProperties.Name="Speaker to rename" />
-                                            <TextBox Width="230" Text="{Binding SpeakerName, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Speaker display name" />
-                                            <Button Content="Rename throughout session" Command="{Binding RenameSpeakerCommand}" />
-                                        </WrapPanel>
-                                        <WrapPanel>
-                                            <ComboBox Width="240" ItemsSource="{Binding AssignmentSpeakers}" SelectedItem="{Binding AssignmentSpeaker}" DisplayMemberPath="Name" AutomationProperties.Name="Optional manual speaker for selected row" />
-                                            <Button Content="Assign speaker to selected row" Command="{Binding AssignSpeakerCommand}" />
-                                        </WrapPanel>
-                                    </StackPanel>
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                        <StackPanel Margin="8,6">
+                                            <TextBlock Text="Rename a speaker on every line. Giving two speakers the same name merges them: their voice samples combine so future lines match better." TextWrapping="Wrap" Foreground="{StaticResource Muted}" Margin="0,0,0,4" />
+                                            <WrapPanel>
+                                                <ComboBox Width="190" ItemsSource="{Binding Speakers}" SelectedItem="{Binding ManagedSpeaker}" DisplayMemberPath="Name" AutomationProperties.Name="Speaker to rename" />
+                                                <TextBox Width="220" Text="{Binding SpeakerName, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Speaker display name">
+                                                    <TextBox.InputBindings><KeyBinding Key="Return" Command="{Binding RenameSpeakerCommand}" /></TextBox.InputBindings>
+                                                </TextBox>
+                                                <Button Content="Rename throughout session" Command="{Binding RenameSpeakerCommand}" />
+                                            </WrapPanel>
+                                        </StackPanel>
+                                    </ScrollViewer>
                                 </TabItem>
                                 <TabItem Header="Track playback">
-                                    <StackPanel Margin="10">
-                                        <TextBlock Text="Play one original track at a time. Row playback always uses that row's track and start time. Coarse cues do not provide word-accurate seeking; unlinked VTT tracks have no audio." Style="{StaticResource Help}" />
-                                        <WrapPanel>
-                                            <ComboBox Width="260" ItemsSource="{Binding Tracks}" SelectedItem="{Binding SelectedTrack}" DisplayMemberPath="Name" AutomationProperties.Name="Original track to play" />
-                                            <TextBox Width="140" Text="{Binding PlaybackTimestamp, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Original track playback timestamp" />
-                                            <Button Content="▶ Play track" Command="{Binding PlayTrackCommand}" />
-                                            <Button Content="■ Stop playback" Command="{Binding StopPlaybackCommand}" />
-                                        </WrapPanel>
-                                    </StackPanel>
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                        <StackPanel Margin="8,6">
+                                            <TextBlock Text="Play one original track from a time. Unlinked VTT tracks have no audio." TextWrapping="Wrap" Foreground="{StaticResource Muted}" Margin="0,0,0,4" />
+                                            <WrapPanel>
+                                                <ComboBox Width="260" ItemsSource="{Binding Tracks}" SelectedItem="{Binding SelectedTrack}" DisplayMemberPath="Name" AutomationProperties.Name="Original track to play" />
+                                                <TextBox Width="140" Text="{Binding PlaybackTimestamp, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Original track playback timestamp" />
+                                                <Button Content="▶ Play track" Command="{Binding PlayTrackCommand}" />
+                                                <Button Content="■ Stop playback" Command="{Binding StopPlaybackCommand}" />
+                                            </WrapPanel>
+                                        </StackPanel>
+                                    </ScrollViewer>
                                 </TabItem>
                             </TabControl>
                         </Grid>
@@ -409,7 +450,7 @@
                 </TabControl>
             </Grid>
         </Grid>
-        <Border Grid.Row="2" BorderBrush="#D6E0E8" BorderThickness="0,1,0,0" Background="White" Padding="18,10">
+        <Border Grid.Row="2" BorderBrush="#D6E0E8" BorderThickness="0,1,0,0" Background="White" Padding="18,6">
             <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="170" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                 <TextBlock Text="{Binding Status}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite">

@@ -184,6 +184,31 @@ published worker `.exe` without `dotnetHostPath`.
   Null IDs, insufficient evidence and ambiguity must remain unattributed.
 - `Confidence` is a registry similarity score, **not a calibrated probability**
   or measured model accuracy. Algorithm version is reported in diagnostics.
+- Transcript lines take the speaker whose turns cover at least 80% of the line's
+  detected speech and at least 40% of the line; recognizer segment edges that graze
+  a neighbour's turn no longer force Unknown. Overlap, unattributed or mixed speech
+  keeps the line unattributed.
+
+## User labels, merges and voice enrollment
+
+The app never infers identity from names, but user actions feed the registry:
+
+- **Labeling lines** (`AppController.AssignSpeaker`) marks them manual and, when the
+  models are installed, runs the worker in enrollment mode (`--diarize` with
+  `DiarizationWorkerRequest.Enrollment`, `ISpeakerEnrollmentService.EnrollAsync`).
+  Up to 60 seconds of the labeled lines' audio is segmented; the dominant local
+  speaker's clean evidence (same rules as above, >=2 seconds) becomes a
+  representative of that speaker's profile, or a new profile under the speaker's
+  GUID and name. Too little clean speech abstains. If the voice confidently matches
+  another profile (match threshold and runner-up margin), the result carries
+  `SimilarTo:<guid>:<score>`; an automatic "Speaker N" is then merged into the
+  labeled speaker, a user-named one is only reported.
+- **Renaming to an existing name** (`RenameSpeakerAsync`) merges: the dropped
+  identity gets `MergedIntoId`, its rows and turns move to the kept ID, and its
+  speaker row is removed. The ID with a voice profile is kept.
+- After enrollment or a merge, finished speaker windows that still contain an
+  unattributed turn are re-queued; **Analyze speakers** re-queues every window.
+  Registry reads/writes by analysis, enrollment and merges are serialized.
 
 Short interjections, overlap-only speech, crowding, noise, roleplayed voices,
 similar voices and recording changes can remain Unknown or split one person.

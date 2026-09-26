@@ -159,11 +159,12 @@ public sealed class HeadlessMcpTools
                 var rows = controller.Store.GetTranscriptPage(id, args.String("search"), args.String("speaker_id"), limit: args.Int("limit", 200));
                 return McpToolResult.Json(rows.Select(row => new
                 {
+                    id = row.Id,
                     time = row.Timestamp,
                     start = Math.Round(TimeSpan.FromTicks(row.StartTicks).TotalSeconds, 2),
                     end = Math.Round(TimeSpan.FromTicks(row.EndTicks).TotalSeconds, 2),
                     track = tracks.TryGetValue(row.TrackId, out var track) ? track.Kind : row.TrackId.ToString(),
-                    speaker = row.SpeakerName, row.Uncertain, text = row.Text
+                    speaker = row.SpeakerName, row.Uncertain, manual = row.ManualSpeaker, text = row.Text
                 }));
             },
             ("session_id", "string", "Session GUID", true),
@@ -192,16 +193,30 @@ public sealed class HeadlessMcpTools
             },
             ("session_id", "string", "Session GUID", true),
             ("action", "string", "pause | resume | cancel", true)),
-        McpTool.Create("rename_speaker", "Rename a speaker throughout a session.",
-            args =>
+        McpTool.Create("rename_speaker", "Rename a speaker throughout a session. Using another speaker's name merges the two (voice profiles combine).",
+            async (args, token) =>
             {
                 var id = args.RequireGuid("session_id");
-                controller.Store.RenameSpeaker(id, args.RequireString("speaker_id"), args.RequireString("name"));
-                return McpToolResult.Json(controller.Store.GetSpeakers(id));
+                var kept = await controller.RenameSpeakerAsync(id, args.RequireString("speaker_id"), args.RequireString("name"), token);
+                return McpToolResult.Json(new { kept, speakers = controller.Store.GetSpeakers(id) });
             },
             ("session_id", "string", "Session GUID", true),
             ("speaker_id", "string", "Speaker id from session_details", true),
             ("name", "string", "New display name", true)),
+        McpTool.Create("assign_speaker", "Manually label transcript rows with a speaker (existing or new name; omit name for Unknown). " +
+                "With speaker models installed the rows' voice is learned in the background and unknown windows are re-checked; then wait_for_jobs.",
+            args =>
+            {
+                var id = args.RequireGuid("session_id");
+                var rows = (args.RequireString("segment_ids")).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                var name = args.String("name");
+                var speaker = string.IsNullOrWhiteSpace(name) ? null : controller.GetOrCreateSpeaker(id, name);
+                controller.AssignSpeaker(id, rows, speaker?.Id);
+                return McpToolResult.Json(new { speaker, rows = controller.Store.GetSegments(id, rows).Select(row => new { row.Id, row.SpeakerName, row.ManualSpeaker }) });
+            },
+            ("session_id", "string", "Session GUID", true),
+            ("segment_ids", "string", "Comma-separated row ids from get_transcript", true),
+            ("name", "string", "Speaker name (created if new); omit for Unknown", false)),
         McpTool.Create("export_transcript", "Export a session transcript to .txt, .json, .srt or .vtt.",
             async (args, token) =>
             {

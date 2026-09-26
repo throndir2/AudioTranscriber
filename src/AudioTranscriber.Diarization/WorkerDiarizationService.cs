@@ -4,7 +4,7 @@ using AudioTranscriber.Core;
 namespace AudioTranscriber.Diarization;
 
 /// <summary>Production boundary: cancellation terminates only this service's owned native worker tree.</summary>
-public sealed class WorkerDiarizationService : IDiarizationService
+public sealed class WorkerDiarizationService : IDiarizationService, ISpeakerEnrollmentService
 {
     private readonly string executable;
     private readonly string? workerAssembly;
@@ -44,8 +44,18 @@ public sealed class WorkerDiarizationService : IDiarizationService
             throw new ArgumentOutOfRangeException(nameof(timeout));
     }
 
-    public async Task<DiarizationResult> DiarizeAsync(DiarizationRequest request, SpeakerRegistrySnapshot registry,
-        CancellationToken cancellationToken = default)
+    public Task<DiarizationResult> DiarizeAsync(DiarizationRequest request, SpeakerRegistrySnapshot registry,
+        CancellationToken cancellationToken = default) => RunAsync(request, registry, null, cancellationToken);
+
+    public Task<DiarizationResult> EnrollAsync(DiarizationRequest request, SpeakerRegistrySnapshot registry,
+        SpeakerEnrollment enrollment, CancellationToken cancellationToken = default)
+    {
+        SherpaDiarizationService.ValidateEnrollment(enrollment);
+        return RunAsync(request, registry, enrollment, cancellationToken);
+    }
+
+    private async Task<DiarizationResult> RunAsync(DiarizationRequest request, SpeakerRegistrySnapshot registry,
+        SpeakerEnrollment? enrollment, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
         SherpaDiarizationService.ValidateRequest(request, registry);
@@ -62,7 +72,7 @@ public sealed class WorkerDiarizationService : IDiarizationService
             var resultPath = Path.Combine(jobDirectory, "result.json");
             await DiarizationWorkerProtocol.WriteAsync(requestPath,
                 new DiarizationWorkerRequest(1, request with { AudioPath = Path.GetFullPath(request.AudioPath) },
-                    models, registry, matching), linked.Token);
+                    models, registry, matching, enrollment), linked.Token);
             using var process = new Process
             {
                 StartInfo = new ProcessStartInfo
