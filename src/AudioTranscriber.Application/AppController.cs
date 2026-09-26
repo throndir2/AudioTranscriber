@@ -26,6 +26,8 @@ public sealed class AppController : IAppController
     private readonly NvidiaCredentialVault credentials = new();
     private readonly CancellationTokenSource shutdown = new();
     private readonly SemaphoreSlim captureGate = new(1, 1);
+    private readonly SemaphoreSlim registryGate = new(1, 1);
+    private readonly ConcurrentDictionary<Guid, Task> backgroundTasks = new();
     private readonly WakeSignal wake = new();
     private readonly ConcurrentDictionary<Guid, Task> mediaTasks = new();
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> mediaCancellation = new();
@@ -409,9 +411,237 @@ public sealed class AppController : IAppController
                         chunk.StartTicks + chunk.SampleCount * TimeSpan.TicksPerSecond / 16000L);
                 }
             Store.ResumeProviderJobs(sessionId, DiarizationProvider);
+            // Re-run finished windows too: voice profiles learned since then (names, merges, labeled lines) can resolve old unknowns.
+            RequeueSpeakerWindows(sessionId, onlyUnresolved: false);
         }, cancellationToken);
         wake.Release();
-        Notify("Local segmentation and speaker matching queued. Short turns and overlap can remain unknown.");
+        Notify("Speaker analysis queued: every window is re-checked against the current voice profiles. Short turns and overlap can remain unknown.");
+    }
+
+    public StoredSpeaker GetOrCreateSpeaker(Guid sessionId, string name)
+    {
+        name = name?.Trim() ?? "";
+        if (name.Length == 0) throw new ArgumentException("A speaker name is required.");
+        return Store.GetSpeakers(sessionId).FirstOrDefault(speaker => SameName(speaker.Name, name))
+            ?? Store.CreateSpeaker(sessionId, name);
+    }
+
+    public void AssignSpeaker(Guid sessionId, IReadOnlyCollection<string> segmentIds, string? speakerId)
+    {
+        ArgumentNullException.ThrowIfNull(segmentIds);
+        if (segmentIds.Count == 0) return;
+        var speaker = speakerId is null ? null : Store.GetSpeakers(sessionId).FirstOrDefault(item => item.Id == speakerId)
+            ?? throw new ArgumentException("Choose a speaker from this session.");
+        Store.AssignSpeaker(sessionId, segmentIds, speakerId);
+        TranscriptChanged?.Invoke(sessionId);
+        if (speaker is not null && Guid.TryParse(speaker.Id, out var speakerGuid) && DiarizationModelsReady)
+        {
+            var ids = segmentIds.ToArray();
+            StartBackground(token => LearnVoiceAsync(sessionId, speaker, speakerGuid, ids, token));
+        }
+    }
+
+    public async Task<string> RenameSpeakerAsync(Guid sessionId, string speakerId, string name, CancellationToken cancellationToken = default)
+    {
+        name = name?.Trim() ?? "";
+        if (name.Length == 0) throw new ArgumentException("A speaker name is required.");
+        string keep;
+        StoredSpeaker existing;
+        await registryGate.WaitAsync(cancellationToken);
+        try
+        {
+            var speakers = Store.GetSpeakers(sessionId);
+            var source = speakers.FirstOrDefault(item => item.Id == speakerId) ?? throw new ArgumentException("Choose a speaker from this session.");
+            var match = speakers.FirstOrDefault(item => item.Id != speakerId && SameName(item.Name, name));
+            if (match is null)
+            {
+                Store.RenameSpeaker(sessionId, speakerId, name);
+                TranscriptChanged?.Invoke(sessionId);
+                return speakerId;
+            }
+            existing = match;
+            keep = MergeLocked(sessionId, source, existing);
+        }
+        finally { registryGate.Release(); }
+        TranscriptChanged?.Invoke(sessionId);
+        var requeued = RequeueSpeakerWindows(sessionId, onlyUnresolved: true);
+        Notify($"Merged into \"{existing.Name.Trim()}\": their voice samples are combined, so future lines match either voice." +
+            (requeued > 0 ? $" Re-checking {requeued} window(s) that still have unknown speakers." : ""));
+        return keep;
+    }
+
+    // Same name means same person: fold both voice profiles together so future lines match either one.
+    // Keeps the existing speaker's name; keeps whichever ID has a voice profile. Caller holds registryGate.
+    private string MergeLocked(Guid sessionId, StoredSpeaker source, StoredSpeaker existing)
+    {
+        var json = Store.GetSpeakerRegistry(sessionId);
+        var registry = json is null ? null : CoreRegistrySerializer.Deserialize(json);
+        bool HasProfile(string id) => registry is not null && Guid.TryParse(id, out var guid) &&
+            registry.Speakers.Any(entry => entry.Identity.Id == guid && entry.Identity.MergedIntoId is null);
+        var (keep, drop) = HasProfile(existing.Id) || !HasProfile(source.Id) ? (existing.Id, source.Id) : (source.Id, existing.Id);
+        string? updated = null;
+        if (HasProfile(drop))
+        {
+            var into = Guid.Parse(keep);
+            var from = Guid.Parse(drop);
+            updated = CoreRegistrySerializer.Serialize(registry! with
+            {
+                Revision = registry.Revision + 1,
+                Speakers = registry.Speakers.Select(entry => entry.Identity.Id == from
+                    ? entry with { Identity = entry.Identity with { MergedIntoId = into } } : entry).ToImmutableArray()
+            });
+        }
+        Store.MergeSpeakers(sessionId, drop, keep, existing.Name.Trim(), updated);
+        return keep;
+    }
+
+    private static bool IsAutomaticName(string name) =>
+        System.Text.RegularExpressions.Regex.IsMatch(name.Trim(), @"^Speaker \d+$");
+
+    private static bool SameName(string a, string b) => string.Equals(a.Trim(), b.Trim(), StringComparison.OrdinalIgnoreCase);
+
+    private void StartBackground(Func<CancellationToken, Task> work)
+    {
+        var id = Guid.NewGuid();
+        var task = Task.Run(async () =>
+        {
+            try { await work(shutdown.Token); }
+            catch (OperationCanceledException) when (shutdown.IsCancellationRequested) { }
+            catch (Exception error) when (IsOperational(error)) { Notify("Learning the speaker's voice failed: " + error.Message, true); }
+            finally { backgroundTasks.TryRemove(id, out _); }
+        });
+        backgroundTasks[id] = task;
+        if (task.IsCompleted) backgroundTasks.TryRemove(id, out _);
+    }
+
+    private const int MaximumEnrollmentSamples = 60 * 16000;
+
+    // Embeds the user-labeled lines' audio into that speaker's voice profile, then re-checks unresolved windows.
+    private async Task LearnVoiceAsync(Guid sessionId, StoredSpeaker speaker, Guid speakerGuid, string[] segmentIds, CancellationToken token)
+    {
+        var rows = Store.GetSegments(sessionId, segmentIds)
+            .Where(row => !row.Provenance.StartsWith("WebVTT ", StringComparison.Ordinal) && row.EndTicks - row.StartTicks >= TimeSpan.TicksPerSecond)
+            .ToArray();
+        if (rows.Length == 0) return;
+        var workPath = Path.Combine(Store.GetSession(sessionId).Directory, "work", $"enroll-{Guid.NewGuid():N}.pcm16");
+        Directory.CreateDirectory(Path.GetDirectoryName(workPath)!);
+        try
+        {
+            long samples = 0;
+            var used = 0;
+            await using (var output = new FileStream(workPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65_536, true))
+            {
+                var chunks = new Dictionary<Guid, IReadOnlyList<StoredAudioChunk>>();
+                foreach (var row in rows)
+                {
+                    const int gap = 16000 / 4;
+                    if (samples + gap + 16000 > MaximumEnrollmentSamples) break;
+                    if (!chunks.TryGetValue(row.TrackId, out var trackChunks)) chunks[row.TrackId] = trackChunks = Store.GetChunks(row.TrackId);
+                    var separator = samples == 0 ? 0 : gap;
+                    var added = await AppendRowAudioAsync(output, trackChunks, row.StartTicks, row.EndTicks,
+                        MaximumEnrollmentSamples - samples - separator, separator, token);
+                    if (added == 0) continue;
+                    samples += separator + added;
+                    used++;
+                }
+            }
+            if (samples < 16000 * 3 / 2)
+            {
+                Notify($"The labeled line(s) are too short to learn {speaker.Name}'s voice. Labeling a longer line teaches it.");
+                return;
+            }
+            string? absorbed = null, soundsLike = null;
+            await registryGate.WaitAsync(token);
+            try
+            {
+                var registry = LoadRegistry(sessionId, out _);
+                await using var service = CreateDiarizer(sessionId);
+                if (service is not ISpeakerEnrollmentService enrollment) return;
+                var result = await enrollment.EnrollAsync(new(sessionId, rows[0].TrackId, workPath, samples, rows[0].StartTicks),
+                    registry, new(speakerGuid, speaker.Name), token);
+                if (!result.Diagnostics.Any(item => item.StartsWith("Enrolled:", StringComparison.Ordinal)))
+                {
+                    Notify($"Not enough clear speech in the labeled line(s) to learn {speaker.Name}'s voice yet. Labeling a longer line teaches it.");
+                    return;
+                }
+                Store.SetSpeakerRegistry(sessionId, CoreRegistrySerializer.Serialize(result.Registry));
+                // The voice already belongs to another profile. An automatic "Speaker N" is the same person under a
+                // placeholder name, so fold it in; a speaker the user named is only pointed out.
+                var similarId = result.Diagnostics.Where(item => item.StartsWith("SimilarTo:", StringComparison.Ordinal))
+                    .Select(item => item.Split(':')[1]).FirstOrDefault();
+                var current = Store.GetSpeakers(sessionId);
+                if (similarId is not null && current.FirstOrDefault(item => item.Id == similarId) is { } similar &&
+                    current.FirstOrDefault(item => item.Id == speaker.Id) is { } labeled)
+                {
+                    if (IsAutomaticName(similar.Name) && !IsAutomaticName(labeled.Name)) { MergeLocked(sessionId, similar, labeled); absorbed = similar.Name; }
+                    else soundsLike = similar.Name;
+                }
+            }
+            finally { registryGate.Release(); }
+            if (absorbed is not null) TranscriptChanged?.Invoke(sessionId);
+            var requeued = RequeueSpeakerWindows(sessionId, onlyUnresolved: true);
+            Notify($"Learned {speaker.Name}'s voice from {used} labeled line(s)." +
+                (absorbed is not null ? $" It matches {absorbed}, so {absorbed}'s lines are now {speaker.Name}." : "") +
+                (soundsLike is not null ? $" It sounds like {soundsLike}; if they are the same person, rename {soundsLike} to {speaker.Name} to merge them." : "") +
+                (requeued > 0 ? $" Re-checking {requeued} window(s) that still have unknown speakers." : ""));
+        }
+        finally { if (File.Exists(workPath)) File.Delete(workPath); }
+    }
+
+    private static async Task<long> AppendRowAudioAsync(Stream output, IReadOnlyList<StoredAudioChunk> chunks, long startTicks, long endTicks,
+        long maximumSamples, int leadingSilence, CancellationToken token)
+    {
+        long written = 0;
+        foreach (var chunk in chunks)
+        {
+            var chunkEnd = chunk.StartTicks + chunk.SampleCount * TimeSpan.TicksPerSecond / 16000L;
+            if (chunkEnd <= startTicks || chunk.StartTicks >= endTicks) continue;
+            var from = Math.Max(0, (startTicks - chunk.StartTicks) * 16000 / TimeSpan.TicksPerSecond);
+            var to = Math.Min(chunk.SampleCount, (endTicks - chunk.StartTicks) * 16000 / TimeSpan.TicksPerSecond);
+            var count = Math.Min(to - from, maximumSamples - written);
+            if (count <= 0) continue;
+            if (written == 0 && leadingSilence > 0) await output.WriteAsync(new byte[leadingSilence * 2], token);
+            await using var input = new FileStream(chunk.Path, FileMode.Open, FileAccess.Read, FileShare.Read, 65_536, true);
+            if (input.Length != chunk.SampleCount * 2L)
+                throw new InvalidDataException("A normalized chunk does not match its committed PCM16 sample count.");
+            input.Position = from * 2;
+            var buffer = new byte[count * 2];
+            await input.ReadExactlyAsync(buffer, token);
+            await output.WriteAsync(buffer, token);
+            written += count;
+            if (written >= maximumSamples) break;
+        }
+        return written;
+    }
+
+    // Queues finished speaker-analysis windows to run again with the current registry.
+    private int RequeueSpeakerWindows(Guid sessionId, bool onlyUnresolved)
+    {
+        if (!DiarizationModelsReady) return 0;
+        var jobs = Store.GetProviderJobs(sessionId, DiarizationProvider);
+        var jobChunks = jobs.Select(job => job.ChunkId).ToHashSet();
+        var selected = new List<Guid>();
+        foreach (var group in jobs.Where(job => job.State == "Succeeded").GroupBy(job => job.TrackId))
+        {
+            if (!onlyUnresolved) { selected.AddRange(group.Select(job => job.Id)); continue; }
+            var chunks = Store.GetChunks(group.Key);
+            var index = new Dictionary<Guid, int>();
+            for (var i = 0; i < chunks.Count; i++) index[chunks[i].Id] = i;
+            foreach (var job in group)
+            {
+                if (!index.TryGetValue(job.ChunkId, out var last)) continue;
+                var first = last;
+                long total = chunks[last].SampleCount;
+                while (first > 0 && total + chunks[first - 1].SampleCount <= Pcm16Audio.MaximumSamples &&
+                       RecognitionWindowBuilder.Adjacent(chunks[first - 1], chunks[first]) && !jobChunks.Contains(chunks[first - 1].Id))
+                    total += chunks[--first].SampleCount;
+                var end = chunks[last].StartTicks + chunks[last].SampleCount * TimeSpan.TicksPerSecond / 16000L;
+                if (Store.GetTurns(group.Key, chunks[first].StartTicks, end).Any(turn => turn.SpeakerId is null)) selected.Add(job.Id);
+            }
+        }
+        var count = selected.Count == 0 ? 0 : Store.RequeueJobs(selected);
+        if (count > 0) wake.Release();
+        return count;
     }
 
     public void PauseTranscription(Guid sessionId)
@@ -1022,16 +1252,29 @@ public sealed class AppController : IAppController
 
     private async Task ProcessDiarizationAsync(StoredJob job, StoredAudioChunk chunk, CancellationToken cancellationToken)
     {
+        // The registry is read before inference and replaced after it; user merges/enrollment must not interleave.
+        await registryGate.WaitAsync(cancellationToken);
+        try { await ProcessDiarizationCoreAsync(job, chunk, cancellationToken); }
+        finally { registryGate.Release(); }
+    }
+
+    private SpeakerRegistrySnapshot LoadRegistry(Guid sessionId, out string? json)
+    {
+        json = Store.GetSpeakerRegistry(sessionId);
+        var registry = json is null ? new SpeakerRegistrySnapshot(sessionId, 0, []) : CoreRegistrySerializer.Deserialize(json);
+        var names = Store.GetSpeakers(sessionId).ToDictionary(speaker => speaker.Id, speaker => speaker.Name);
+        return registry with { Speakers = registry.Speakers.Select(entry =>
+            names.TryGetValue(entry.Identity.Id.ToString("D"), out var name)
+                ? entry with { Identity = entry.Identity with { DisplayName = name } } : entry).ToImmutableArray() };
+    }
+
+    private async Task ProcessDiarizationCoreAsync(StoredJob job, StoredAudioChunk chunk, CancellationToken cancellationToken)
+    {
         var window = DiarizationWindow(job, chunk);
         var first = window[0];
         var source = JsonSerializer.Deserialize<NormalizedChunk>(first.MetadataJson)
             ?? throw new InvalidDataException("Normalized source timing metadata is missing.");
-        var previous = Store.GetSpeakerRegistry(job.SessionId);
-        var registry = previous is null ? new SpeakerRegistrySnapshot(job.SessionId, 0, []) : CoreRegistrySerializer.Deserialize(previous);
-        var names = Store.GetSpeakers(job.SessionId).ToDictionary(speaker => speaker.Id, speaker => speaker.Name);
-        registry = registry with { Speakers = registry.Speakers.Select(entry =>
-            names.TryGetValue(entry.Identity.Id.ToString("D"), out var name)
-                ? entry with { Identity = entry.Identity with { DisplayName = name } } : entry).ToImmutableArray() };
+        var registry = LoadRegistry(job.SessionId, out var previous);
         var sampleCount = window.Sum(item => item.SampleCount);
         var startTicks = first.StartTicks;
         var endTicks = Math.Max(chunk.StartTicks + chunk.SampleCount * TimeSpan.TicksPerSecond / 16000L,
@@ -1075,7 +1318,8 @@ public sealed class AppController : IAppController
             var turns = result.Turns.Select(turn => new StoredTurn(turn.TrackId, turn.StartTicks, turn.EndTicks,
                 turn.SpeakerId?.ToString("D"), turn.Quality.HasFlag(SpeakerQualityFlags.Overlap),
                 turn.SpeakerId is null || (turn.Quality & (SpeakerQualityFlags.Ambiguous | SpeakerQualityFlags.InsufficientEvidence)) != 0)).ToArray();
-            var speakers = result.Registry.Speakers.Select(entry => new StoredSpeaker(entry.Identity.Id.ToString("D"),
+            var speakers = result.Registry.Speakers.Where(entry => entry.Identity.MergedIntoId is null)
+                .Select(entry => new StoredSpeaker(entry.Identity.Id.ToString("D"),
                 job.SessionId, entry.Identity.DisplayName, entry.Identity.ExternalParticipantId, "Local segmentation and speaker embeddings")).ToArray();
             if (!Store.CompleteDiarizationJob(job, CoreRegistrySerializer.Serialize(result.Registry), speakers, turns,
                     startTicks, endTicks))
@@ -1085,7 +1329,10 @@ public sealed class AppController : IAppController
             }
             RefreshSpeakerAssignments(job.SessionId, job.TrackId, startTicks, endTicks);
             TranscriptChanged?.Invoke(job.SessionId);
-            if (!result.Diagnostics.IsDefaultOrEmpty) Notify("Speaker analysis: " + string.Join("; ", result.Diagnostics));
+            // Routine markers (algorithm version, short-tail padding, silence) are kept in the raw attempt, not announced.
+            var notable = (result.Diagnostics.IsDefault ? [] : result.Diagnostics).Where(item => item != SherpaDiarizationService.AlgorithmVersion &&
+                !item.StartsWith("ShortInputSilencePadded", StringComparison.Ordinal) && item != "NoSpeechDetected").ToArray();
+            if (notable.Length > 0) Notify("Speaker analysis: " + string.Join("; ", notable));
         }
         finally
         {
@@ -1284,6 +1531,7 @@ public sealed class AppController : IAppController
                 wake.Release();
                 await Task.WhenAll(scheduler, speakerScheduler);
                 await Task.WhenAll(mediaTasks.Values);
+                await Task.WhenAll(backgroundTasks.Values);
                 if (modelSetup is { } setup) await Task.WhenAny(setup, Task.Delay(TimeSpan.FromSeconds(10)));
             }
             finally

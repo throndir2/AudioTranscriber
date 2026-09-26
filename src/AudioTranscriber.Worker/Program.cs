@@ -23,7 +23,9 @@ internal static class Program
             if (request.Version != DiarizationWorkerProtocol.Version)
                 throw new InvalidDataException("Unsupported worker protocol.");
             await using var engine = new SherpaDiarizationService(request.Models, request.Matching);
-            var result = await engine.DiarizeAsync(request.Audio, request.Registry);
+            var result = request.Enrollment is { } enrollment
+                ? await engine.EnrollAsync(request.Audio, request.Registry, enrollment)
+                : await engine.DiarizeAsync(request.Audio, request.Registry);
             DiarizationWorkerProtocol.ValidateResult(result, request.Audio, request.Registry.Revision);
             await DiarizationWorkerProtocol.WriteAsync(resultPath, new DiarizationWorkerResponse(1, result));
             return 0;

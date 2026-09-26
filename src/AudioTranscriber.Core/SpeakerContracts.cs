@@ -54,3 +54,14 @@ public interface IDiarizationService : IAsyncDisposable
         DiarizationRequest request, SpeakerRegistrySnapshot registry,
         CancellationToken cancellationToken = default);
 }
+
+// The user states that the speech in the request audio belongs to SpeakerId. A missing identity is created
+// with DisplayName; an existing one gains the audio as voice evidence for future matching.
+public sealed record SpeakerEnrollment(Guid SpeakerId, string DisplayName);
+
+public interface ISpeakerEnrollmentService
+{
+    Task<DiarizationResult> EnrollAsync(
+        DiarizationRequest request, SpeakerRegistrySnapshot registry, SpeakerEnrollment enrollment,
+        CancellationToken cancellationToken = default);
+}

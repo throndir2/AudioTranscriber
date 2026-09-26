@@ -67,7 +67,7 @@
             <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
         <Style TargetType="TabItem">
-            <Setter Property="Padding" Value="15,10" />
+            <Setter Property="Padding" Value="14,6" />
         </Style>
         <Style TargetType="DataGrid">
             <Setter Property="AutoGenerateColumns" Value="False" />

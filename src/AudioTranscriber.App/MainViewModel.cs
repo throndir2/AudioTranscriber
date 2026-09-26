@@ -31,7 +31,10 @@ public sealed class MainViewModel : ObservableObject
     private string setupStatus = "";
     private double outputLevel, microphoneLevel;
     private string search = "", seek = "", appliedSearch = "";
-    private SpeakerChoice? speakerFilter, assignmentSpeaker;
+    private SpeakerChoice? speakerFilter;
+    private string lineSpeaker = "";
+    private bool reloadingTranscript, scrollToTop;
+    private IReadOnlyList<TranscriptItem> selectedRows = [];
     private string? appliedSpeaker;
     private long? appliedSeek;
     private readonly List<TranscriptCursor?> cursors = [null];
@@ -124,13 +127,12 @@ public sealed class MainViewModel : ObservableObject
             ApplySearch();
         }, () => SelectedSession is not null && !closing);
         NextPageCommand = new RelayCommand(NextPage, () => hasNext && !closing);
-        PreviousPageCommand = new RelayCommand(() => { pageIndex--; Guard(LoadPage); }, () => pageIndex > 0 && !closing);
+        PreviousPageCommand = new RelayCommand(() => { pageIndex--; scrollToTop = true; Guard(LoadPage); }, () => pageIndex > 0 && !closing);
         SaveCorrectionCommand = new RelayCommand(SaveCorrection, () => SelectedRow is not null && !closing);
         RestoreRawCommand = new RelayCommand(RestoreRaw, () => SelectedRow?.Row.Correction is not null && !closing);
-        RenameSpeakerCommand = new RelayCommand(RenameSpeaker,
+        RenameSpeakerCommand = new AsyncCommand(() => RenameSpeakerAsync(ManagedSpeaker, SpeakerName),
             () => SelectedSession is not null && ManagedSpeaker is not null && !string.IsNullOrWhiteSpace(SpeakerName) && !closing);
-        AssignSpeakerCommand = new RelayCommand(AssignSpeaker,
-            () => SelectedRow is not null && AssignmentSpeaker is not null && !closing);
+        SetLineSpeakerCommand = new RelayCommand(SetLineSpeaker, () => SelectedRows.Count > 0 && !closing);
         PlayRowCommand = new AsyncCommand(PlayRowAsync, () => SelectedRow is not null && !Busy && !closing);
         PlayTrackCommand = new AsyncCommand(PlayTrackAsync, () => SelectedSession is not null && SelectedTrack is not null && !Busy && !closing);
         StopPlaybackCommand = new RelayCommand(() => Guard(controller.StopPlayback), () => !closing);
@@ -248,7 +250,7 @@ public sealed class MainViewModel : ObservableObject
     public ObservableCollection<StoredTrack> Tracks { get; } = [];
     public ObservableCollection<StoredSpeaker> Speakers { get; } = [];
     public ObservableCollection<SpeakerChoice> SpeakerFilters { get; } = [];
-    public ObservableCollection<SpeakerChoice> AssignmentSpeakers { get; } = [];
+    public ObservableCollection<string> SpeakerNames { get; } = [];
     public ObservableCollection<TranscriptItem> Transcript { get; } = [];
     public ObservableCollection<StoredJob> Jobs { get; } = [];
     public IReadOnlyList<ProviderOption> Providers { get; }
@@ -333,12 +335,13 @@ public sealed class MainViewModel : ObservableObject
     public string Search { get => search; set => Set(ref search, value); }
     public string Seek { get => seek; set => Set(ref seek, value); }
     public SpeakerChoice? SpeakerFilter { get => speakerFilter; set => Set(ref speakerFilter, value); }
-    public SpeakerChoice? AssignmentSpeaker { get => assignmentSpeaker; set => Set(ref assignmentSpeaker, value); }
+    // Editable speaker for the selected line(s): pick an existing name or type a new one.
+    public string LineSpeaker { get => lineSpeaker; set => Set(ref lineSpeaker, value ?? ""); }
     public StoredTrack? SelectedTrack { get => selectedTrack; set => Set(ref selectedTrack, value); }
     public string PlaybackTimestamp { get => playbackTimestamp; set => Set(ref playbackTimestamp, value); }
     public string Correction { get => correction; set => Set(ref correction, value); }
     public string SpeakerName { get => speakerName; set => Set(ref speakerName, value); }
-    public string PageSummary => $"Page {pageIndex + 1} · {Transcript.Count} of at most {TranscriptPresentation.PageSize} rows loaded";
+    public string PageSummary => $"Page {pageIndex + 1} · {Transcript.Count} lines · click a line to edit it, right-click to set its speaker";
     public StoredSpeaker? ManagedSpeaker
     {
         get => managedSpeaker;
@@ -349,13 +352,39 @@ public sealed class MainViewModel : ObservableObject
         get => selectedRow;
         set
         {
+            // Reloading a page briefly empties the grid; keep the selection (and any unsaved edits) across it.
+            if ((reloadingTranscript && value is null) || RestoringSelection) return;
+            var previous = selectedRow;
             if (!Set(ref selectedRow, value)) return;
-            Correction = value?.Text ?? "";
-            AssignmentSpeaker = AssignmentSpeakers.FirstOrDefault(x => x.Id == value?.Row.SpeakerId);
-            ManagedSpeaker = Speakers.FirstOrDefault(x => x.Id == value?.Row.SpeakerId);
+            var sameRow = previous is not null && value is not null && previous.Row.Id == value.Row.Id;
+            if (!sameRow || Correction == previous!.Text) Correction = value?.Text ?? "";
+            if (!sameRow || LineSpeaker == previous!.Speaker) LineSpeaker = value?.Speaker ?? "";
+            if (!sameRow) ManagedSpeaker = Speakers.FirstOrDefault(x => x.Id == value?.Row.SpeakerId) ?? ManagedSpeaker;
+            if (!reloadingTranscript && (value is null || !selectedRows.Contains(value))) SelectedRows = value is null ? [] : [value];
             Changed(nameof(RowDetails));
             Changed(nameof(RawText));
         }
+    }
+    public IReadOnlyList<TranscriptItem> SelectedRows
+    {
+        get => selectedRows;
+        private set
+        {
+            selectedRows = value;
+            Changed();
+            Changed(nameof(SelectionSummary));
+            CommandManager.InvalidateRequerySuggested();
+        }
+    }
+    public string SelectionSummary => SelectedRows.Count > 1 ? $"Speaker ({SelectedRows.Count} lines)" : "Speaker";
+    // Raised after a page reload; true when the user moved to a new page or search and the grid should start at the top.
+    public event Action<bool>? TranscriptReloaded;
+    // Set by the view while it re-adds a multi-line selection, so the edited line stays the same.
+    public bool RestoringSelection { get; set; }
+    public void UpdateSelection(IEnumerable<TranscriptItem> rows)
+    {
+        if (reloadingTranscript) return;
+        SelectedRows = rows.OrderBy(row => row.Row.StartTicks).ThenBy(row => row.Row.Id, StringComparer.Ordinal).ToArray();
     }
     public string RawText => SelectedRow?.Row.RawText ?? "";
     public string RowDetails => SelectedRow is { } item
@@ -388,7 +417,7 @@ public sealed class MainViewModel : ObservableObject
     public ICommand SaveCorrectionCommand { get; }
     public ICommand RestoreRawCommand { get; }
     public ICommand RenameSpeakerCommand { get; }
-    public ICommand AssignSpeakerCommand { get; }
+    public ICommand SetLineSpeakerCommand { get; }
     public ICommand PlayRowCommand { get; }
     public ICommand PlayTrackCommand { get; }
     public ICommand StopPlaybackCommand { get; }
@@ -844,7 +873,7 @@ public sealed class MainViewModel : ObservableObject
     {
         if (SelectedSession is not { } session)
         {
-            Tracks.Clear(); Speakers.Clear(); SpeakerFilters.Clear(); AssignmentSpeakers.Clear(); Jobs.Clear();
+            Tracks.Clear(); Speakers.Clear(); SpeakerFilters.Clear(); SpeakerNames.Clear(); Jobs.Clear();
             QueueSummary = "No session selected.";
             return;
         }
@@ -859,16 +888,19 @@ public sealed class MainViewModel : ObservableObject
         if (!Speakers.SequenceEqual(speakers) || SpeakerFilters.Count == 0)
         {
             var filterId = SpeakerFilter?.Id;
-            var assignmentId = AssignmentSpeaker?.Id;
             var managedId = ManagedSpeaker?.Id;
+            var typedSpeaker = LineSpeaker;
+            var typedName = SpeakerName;
             Replace(Speakers, speakers);
             Replace(SpeakerFilters, new[] { new SpeakerChoice(null, "All speakers"), new SpeakerChoice("", "Unknown / unassigned") }
                 .Concat(speakers.Select(x => new SpeakerChoice(x.Id, x.Name))));
-            Replace(AssignmentSpeakers, new[] { new SpeakerChoice(null, "Unknown / unassigned") }
-                .Concat(speakers.Select(x => new SpeakerChoice(x.Id, x.Name))));
+            Replace(SpeakerNames, speakers.Select(x => x.Name.Trim()).Distinct(StringComparer.OrdinalIgnoreCase)
+                .Order(StringComparer.CurrentCultureIgnoreCase).Append(UnknownSpeaker));
             SpeakerFilter = SpeakerFilters.FirstOrDefault(x => x.Id == filterId);
-            AssignmentSpeaker = AssignmentSpeakers.FirstOrDefault(x => x.Id == assignmentId);
             ManagedSpeaker = Speakers.FirstOrDefault(x => x.Id == managedId);
+            // Replacing an editable combo's items can clear its text; keep what the user typed.
+            LineSpeaker = typedSpeaker;
+            if (ManagedSpeaker?.Id == managedId) SpeakerName = typedName;
         }
         Replace(Jobs, controller.Store.GetJobs(session.Id, 100));
         var progress = controller.Store.GetProgress(session.Id);
@@ -1055,16 +1087,23 @@ public sealed class MainViewModel : ObservableObject
         LoadPage();
     });
 
-    private void ResetPaging() { cursors.Clear(); cursors.Add(null); pageIndex = 0; }
+    private void ResetPaging() { cursors.Clear(); cursors.Add(null); pageIndex = 0; scrollToTop = true; }
 
     private void LoadPage()
     {
         var rowId = SelectedRow?.Row.Id;
+        var selectedIds = SelectedRows.Select(row => row.Row.Id).ToHashSet();
         var rows = SelectedSession is { } session
             ? controller.Store.GetTranscriptPage(session.Id, appliedSearch, appliedSpeaker, cursors[pageIndex], TranscriptPresentation.PageSize, appliedSeek)
             : [];
-        Replace(Transcript, rows.Select(x => new TranscriptItem(x, Tracks.FirstOrDefault(t => t.Id == x.TrackId)?.Name ?? x.TrackId.ToString())));
+        reloadingTranscript = true;
+        try { Replace(Transcript, rows.Select(x => new TranscriptItem(x, Tracks.FirstOrDefault(t => t.Id == x.TrackId)?.Name ?? x.TrackId.ToString()))); }
+        finally { reloadingTranscript = false; }
         SelectedRow = Transcript.FirstOrDefault(x => x.Row.Id == rowId);
+        SelectedRows = Transcript.Where(item => selectedIds.Contains(item.Row.Id)).ToArray();
+        var reset = scrollToTop;
+        scrollToTop = false;
+        TranscriptReloaded?.Invoke(reset);
         hasNext = SelectedSession is { } selected && rows.Count == TranscriptPresentation.PageSize &&
             controller.Store.GetTranscriptPage(selected.Id, appliedSearch, appliedSpeaker,
                 new TranscriptCursor(rows[^1].StartTicks, rows[^1].Id), 1, appliedSeek).Count != 0;
@@ -1079,6 +1118,7 @@ public sealed class MainViewModel : ObservableObject
         var cursor = new TranscriptCursor(last.StartTicks, last.Id);
         if (cursors.Count == pageIndex + 1) cursors.Add(cursor); else cursors[pageIndex + 1] = cursor;
         pageIndex++;
+        scrollToTop = true;
         LoadPage();
     });
 
@@ -1098,22 +1138,86 @@ public sealed class MainViewModel : ObservableObject
         SetStatus("Correction removed; raw recognition is shown again.");
     });
 
-    private void RenameSpeaker() => Guard(() =>
+    private const string UnknownSpeaker = "Unknown / unassigned";
+
+    private async Task RenameSpeakerAsync(StoredSpeaker? speaker, string name)
     {
-        if (SelectedSession is not { } session || ManagedSpeaker is not { } speaker) return;
-        controller.Store.RenameSpeaker(session.Id, speaker.Id, SpeakerName.Trim());
+        if (SelectedSession is not { } session || speaker is null || string.IsNullOrWhiteSpace(name)) return;
+        name = name.Trim();
+        var existing = Speakers.FirstOrDefault(x => x.Id != speaker.Id && string.Equals(x.Name.Trim(), name, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null && !dialogs.Confirm("Merge speakers?",
+                $"\"{existing.Name}\" already exists. Giving \"{speaker.Name}\" the same name merges them into one speaker:\n\n" +
+                "• every line of both becomes \"" + existing.Name + "\"\n" +
+                "• their voice samples are combined, so future lines match either voice\n" +
+                "• lines that are still Unknown are re-checked with the combined voice\n\nMerge them?"))
+            return;
+        try
+        {
+            var kept = await controller.RenameSpeakerAsync(session.Id, speaker.Id, name);
+            RefreshSessionDetails();
+            ManagedSpeaker = Speakers.FirstOrDefault(x => x.Id == kept);
+            LoadPage();
+            SetStatus(existing is null
+                ? $"Renamed to \"{name}\" throughout this session."
+                : $"Merged \"{speaker.Name}\" into \"{existing.Name}\". Their voices now count as one speaker.");
+        }
+        catch (Exception error) { Report(error); }
+    }
+
+    private void SetLineSpeaker()
+    {
+        var typed = LineSpeaker.Trim();
+        if (typed.Length == 0 || string.Equals(typed, UnknownSpeaker, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(typed, "Unknown", StringComparison.OrdinalIgnoreCase))
+            AssignSelection(null, null);
+        else
+            AssignSelection(null, typed);
+    }
+
+    /// <summary>Labels the selected lines with an existing speaker (by ID), a typed name, or Unknown when both are null.</summary>
+    public void AssignSelection(string? speakerId, string? newName) => Guard(() =>
+    {
+        if (SelectedSession is not { } session || SelectedRows.Count == 0) return;
+        var rows = SelectedRows;
+        StoredSpeaker? speaker = null;
+        if (newName is not null) speaker = controller.GetOrCreateSpeaker(session.Id, newName);
+        else if (speakerId is not null) speaker = Speakers.FirstOrDefault(x => x.Id == speakerId);
+        controller.AssignSpeaker(session.Id, rows.Select(row => row.Row.Id).ToArray(), speaker?.Id);
         RefreshSessionDetails();
         LoadPage();
-        SetStatus("Speaker display name updated throughout this session. No participant identity was inferred.");
+        LineSpeaker = SelectedRow?.Speaker ?? LineSpeaker;
+        var lines = rows.Count == 1 ? "1 line" : $"{rows.Count} lines";
+        SetStatus(speaker is null
+            ? $"Marked {lines} as Unknown."
+            : controller.DiarizationModelsReady
+                ? $"Set {lines} to \"{speaker.Name}\". Learning this voice so later lines are labeled automatically…"
+                : $"Set {lines} to \"{speaker.Name}\".");
     });
 
-    private void AssignSpeaker() => Guard(() =>
+    public void AssignSelectionToNewSpeaker()
     {
-        if (SelectedRow is not { } row || AssignmentSpeaker is not { } speaker) return;
-        controller.Store.AssignSpeaker(row.Row.Id, speaker.Id);
-        LoadPage();
-        SetStatus("Explicit manual speaker assignment saved for this row.");
-    });
+        if (SelectedRows.Count == 0) return;
+        var name = dialogs.PromptSpeakerName("Set speaker",
+            $"Who is speaking in the selected {(SelectedRows.Count == 1 ? "line" : SelectedRows.Count + " lines")}? Type a new name or pick an existing one. " +
+            "Using an existing name adds these lines to that speaker.",
+            "", Speakers.Select(x => x.Name).Distinct(StringComparer.OrdinalIgnoreCase), "Set speaker");
+        if (name is not null) AssignSelection(null, name);
+    }
+
+    public Task RenameSpeakerInteractiveAsync(string speakerId)
+    {
+        var speaker = Speakers.FirstOrDefault(x => x.Id == speakerId);
+        if (speaker is null) return Task.CompletedTask;
+        var name = dialogs.PromptSpeakerName("Rename speaker",
+            $"New name for \"{speaker.Name}\" on every line of this session. Choosing another speaker's name merges the two.",
+            speaker.Name, Speakers.Where(x => x.Id != speakerId).Select(x => x.Name).Distinct(StringComparer.OrdinalIgnoreCase), "Rename");
+        return name is null || name == speaker.Name ? Task.CompletedTask : RenameSpeakerAsync(speaker, name);
+    }
+
+    public void PlaySelectedRow()
+    {
+        if (PlayRowCommand.CanExecute(null)) PlayRowCommand.Execute(null);
+    }
 
     private Task PlayRowAsync()
     {

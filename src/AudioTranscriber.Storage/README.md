@@ -70,7 +70,11 @@ and the existing consent gate still applies.
 `IReadOnlyList<(string SegmentId, string? SpeakerId, bool Uncertain)>` and commits
 the batch atomically. It changes only rows not marked as manually assigned.
 `AssignSpeaker` marks a row manual even when the user explicitly selects Unknown
-(`null`). Neither path changes raw text or corrections.
+(`null`); the session overload labels a batch atomically. Neither path changes raw
+text or corrections. `CreateSpeaker` adds a user-named speaker without a voice
+profile. `MergeSpeakers` moves one speaker's rows and turns to another, removes the
+merged speaker row, renames the kept one, and optionally replaces the registry JSON,
+all in one transaction. `TranscriptRow.ManualSpeaker` exposes the manual flag.
 
 Schema version 2 adds `segments.manual_speaker`. Version 1 did not record the
 origin of speaker assignments, so migration conservatively protects **all

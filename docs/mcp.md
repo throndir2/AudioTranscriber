@@ -32,7 +32,8 @@ self-contained speaker worker.
 `status`, `list_devices`, `list_providers`, `install_whisper_model` (tiny/base for quick tests),
 `set_whisper_model`, `install_diarization_models`, `start_recording`, `stop_recording`, `levels`, `play_audio`,
 `import_audio`, `list_sessions`, `session_details`, `wait_for_jobs`, `get_transcript`, `analyze_speakers`,
-`control_jobs`, `rename_speaker`, `export_transcript`, `notifications`.
+`control_jobs`, `rename_speaker` (an existing name merges), `assign_speaker` (label row ids from `get_transcript`;
+the voice is learned in the background), `export_transcript`, `notifications`.
 
 Typical loopback test: `start_recording` → `play_audio` (plays a file to the same output endpoint) →
 `stop_recording` (reports peak capture level) → `wait_for_jobs` → `get_transcript`. Background failures, such as
@@ -44,7 +45,8 @@ a speaker-worker error, appear in `wait_for_jobs.jobErrors` and `notifications`.
 `read_grid`, `wait_for`, `press_key`, `screenshot`, `play_audio`, `app_status`.
 
 `snapshot` lists every control of every app window with `[eN]` refs; other tools accept a `ref` or a
-`name` (+ `control_type`). Message boxes and Open/Save dialogs appear as extra windows: click `Yes`, or
+`name` (+ `control_type`). `click right=true` right-clicks (context menus then appear in `snapshot`), and
+`press_key` accepts chords such as `Shift+Down`. Message boxes and Open/Save dialogs appear as extra windows: click `Yes`, or
 `set_text` the `File name:` edit and click `Open`. Examples:
 
 ```text
@@ -52,6 +54,7 @@ click name="Privacy / models" control_type=TabItem
 click name="Install small diarization models" control_type=Button   → click name=Yes
 click name="Start recording" control_type=Button → play_audio path=… → click name="Stop recording"
 read_grid name="Paged transcript"
+click name="Happy to be here" control_type=DataItem right=true → click name="Type a speaker name…" → set_text name="Speaker name" text=Zira → click name="Set speaker"
 read_text name="Live activity log"                                   → recent job progress, transcript lines, live file writes
 ```
 

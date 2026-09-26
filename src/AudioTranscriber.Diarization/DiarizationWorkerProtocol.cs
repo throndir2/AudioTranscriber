@@ -4,7 +4,7 @@ using AudioTranscriber.Core;
 namespace AudioTranscriber.Diarization;
 
 public sealed record DiarizationWorkerRequest(int Version, DiarizationRequest Audio, DiarizationModelPaths Models,
-    SpeakerRegistrySnapshot Registry, SpeakerMatchingOptions Matching);
+    SpeakerRegistrySnapshot Registry, SpeakerMatchingOptions Matching, SpeakerEnrollment? Enrollment = null);
 public sealed record DiarizationWorkerResponse(int Version, DiarizationResult Result);
 
 public static class DiarizationWorkerProtocol

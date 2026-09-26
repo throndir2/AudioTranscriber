@@ -19,8 +19,9 @@ public sealed record TranscriptItem(TranscriptRow Row, string TrackName)
     public string Speaker => Row.SpeakerName;
     public string Text => Row.Text;
     public string Timing => Row.TimingGranularity;
-    public string Attribution => Row.Uncertain ? "Uncertain / overlap" : "No uncertainty flag";
+    public string Attribution => Row.ManualSpeaker ? "Set by you" : Row.Uncertain ? "Uncertain / overlap" : "Automatic";
     public string Provenance => Row.Provenance;
+    public override string ToString() => $"{Timestamp} {Speaker}: {Text.Trim()}";
 }
 
 public static class TranscriptPresentation

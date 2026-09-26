@@ -127,17 +127,40 @@ Select a session, then open **Transcript**. The virtualized DataGrid loads at mo
 and can be combined with a speaker filter and timestamp jump. Timestamps accept
 seconds, `mm:ss`, or `hh:mm:ss`; hours can exceed 23. Previous/Next retain keyset
 cursors rather than materializing the full transcript. Refresh library also
-refreshes the current transcript page; save draft corrections before refreshing
-or changing selection/page.
+refreshes the current transcript page. Unsaved text in the correction box and a
+typed speaker name survive live refreshes of the same line.
 
-Select a row to inspect provenance, timing granularity, uncertainty flags, and
-read-only raw recognition. Edit the correction box and click **Save correction**.
-**Restore raw text** clears the correction without overwriting raw recognition.
-Speaker names are stable session-wide display names, not verified participant
-identities. **Speaker names** supports rename and an optional explicit
-row assignment; it does not replace automatic diarization.
+Click a line to edit it in **Selected line** below the grid (drag the splitter to
+resize). The left box is your correction; click **Save text**. The right box is
+the preserved raw recognition, and **Restore raw** drops your correction. Hover the
+raw box for the line's provenance and timing.
 
-Double-click a row or choose **Play row** to play its own track from its stored
+### Setting who is speaking
+
+- **Right-click** one or more lines (Ctrl/Shift-click selects several) and choose
+  **Set speaker for …** → an existing speaker, **Unknown / unassigned**, or
+  **New speaker…**; or **Type a speaker name…** to enter your own.
+- Or pick/type a name in the **Speaker** box of **Selected line** and press Enter
+  or **Set speaker**. A name that already exists (case-insensitive) reuses that
+  speaker; a new name creates one.
+- **Rename "X" everywhere…** (right-click) or the **Speaker names** tab renames a
+  speaker on every line. Choosing a name another speaker already has **merges** the
+  two after a confirmation: every line of both gets the name.
+
+Lines you label show **Set by you** and are never changed by later analysis.
+
+How labels improve future lines: the speaker model matches **voices, not names**.
+When you label a line, the app embeds that line's clear speech (at least about two
+seconds; shorter lines are labeled but not learned) into that speaker's voice
+profile, then re-checks windows that still contain Unknown speech. If the voice
+already belongs to an automatic placeholder such as "Speaker 2", that placeholder is
+folded into your named speaker; if it resembles a speaker you named, the status
+line suggests renaming to merge them. Merging combines both voice profiles, so
+lines from either voice are matched to the one speaker from then on. **Analyze
+speakers** re-checks every window of the session with the current profiles.
+Speaker names are session display labels, not verified identities.
+
+Double-click a line, right-click → **Play line**, or choose **▶ Play** to play its own track from its stored
 start timestamp. **Track playback** separately chooses an original track and
 timestamp. Playback is one track at a time, not an undisclosed mix of loopback and
 microphone. Stop playback is independent of recording. Coarse cues do not imply
@@ -213,7 +236,8 @@ attribution/package notices) download automatically on first start, so speakers
 are labeled by default. They do not need a Hugging Face token. If the automatic
 download fails, **Install small diarization models** retries it. Speaker analysis
 that waited for the models continues automatically once they are ready;
-**Analyze selected session speakers** re-runs it for a session.
+**Analyze selected session speakers** re-checks every window of a session against
+the current voice profiles (including voices learned from lines you labeled).
 
 Short turns, overlap, crowded windows, and character voices can remain uncertain.
 The model's local-window limits do not impose a three-person maximum on an entire
