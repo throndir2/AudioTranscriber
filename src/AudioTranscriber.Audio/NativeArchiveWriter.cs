@@ -25,6 +25,9 @@ public sealed class NativeArchiveWriter : IDisposable
     private long? previousEndTicks;
     private long lastCheckpoint;
     private bool finished;
+    private readonly long pauseSplitFrames, pauseFrames;
+    private long quietFrames;
+    private bool heardInChunk;
     public long DurableThroughFrame { get; private set; }
     public event Action<OriginalChunk>? ChunkSealed;
     public event Action<AudioGap>? Gap;
@@ -42,6 +45,8 @@ public sealed class NativeArchiveWriter : IDisposable
         chunkFrames = Math.Min(checked((long)options.Format.SampleRate * options.MaxChunkSeconds),
             (options.MaxChunkBytes - headerBytes - 1) / options.Format.BlockAlign);
         if (chunkFrames < 1) throw new ArgumentException("Chunk budget cannot fit one sample frame.");
+        pauseSplitFrames = (long)options.Format.SampleRate * Math.Max(0, options.PauseSplitAfterMilliseconds) / 1000;
+        pauseFrames = (long)options.Format.SampleRate * Math.Max(1, options.PauseMilliseconds) / 1000;
         LocalMedia.CheckSpace(directory, options.MinimumFreeBytes);
         LocalMedia.AtomicJson(Path.Combine(directory, "track.json"), options);
     }
@@ -84,6 +89,10 @@ public sealed class NativeArchiveWriter : IDisposable
                 options.IsLoopback ? AudioGapKind.TimedSilence : AudioGapKind.UnknownLoss,
                 options.IsLoopback ? "No initial loopback packets." : "Microphone startup interval."));
         }
+        var pauseSplit = pauseSplitFrames > 0;
+        var quiet = pauseSplit && SampleMeter.Measure(packet.Data.Span, options.Format).Rms < options.PauseRms;
+        // Speech starting after a quiet stretch begins a fresh chunk instead of being cut by the length cap.
+        if (pauseSplit && !quiet && current is not null && !heardInChunk && framesWritten >= pauseSplitFrames) Seal();
         var consumed = 0;
         while (consumed < packet.Frames)
         {
@@ -95,8 +104,15 @@ public sealed class NativeArchiveWriter : IDisposable
                 checked(packet.Qpc100ns + AudioTime.FramesToTicks(consumed, options.Format.SampleRate)), packet.Flags));
             framesWritten = checked(framesWritten + count);
             consumed += count;
+            if (!quiet) heardInChunk = true;
             if (framesWritten == chunkFrames) Seal();
             else if (Environment.TickCount64 - lastCheckpoint >= options.DurabilityMilliseconds) Checkpoint();
+        }
+        if (pauseSplit)
+        {
+            quietFrames = quiet ? quietFrames + packet.Frames : 0;
+            // Seal at the end of a pause so the phrase just spoken can be recognized immediately.
+            if (current is not null && heardInChunk && quietFrames >= pauseFrames && framesWritten >= pauseSplitFrames) Seal();
         }
         previousEndTicks = checked(ticks + AudioTime.FramesToTicks(packet.Frames, options.Format.SampleRate));
         nextDeviceFrame = checked(packet.DevicePosition + packet.Frames);
@@ -169,6 +185,8 @@ public sealed class NativeArchiveWriter : IDisposable
         File.Delete(journalPath!);
         DurableThroughFrame = checked(snapshot.SourceStartFrame + snapshot.FrameCount);
         current = null;
+        heardInChunk = false;
+        quietFrames = 0;
         ChunkSealed?.Invoke(snapshot);
     }
 

@@ -86,4 +86,7 @@ public static class AudioTime
 public sealed record ArchiveOptions(string RootDirectory, Guid SessionId, Guid TrackId, NativeWaveFormat Format,
     long SessionQpcOrigin100ns, string DeviceId, bool IsLoopback, long QueueByteLimit = 16 * 1024 * 1024,
     long MaxChunkBytes = 64 * 1024 * 1024, int MaxChunkSeconds = 30, int DurabilityMilliseconds = 1000,
-    long MinimumFreeBytes = 128 * 1024 * 1024);
+    long MinimumFreeBytes = 128 * 1024 * 1024,
+    // When > 0, a chunk also seals at the end of a pause once it holds at least this much audio,
+    // so live recognition gets whole phrases as soon as the speaker stops.
+    int PauseSplitAfterMilliseconds = 0, int PauseMilliseconds = 400, float PauseRms = 0.008f);

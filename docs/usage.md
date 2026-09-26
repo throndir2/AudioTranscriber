@@ -155,13 +155,17 @@ choose a path (default `Documents\AudioTranscriber\live-transcript.txt`; an exis
 file is overwritten; the path and checkbox are remembered). Checking the box while
 a recording is running starts mirroring that recording immediately; otherwise the
 next recording or import is mirrored. Unchecking it stops updates and leaves the file.
-The app rewrites that file every ~3 seconds whenever the transcript changes, in
+The app rewrites that file as soon as each chunk is recognized (and at least every
+~3 seconds) whenever the transcript changes, in
 the same `[hh:mm:ss.fff - hh:mm:ss.fff] Speaker: text` format as the TXT export.
 Corrections and speaker renames are reflected on the next refresh. The status line
 under the path shows the last write time, line count, and bytes on disk.
 
-Recognition works on ~24-second chunks and waits for the following chunk as
-context, so the first lines usually appear about a minute after recording starts.
+Recordings are cut into short chunks at natural pauses (at least 1.5 seconds,
+at most 6 seconds), so a line usually lands in the file a few seconds after
+the speaker pauses (depending on Whisper speed); silent chunks are skipped. Text is written first with the
+speaker shown as `Unknown`; speaker analysis runs separately on ~20-second
+windows and fills the names in afterwards.
 
 The file is opened without an exclusive lock (`FileShare.ReadWrite | Delete`) and
 closed after each update, so VS Code, Copilot, or any other reader can keep it open

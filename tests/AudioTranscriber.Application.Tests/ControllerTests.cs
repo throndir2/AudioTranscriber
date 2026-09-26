@@ -28,7 +28,7 @@ public sealed class ControllerTests
         await UntilAsync(() => fixture.Provider.Calls > 0);
         Assert.False(fixture.Provider.WasCanceled);
         fixture.Provider.Release.TrySetResult();
-        await UntilAsync(() => fixture.App.Store.GetProgress(session.Id).Succeeded == 4);
+        await UntilAsync(() => fixture.App.Store.GetProgress(session.Id).Succeeded == 3);
         var transcript = fixture.App.Store.GetTranscriptPage(session.Id);
         Assert.Equal(2, transcript.Count);
         Assert.All(transcript, row => Assert.Equal("Speaker 1", row.SpeakerName));
@@ -44,11 +44,11 @@ public sealed class ControllerTests
             "nvidia-parakeet-tdt-v3", "en", false);
         fixture.Capture.Emit(32000);
         await fixture.App.StopRecordingAsync();
-        await UntilAsync(() => fixture.App.Store.GetProgress(session.Id).Succeeded == 2);
+        await UntilAsync(() => fixture.App.Store.GetProgress(session.Id).Succeeded == 1);
         Assert.Equal(0, fixture.Provider.Calls);
         Assert.False(fixture.App.Store.GetSession(session.Id).CloudConsent);
         fixture.App.SetCloudConsent(session.Id, true);
-        await UntilAsync(() => fixture.App.Store.GetProgress(session.Id).Succeeded == 4);
+        await UntilAsync(() => fixture.App.Store.GetProgress(session.Id).Succeeded == 3);
         Assert.Equal(2, fixture.Provider.Calls);
     }
 
@@ -66,7 +66,7 @@ public sealed class ControllerTests
         Assert.Empty(fixture.App.Store.GetTranscriptPage(session.Id));
         fixture.Provider.Release.TrySetResult();
         fixture.App.ResumeTranscription(session.Id);
-        await UntilAsync(() => fixture.App.Store.GetProgress(session.Id).Succeeded == 4);
+        await UntilAsync(() => fixture.App.Store.GetProgress(session.Id).Succeeded == 3);
         Assert.Equal(2, fixture.App.Store.GetTranscriptPage(session.Id).Count);
     }
 
@@ -88,7 +88,7 @@ public sealed class ControllerTests
         Assert.All(fixture.App.Store.GetJobs(session.Id), job => Assert.Equal(canceled ? "Canceled" : "Paused", job.State));
         Assert.Equal(canceled ? "Canceled" : "Paused", fixture.App.Store.GetSession(session.Id).ProcessingState);
         fixture.App.ResumeTranscription(session.Id);
-        await UntilAsync(() => fixture.App.Store.GetProgress(session.Id).Succeeded == 6);
+        await UntilAsync(() => fixture.App.Store.GetProgress(session.Id).Succeeded == 4);
         Assert.Equal(3, fixture.Provider.Calls);
     }
 
@@ -102,13 +102,13 @@ public sealed class ControllerTests
             "local-whisper", "en", false);
         fixture.Capture.Emit(32000);
         await fixture.App.StopRecordingAsync();
-        await UntilAsync(() => fixture.App.Store.GetProgress(bad.Id).Failed == 2);
+        await UntilAsync(() => fixture.App.Store.GetProgress(bad.Id).Failed == 3);
         fixture.Media.CorruptOutput = false;
         var good = await fixture.App.StartRecordingAsync("Synthetic valid bytes", "synthetic-output", null,
             "local-whisper", "en", false);
         fixture.Capture.Emit(32000);
         await fixture.App.StopRecordingAsync();
-        await UntilAsync(() => fixture.App.Store.GetProgress(good.Id).Succeeded == 4);
+        await UntilAsync(() => fixture.App.Store.GetProgress(good.Id).Succeeded == 3);
     }
 
     [Fact]
@@ -175,7 +175,7 @@ public sealed class ControllerTests
         await UntilAsync(() => fixture.Notifications.Any(item => item.Message.StartsWith("Lease renewal is temporarily", StringComparison.Ordinal)), 45);
         fixture.Sql("DROP TRIGGER reject_renewal");
         fixture.Provider.Release.TrySetResult();
-        await UntilAsync(() => fixture.App.Store.GetProgress(session.Id).Succeeded == 4);
+        await UntilAsync(() => fixture.App.Store.GetProgress(session.Id).Succeeded == 3);
     }
 
     [Fact]
@@ -212,6 +212,16 @@ public sealed class ControllerTests
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(seconds));
         while (!condition()) await Task.Delay(20, timeout.Token);
+    }
+
+    // Audible synthetic audio: all-zero PCM is skipped as silence before recognition.
+    private static byte[] Tone(int samples)
+    {
+        var bytes = new byte[samples * 2];
+        for (var i = 0; i < samples; i++)
+            System.Buffers.Binary.BinaryPrimitives.WriteInt16LittleEndian(bytes.AsSpan(i * 2),
+                (short)(6000 * Math.Sin(2 * Math.PI * 440 * i / 16000.0)));
+        return bytes;
     }
 
     private sealed class Fixture : IAsyncDisposable
@@ -289,7 +299,7 @@ public sealed class ControllerTests
         {
             var id = Guid.NewGuid();
             var path = Path.Combine(options!.OutputDirectory, id.ToString("N") + ".synthetic-pcm");
-            File.WriteAllBytes(path, new byte[samples * 2]);
+            File.WriteAllBytes(path, Tone(samples));
             ChunkSealed?.Invoke(new(id, TrackId, path, AudioFormat.Pcm16Mono16K, frames, samples,
                 AudioTime.FramesToTicks(frames, 16000), continuity));
             frames += samples;

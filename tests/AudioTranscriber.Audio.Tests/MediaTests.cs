@@ -75,6 +75,70 @@ public sealed class MediaTests
     }
 
     [Fact]
+    public async Task PauseAlignedChunksSealShardsWithoutWaitingForTheNextChunkAndReplayIdentically()
+    {
+        using var files = new TestFiles();
+        const int rate = 48000;
+        var format = NativeWaveFormat.FromWaveFormat(WaveFormat.CreateIeeeFloatWaveFormat(rate, 2));
+        var chunks = new List<OriginalChunk>();
+        using (var archive = new NativeArchiveWriter(new(files.Root, Guid.NewGuid(), Guid.NewGuid(), format, 0,
+            "synthetic", true, MaxChunkSeconds: 6, MinimumFreeBytes: 0, PauseSplitAfterMilliseconds: 1500)))
+        {
+            archive.ChunkSealed += chunks.Add;
+            using var queue = new PooledPacketQueue(1024 * 1024);
+            var offset = 0;
+            async Task WriteAsync(double seconds, bool tone)
+            {
+                for (var end = offset + (int)(seconds * rate); offset < end;)
+                {
+                    var count = Math.Min(480, end - offset);
+                    var position = offset;
+                    Assert.True(queue.TryWrite(count * format.BlockAlign, offset, count, offset,
+                        AudioTime.FramesToTicks(offset, rate), PacketFlags.None, memory =>
+                        {
+                            var samples = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(memory.Span);
+                            for (var i = 0; i < count * 2; i++)
+                                samples[i] = tone ? (float)(0.2 * Math.Sin((position + i / 2) * 2 * Math.PI * 440 / rate)) : 0;
+                        }));
+                    await using var reader = queue.ReadAllAsync().GetAsyncEnumerator();
+                    Assert.True(await reader.MoveNextAsync());
+                    using (reader.Current) archive.Write(reader.Current);
+                    offset += count;
+                }
+            }
+            await WriteAsync(2, true); await WriteAsync(0.6, false);
+            await WriteAsync(3, true); await WriteAsync(0.6, false);
+            await WriteAsync(1, true);
+            archive.Finish();
+        }
+        // Each chunk ends once 400 ms of a pause has passed.
+        Assert.Equal([115200L, 172800L, 57600L], chunks.Select(c => c.FrameCount));
+
+        var directory = Path.Combine(files.Root, "normalized");
+        var options = new NormalizationOptions(directory, chunks[0].SessionId, chunks[0].TrackId, 0, 0, 0, format,
+            SealAtInput: true);
+        var live = new List<NormalizedShard>();
+        await using (var normalizer = new PersistentNormalizer(options))
+        {
+            normalizer.ShardSealed += shard => { lock (live) live.Add(shard); };
+            for (var i = 0; i < chunks.Count; i++)
+            {
+                await normalizer.AppendChunkAsync(chunks[i]);
+                if (i == chunks.Count - 1) break;
+                // The shard for this chunk must arrive before the next chunk is supplied.
+                var deadline = Stopwatch.StartNew();
+                while (true) { lock (live) if (live.Count > i) break; Assert.True(deadline.ElapsedMilliseconds < 5000); await Task.Delay(10); }
+            }
+            await normalizer.CompleteAsync();
+        }
+        Assert.Equal([35200, 57600, 19200, 3200], live.Select(s => s.SampleCount));
+
+        var replay = await PersistentNormalizer.NormalizeChunksAsync(chunks, directory);
+        Assert.Equal(live.Select(s => s.Id), replay.Select(s => s.Id));
+        Assert.Equal(live.Select(s => s.Sha256), replay.Select(s => s.Sha256));
+    }
+
+    [Fact]
     public async Task ImportsAreManagedReadOnlyHashedAndSelectedStreamValidated()
     {
         using var files = new TestFiles();

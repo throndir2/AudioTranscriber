@@ -90,6 +90,9 @@ public sealed class WorkerDiarizationService : IDiarizationService
             process.StartInfo.ArgumentList.Add(resultPath);
             linked.Token.ThrowIfCancellationRequested();
             if (!process.Start()) throw new InvalidOperationException("Local diarization worker did not start.");
+            // Speaker analysis is off the transcript's critical path; never let it slow recognition.
+            try { process.PriorityClass = ProcessPriorityClass.BelowNormal; }
+            catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception) { }
             process.StandardInput.Close();
             using var registration = linked.Token.Register(() => KillOwnedProcess(process));
             try

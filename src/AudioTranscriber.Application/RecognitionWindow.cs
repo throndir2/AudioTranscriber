@@ -50,7 +50,7 @@ public static class RecognitionWindowBuilder
             next is null || !Adjacent(current, next));
     }
 
-    private static bool Adjacent(StoredAudioChunk first, StoredAudioChunk second)
+    internal static bool Adjacent(StoredAudioChunk first, StoredAudioChunk second)
     {
         // QPC anchors can differ slightly from nominal sample time; a different continuity is still never bridged.
         if (first.TrackId != second.TrackId || checked(first.StartSample + first.SampleCount) != second.StartSample ||

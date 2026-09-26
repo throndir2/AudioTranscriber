@@ -6,7 +6,7 @@ namespace AudioTranscriber.Audio;
 
 public sealed record NormalizationOptions(string Directory, Guid SessionId, Guid TrackId, long ContinuityId,
     long SourceStartFrame, long SessionStartTicks, NativeWaveFormat Format, long NormalizedStartSample = 0,
-    int ShardSeconds = 24);
+    int ShardSeconds = 24, bool SealAtInput = false);
 
 /// <summary>One FFmpeg resampler per continuity run, not one per WAV. CompleteAsync sends and drains EOF.</summary>
 public sealed class PersistentNormalizer : IAsyncDisposable
@@ -62,6 +62,8 @@ public sealed class PersistentNormalizer : IAsyncDisposable
             input.Position = chunk.DataOffset;
             var remaining = chunk.DataBytes;
             if (remaining != checked(chunk.FrameCount * chunk.Format.BlockAlign)) throw new InvalidDataException("Invalid native chunk length.");
+            // The boundary is registered before its audio reaches FFmpeg, so replay derives identical shards.
+            derivatives.AddInputBoundary(sourceFrames, chunk.FrameCount);
             Interlocked.Add(ref sourceFrames, chunk.FrameCount);
             var buffer = new byte[65536];
             while (remaining > 0)
@@ -71,6 +73,7 @@ public sealed class PersistentNormalizer : IAsyncDisposable
                 await process.Input.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
                 remaining -= read;
             }
+            await process.Input.FlushAsync(cancellationToken);
         }
         catch
         {
@@ -182,6 +185,9 @@ public sealed class PersistentNormalizer : IAsyncDisposable
 
     private sealed class DerivativeWriter : IDisposable
     {
+        // FFmpeg holds back under ~90 ms of resampled audio until more input arrives; boundaries sit this far
+        // before each input end (inside the pause the capture split on) so a shard never waits for the next chunk.
+        private const long BoundaryMarginSamples = 16000 / 5;
         private readonly NormalizationOptions options;
         private readonly Func<long> sourceCount;
         private readonly Action<NormalizedShard> onShard;
@@ -189,12 +195,11 @@ public sealed class PersistentNormalizer : IAsyncDisposable
         private readonly byte[] buffer;
         private int filled;
         private readonly string directory;
+        private readonly System.Collections.Concurrent.ConcurrentQueue<long> boundaries = new();
         public long EmittedSamples { get; private set; }
         public DerivativeWriter(NormalizationOptions options, Func<long> sourceCount, Action<NormalizedShard> onShard)
         {
-            this.options = options; this.sourceCount = sourceCount; this.onShard = onShard;
-            capacity = checked(options.ShardSeconds * 16000 * 2);
-            buffer = new byte[capacity];
+            this.sourceCount = sourceCount; this.onShard = onShard;
             directory = Path.Combine(Path.GetFullPath(options.Directory), options.SessionId.ToString("N"),
                 options.TrackId.ToString("N"), $"run-{options.ContinuityId}");
             Directory.CreateDirectory(directory);
@@ -204,11 +209,24 @@ public sealed class PersistentNormalizer : IAsyncDisposable
                 var prior = JsonSerializer.Deserialize<NormalizationOptions>(File.ReadAllText(runPath));
                 if (prior is null || prior.SourceStartFrame != options.SourceStartFrame ||
                     prior.NormalizedStartSample != options.NormalizedStartSample || prior.SessionStartTicks != options.SessionStartTicks ||
-                    prior.ShardSeconds != options.ShardSeconds ||
                     !prior.Format.SerializedFormat.AsSpan().SequenceEqual(options.Format.SerializedFormat))
                     throw new InvalidDataException("Replay configuration differs from the committed continuity run.");
+                // Replay keeps the shard layout the run was committed with.
+                options = options with { ShardSeconds = prior.ShardSeconds, SealAtInput = prior.SealAtInput };
             }
             else LocalMedia.AtomicJson(runPath, options);
+            this.options = options;
+            capacity = checked(options.ShardSeconds * 16000 * 2);
+            buffer = new byte[capacity];
+        }
+
+        public void AddInputBoundary(long framesBefore, long frames)
+        {
+            if (!options.SealAtInput) return;
+            var rate = options.Format.SampleRate;
+            // Very short inputs are merged into the next shard; the rule depends only on input sizes, so it replays identically.
+            if (AudioTime.Scale(frames, 16000, rate) <= 2 * BoundaryMarginSamples) return;
+            boundaries.Enqueue(AudioTime.Scale(framesBefore + frames, 16000, rate) - BoundaryMarginSamples);
         }
 
         public async Task ReadAsync(Stream output, CancellationToken cancellationToken)
@@ -220,11 +238,22 @@ public sealed class PersistentNormalizer : IAsyncDisposable
                 var consumed = 0;
                 while (consumed < count)
                 {
-                    if (filled == capacity) Seal();
-                    var copy = Math.Min(capacity - filled, count - consumed);
+                    if (!options.SealAtInput && filled == capacity) Seal();
+                    var room = capacity - filled;
+                    if (options.SealAtInput)
+                    {
+                        while (boundaries.TryPeek(out var next) && next * 2 <= EmittedSamples * 2 + filled)
+                            boundaries.TryDequeue(out _);
+                        if (boundaries.TryPeek(out var boundary))
+                            room = (int)Math.Min(room, boundary * 2 - (EmittedSamples * 2 + filled));
+                    }
+                    var copy = Math.Min(room, count - consumed);
                     incoming.AsSpan(consumed, copy).CopyTo(buffer.AsSpan(filled));
                     filled += copy;
                     consumed += copy;
+                    if (options.SealAtInput && (filled == capacity ||
+                        boundaries.TryPeek(out var reached) && reached * 2 == EmittedSamples * 2 + filled))
+                        Seal();
                 }
             }
             if ((filled & 1) != 0) throw new InvalidDataException("FFmpeg emitted a partial PCM16 sample.");

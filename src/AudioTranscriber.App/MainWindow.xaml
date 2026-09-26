@@ -157,7 +157,7 @@
                                     <Button DockPanel.Dock="Right" Content="Copy" Command="{Binding CopyActivityCommand}" Padding="10,3" />
                                     <TextBlock Text="Live activity" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
                                 </DockPanel>
-                                <TextBlock Style="{StaticResource Help}" Text="Shows what is happening right now: audio captured, each chunk being transcribed, every new transcript line as it arrives, errors, and live file writes. Audio is transcribed in about 24-second chunks, so the first line appears roughly a minute after you start." />
+                                <TextBlock Style="{StaticResource Help}" Text="Shows what is happening right now: audio captured, each chunk being transcribed, every new transcript line as it arrives, errors, and live file writes. Recordings are cut into short chunks at pauses, so a line usually appears a few seconds after the speaker pauses; speaker names fill in shortly after." />
                                 <ListBox x:Name="ActivityList" ItemsSource="{Binding ActivityLog}" Height="260" Margin="0,0,0,8"
                                          ScrollViewer.HorizontalScrollBarVisibility="Disabled" Background="#FBFCFD" BorderBrush="#D6E0E8"
                                          AutomationProperties.Name="Live activity log">

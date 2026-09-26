@@ -17,6 +17,8 @@ namespace AudioTranscriber.Application;
 public sealed class AppController : IAppController
 {
     private const string DiarizationProvider = "local-diarization";
+    private const int LiveChunkMaxSeconds = 6;
+    private const int LivePauseSplitAfterMilliseconds = 1500;
     private readonly IAudioCaptureService capture;
     private readonly IMediaNormalizer media;
     private readonly IAudioPlaybackService playback;
@@ -24,7 +26,7 @@ public sealed class AppController : IAppController
     private readonly NvidiaCredentialVault credentials = new();
     private readonly CancellationTokenSource shutdown = new();
     private readonly SemaphoreSlim captureGate = new(1, 1);
-    private readonly SemaphoreSlim wake = new(0);
+    private readonly WakeSignal wake = new();
     private readonly ConcurrentDictionary<Guid, Task> mediaTasks = new();
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> mediaCancellation = new();
     private readonly ConcurrentDictionary<Guid, CaptureFeed> captureFeeds = new();
@@ -40,11 +42,9 @@ public sealed class AppController : IAppController
     private readonly string credentialPath;
     private readonly Func<string, ITranscriptionProvider>? providerOverride;
     private readonly Func<IDiarizationService>? diarizationOverride;
-    private readonly Task scheduler;
-    private Task? activeJobTask;
-    private CancellationTokenSource? activeJobCancellation;
-    private Guid? activeJobSession;
-    private bool activeJobCloud;
+    // Speech recognition and speaker analysis run in independent lanes so text is never queued behind speaker work.
+    private readonly JobLane speechLane = new(), speakerLane = new();
+    private readonly Task scheduler, speakerScheduler;
     private Guid? microphoneTrackId;
     private volatile LocalSettings settings;
     private bool captureFaulted;
@@ -71,6 +71,7 @@ public sealed class AppController : IAppController
         .ToArray();
     public event Action<AppNotification>? Notification;
     public event Action<CaptureMeter>? LevelsChanged;
+    public event Action<Guid>? TranscriptChanged;
 
     public AppController(string rootDirectory, IAudioCaptureService? capture = null,
         IMediaNormalizer? media = null, IAudioPlaybackService? playback = null,
@@ -118,7 +119,8 @@ public sealed class AppController : IAppController
         this.capture.Fault += OnCaptureFault;
         if (this.playback is AudioPlaybackService player)
             player.PlaybackFailed += error => Notify("Playback failed: " + error.Message, true);
-        scheduler = Task.Run(SchedulerAsync);
+        scheduler = Task.Run(() => SchedulerAsync(speechLane, null, DiarizationProvider));
+        speakerScheduler = Task.Run(() => SchedulerAsync(speakerLane, DiarizationProvider, null));
     }
 
     public IReadOnlyList<DeviceChoice> GetOutputDevices() => capture.GetOutputDevices()
@@ -286,8 +288,10 @@ public sealed class AppController : IAppController
             if (microphoneTrackId is { } microphone) StartCaptureFeed(session, microphone);
             try
             {
+                // Short, pause-aligned chunks keep speech-to-text latency near one phrase instead of 30 seconds.
                 await capture.StartAsync(new(session.Id, Path.Combine(session.Directory, "originals"), outputDeviceId,
-                    microphoneDeviceId, outputId, microphoneTrackId), cancellationToken);
+                    microphoneDeviceId, outputId, microphoneTrackId, ChunkDurationSeconds: LiveChunkMaxSeconds,
+                    PauseSplitAfterMilliseconds: LivePauseSplitAfterMilliseconds), cancellationToken);
                 Store.SetSessionState(session.Id, "Recording");
                 Notify("Recording selected Windows output" + (microphoneDeviceId is null ? ". Local microphone is not captured." : " and a separate microphone track."));
             }
@@ -401,9 +405,8 @@ public sealed class AppController : IAppController
                 foreach (var chunk in Store.GetChunks(track.Id))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    if (Store.HasCompletedJob(chunk.Id, DiarizationProvider))
-                        RefreshSpeakerAssignments(sessionId, track.Id, chunk.StartTicks,
-                            chunk.StartTicks + chunk.SampleCount * TimeSpan.TicksPerSecond / 16000L);
+                    RefreshSpeakerAssignments(sessionId, track.Id, chunk.StartTicks,
+                        chunk.StartTicks + chunk.SampleCount * TimeSpan.TicksPerSecond / 16000L);
                 }
             Store.ResumeProviderJobs(sessionId, DiarizationProvider);
         }, cancellationToken);
@@ -414,7 +417,7 @@ public sealed class AppController : IAppController
     public void PauseTranscription(Guid sessionId)
     {
         Store.PauseJobs(sessionId);
-        if (activeJobSession == sessionId) activeJobCancellation?.Cancel();
+        CancelActiveJobs(lane => lane.Session == sessionId);
         Notify("Transcription paused; recording and retained originals are unaffected.");
     }
 
@@ -436,7 +439,7 @@ public sealed class AppController : IAppController
     public void CancelTranscription(Guid sessionId)
     {
         Store.CancelJobs(sessionId);
-        if (activeJobSession == sessionId) activeJobCancellation?.Cancel();
+        CancelActiveJobs(lane => lane.Session == sessionId);
         if (mediaCancellation.TryGetValue(sessionId, out var cancellation)) cancellation.Cancel();
         Notify("Transcription/import work canceled. Existing source audio, chunks, and completed results are retained.");
     }
@@ -444,7 +447,7 @@ public sealed class AppController : IAppController
     public void SetCloudConsent(Guid sessionId, bool consent)
     {
         Store.SetConsent(sessionId, consent);
-        if (!consent && activeJobSession == sessionId && activeJobCloud) activeJobCancellation?.Cancel();
+        if (!consent) CancelActiveJobs(lane => lane.Session == sessionId && lane.Cloud);
         wake.Release();
         Notify(consent ? "This session permits NVIDIA submission of its recorded/imported audio tracks."
             : "Future NVIDIA uploads are disabled. Audio already sent cannot be recalled.");
@@ -502,7 +505,7 @@ public sealed class AppController : IAppController
             try
             {
                 await ConsumeNormalizedAsync(session, media.NormalizeAsync(ObserveOriginals(trackId, feed, shutdown.Token),
-                    new(Path.Combine(session.Directory, "normalized", trackId.ToString("N"))), shutdown.Token), shutdown.Token);
+                    LiveNormalization(session, trackId), shutdown.Token), shutdown.Token);
             }
             catch (Exception error) when (IsOperational(error))
             {
@@ -695,11 +698,15 @@ public sealed class AppController : IAppController
                 await NormalizeImportedTrackAsync(session, track, cancellationToken);
             else if (track.Kind is "Loopback" or "Microphone")
                 await ConsumeNormalizedAsync(session, media.NormalizeAsync(RetainedOriginals(track.Id, cancellationToken),
-                    new(Path.Combine(session.Directory, "normalized", track.Id.ToString("N"))), cancellationToken), cancellationToken);
+                    LiveNormalization(session, track.Id), cancellationToken), cancellationToken);
         }
         if (recovered.Diagnostics.Count > 0)
             throw new InvalidDataException("Original recovery reported gaps or untrusted files; see the retained archive diagnostics.");
     }
+
+    // Recorded tracks cut shards at capture-chunk boundaries (committed runs replay with their original layout).
+    private static Core.NormalizationOptions LiveNormalization(StoredSession session, Guid trackId) =>
+        new(Path.Combine(session.Directory, "normalized", trackId.ToString("N")), SealAtSourceChunks: true);
 
     private async IAsyncEnumerable<Core.NativeChunk> RetainedOriginals(Guid trackId,
         [EnumeratorCancellation] CancellationToken cancellationToken)
@@ -717,6 +724,7 @@ public sealed class AppController : IAppController
         // Only word-timed providers read neighbor audio as context; others can transcribe each chunk as soon as it is sealed.
         var waitForNext = UsesNeighborContext(session.ProviderId);
         StoredAudioChunk? previous = null;
+        long undiarized = 0;
         await foreach (var decoded in chunks.WithCancellation(cancellationToken))
         {
             var anchor = Store.GetArchiveManifests(decoded.TrackId).Select(DeserializeNative)
@@ -725,15 +733,36 @@ public sealed class AppController : IAppController
             var stored = new StoredAudioChunk(chunk.Id, session.Id, chunk.TrackId, chunk.Path,
                 chunk.NormalizedStartSample, checked((int)chunk.SampleCount), chunk.SessionStartTicks, JsonSerializer.Serialize(chunk));
             Store.AddNormalizedChunk(stored);
-            Store.QueueTranscription(stored, DiarizationProvider, session.Language, false);
+            undiarized = QueueDiarizationWindow(previous, stored, undiarized, session.Language);
             if (!waitForNext) QueueAsr(stored, session);
             else if (previous is not null) QueueAsr(previous, session);
             previous = stored;
             wake.Release();
             Notify($"Audio ready through {TimeSpan.FromTicks(chunk.SessionEndTicks):g}; recording/import is independent of recognition.");
         }
-        if (previous is not null) QueueAsr(previous, session);
+        if (previous is not null)
+        {
+            QueueAsr(previous, session);
+            if (undiarized > 0) Store.QueueTranscription(previous, DiarizationProvider, session.Language, false);
+        }
         wake.Release();
+    }
+
+    // Speaker analysis runs on ~20-second windows of consecutive chunks (queued on the window's last chunk):
+    // short live chunks would otherwise each pay a full worker start and a padded 30-second inference.
+    private const long DiarizationWindowSamples = 20 * 16000;
+
+    private long QueueDiarizationWindow(StoredAudioChunk? previous, StoredAudioChunk current, long undiarized, string language)
+    {
+        if (previous is not null && undiarized > 0 && !RecognitionWindowBuilder.Adjacent(previous, current))
+        {
+            Store.QueueTranscription(previous, DiarizationProvider, language, false);
+            undiarized = 0;
+        }
+        undiarized += current.SampleCount;
+        if (undiarized < DiarizationWindowSamples) return undiarized;
+        Store.QueueTranscription(current, DiarizationProvider, language, false);
+        return 0;
     }
 
     private static bool UsesNeighborContext(string providerId) =>
@@ -746,16 +775,31 @@ public sealed class AppController : IAppController
     {
         var session = Store.GetSession(sessionId);
         foreach (var track in Store.GetTracks(sessionId))
+        {
+            StoredAudioChunk? previous = null;
+            long undiarized = 0;
             foreach (var chunk in Store.GetChunks(track.Id))
-                Store.QueueTranscription(chunk, DiarizationProvider, session.Language, false);
+            {
+                undiarized = QueueDiarizationWindow(previous, chunk, undiarized, session.Language);
+                previous = chunk;
+            }
+            if (previous is not null && undiarized > 0) Store.QueueTranscription(previous, DiarizationProvider, session.Language, false);
+        }
     }
 
-    private async Task SchedulerAsync()
+    private void CancelActiveJobs(Func<JobLane, bool> predicate)
     {
+        foreach (var lane in new[] { speechLane, speakerLane })
+            if (predicate(lane)) lane.Cancellation?.Cancel();
+    }
+
+    private async Task SchedulerAsync(JobLane lane, string? provider, string? excludeProvider)
+    {
+        var signal = provider == DiarizationProvider ? wake.Speaker : wake.Speech;
         while (!shutdown.IsCancellationRequested && !stopping)
         {
             StoredJob? job;
-            try { job = Store.ClaimNextJob(); }
+            try { job = Store.ClaimNextJob(provider, excludeProvider); }
             catch (Exception error) when (error is Microsoft.Data.Sqlite.SqliteException or IOException or UnauthorizedAccessException)
             {
                 Notify("The durable job queue is unavailable; capture retains its own originals. " + error.Message, true);
@@ -765,18 +809,18 @@ public sealed class AppController : IAppController
             }
             if (job is null)
             {
-                try { await wake.WaitAsync(TimeSpan.FromSeconds(2), shutdown.Token); }
+                try { await signal.WaitAsync(TimeSpan.FromSeconds(2), shutdown.Token); }
                 catch (OperationCanceledException) when (shutdown.IsCancellationRequested) { break; }
                 continue;
             }
-            activeJobSession = job.SessionId;
-            activeJobCloud = job.Cloud;
+            lane.Session = job.SessionId;
+            lane.Cloud = job.Cloud;
             using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(shutdown.Token);
-            activeJobCancellation = cancellation;
+            lane.Cancellation = cancellation;
             try
             {
-                activeJobTask = ProcessJobAsync(job, cancellation.Token);
-                await activeJobTask;
+                lane.Task = ProcessJobAsync(job, cancellation.Token);
+                await lane.Task;
             }
             catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
             {
@@ -793,10 +837,10 @@ public sealed class AppController : IAppController
             }
             finally
             {
-                activeJobTask = null;
-                activeJobCancellation = null;
-                activeJobSession = null;
-                activeJobCloud = false;
+                lane.Task = null;
+                lane.Cancellation = null;
+                lane.Session = null;
+                lane.Cloud = false;
             }
         }
     }
@@ -837,6 +881,12 @@ public sealed class AppController : IAppController
             {
                 Store.DeferJob(job, "Waiting for the Whisper model download to finish; transcription starts automatically.", TimeSpan.FromSeconds(60));
                 if (WhisperModelPath is not null) Store.ReleaseProviderJobs("local-whisper");
+                return;
+            }
+            if (await IsSilentChunkAsync(chunk, cancellationToken))
+            {
+                var skipped = JsonSerializer.Serialize(new { Version = 1, Skipped = "silence", ChunkId = chunk.Id });
+                Store.CompleteJob(job, [], skipped, "skipped:silence");
                 return;
             }
             var provider = CreateProvider(job.ProviderId);
@@ -901,6 +951,10 @@ public sealed class AppController : IAppController
                         segment.EndMilliseconds ?? (window.SampleCount * 1000L / 16000), segment.Timing.ToString())), turns, provenance);
             }
             Store.CompleteJob(job, rows, evidence, modelIdentity);
+            // Speaker analysis runs in its own lane; re-apply any turns it stored meanwhile to the new rows.
+            RefreshSpeakerAssignments(job.SessionId, job.TrackId, chunk.StartTicks,
+                chunk.StartTicks + chunk.SampleCount * TimeSpan.TicksPerSecond / 16000L);
+            TranscriptChanged?.Invoke(job.SessionId);
             if (result.Status != TranscriptionStatus.Succeeded || !result.Diagnostics.IsDefaultOrEmpty)
                 Notify($"{provider.Descriptor.Name}: {result.Status}. {string.Join("; ", result.Diagnostics.IsDefault ? [] : result.Diagnostics)}");
         }
@@ -968,7 +1022,9 @@ public sealed class AppController : IAppController
 
     private async Task ProcessDiarizationAsync(StoredJob job, StoredAudioChunk chunk, CancellationToken cancellationToken)
     {
-        var source = JsonSerializer.Deserialize<NormalizedChunk>(chunk.MetadataJson)
+        var window = DiarizationWindow(job, chunk);
+        var first = window[0];
+        var source = JsonSerializer.Deserialize<NormalizedChunk>(first.MetadataJson)
             ?? throw new InvalidDataException("Normalized source timing metadata is missing.");
         var previous = Store.GetSpeakerRegistry(job.SessionId);
         var registry = previous is null ? new SpeakerRegistrySnapshot(job.SessionId, 0, []) : CoreRegistrySerializer.Deserialize(previous);
@@ -976,30 +1032,92 @@ public sealed class AppController : IAppController
         registry = registry with { Speakers = registry.Speakers.Select(entry =>
             names.TryGetValue(entry.Identity.Id.ToString("D"), out var name)
                 ? entry with { Identity = entry.Identity with { DisplayName = name } } : entry).ToImmutableArray() };
-        await using var service = CreateDiarizer(job.SessionId);
-        var result = await service.DiarizeAsync(new(job.SessionId, job.TrackId, chunk.Path, chunk.SampleCount, chunk.StartTicks,
-            NormalizedStartSample: chunk.StartSample, SourceFrameOffset: source.SourceFrameOffset, SourceSampleRate: source.SourceFormat.SampleRate),
-            registry, cancellationToken);
-        Store.SaveRawAttempt(job, JsonSerializer.Serialize(new
+        var sampleCount = window.Sum(item => item.SampleCount);
+        var startTicks = first.StartTicks;
+        var endTicks = Math.Max(chunk.StartTicks + chunk.SampleCount * TimeSpan.TicksPerSecond / 16000L,
+            startTicks + sampleCount * TimeSpan.TicksPerSecond / 16000L);
+        var silent = true;
+        foreach (var item in window) silent &= await IsSilentChunkAsync(item, cancellationToken);
+        if (silent)
         {
-            Version = 1, Source = source, result.Turns, Diagnostics = result.Diagnostics.IsDefault ? [] : result.Diagnostics,
-            SegmentationSha256 = DiarizationModels.SegmentationModelSha256,
-            DiarizationModels.EmbeddingSha256
-        }), "local:pyannote-segmentation-3.0+wespeaker-resnet34-lm");
-        var turns = result.Turns.Select(turn => new StoredTurn(turn.TrackId, turn.StartTicks, turn.EndTicks,
-            turn.SpeakerId?.ToString("D"), turn.Quality.HasFlag(SpeakerQualityFlags.Overlap),
-            turn.SpeakerId is null || (turn.Quality & (SpeakerQualityFlags.Ambiguous | SpeakerQualityFlags.InsufficientEvidence)) != 0)).ToArray();
-        var speakers = result.Registry.Speakers.Select(entry => new StoredSpeaker(entry.Identity.Id.ToString("D"),
-            job.SessionId, entry.Identity.DisplayName, entry.Identity.ExternalParticipantId, "Local segmentation and speaker embeddings")).ToArray();
-        var endTicks = chunk.StartTicks + chunk.SampleCount * TimeSpan.TicksPerSecond / 16000L;
-        if (!Store.CompleteDiarizationJob(job, CoreRegistrySerializer.Serialize(result.Registry), speakers, turns,
-                chunk.StartTicks, endTicks))
-        {
-            Notify("Speaker result was superseded by a pause, cancellation, or expired lease; the source remains retained.");
+            Store.CompleteDiarizationJob(job, previous ?? CoreRegistrySerializer.Serialize(registry), [], [], startTicks, endTicks);
             return;
         }
-        RefreshSpeakerAssignments(job.SessionId, job.TrackId, chunk.StartTicks, endTicks);
-        if (!result.Diagnostics.IsDefaultOrEmpty) Notify("Speaker analysis: " + string.Join("; ", result.Diagnostics));
+        var audioPath = chunk.Path;
+        string? workPath = null;
+        try
+        {
+            if (window.Count > 1)
+            {
+                workPath = Path.Combine(Store.GetSession(job.SessionId).Directory, "work", job.Id.ToString("N") + ".speakers.pcm16");
+                Directory.CreateDirectory(Path.GetDirectoryName(workPath)!);
+                await using (var output = new FileStream(workPath, FileMode.Create, FileAccess.Write, FileShare.None, 65_536, true))
+                    foreach (var item in window)
+                    {
+                        await using var input = new FileStream(item.Path, FileMode.Open, FileAccess.Read, FileShare.Read, 65_536, true);
+                        if (input.Length != item.SampleCount * 2L)
+                            throw new InvalidDataException("A normalized chunk does not match its committed PCM16 sample count.");
+                        await input.CopyToAsync(output, cancellationToken);
+                    }
+                audioPath = workPath;
+            }
+            await using var service = CreateDiarizer(job.SessionId);
+            var result = await service.DiarizeAsync(new(job.SessionId, job.TrackId, audioPath, sampleCount, startTicks,
+                NormalizedStartSample: first.StartSample, SourceFrameOffset: source.SourceFrameOffset, SourceSampleRate: source.SourceFormat.SampleRate),
+                registry, cancellationToken);
+            Store.SaveRawAttempt(job, JsonSerializer.Serialize(new
+            {
+                Version = 1, Source = source, WindowChunks = window.Select(item => item.Id), result.Turns,
+                Diagnostics = result.Diagnostics.IsDefault ? [] : result.Diagnostics,
+                SegmentationSha256 = DiarizationModels.SegmentationModelSha256,
+                DiarizationModels.EmbeddingSha256
+            }), "local:pyannote-segmentation-3.0+wespeaker-resnet34-lm");
+            var turns = result.Turns.Select(turn => new StoredTurn(turn.TrackId, turn.StartTicks, turn.EndTicks,
+                turn.SpeakerId?.ToString("D"), turn.Quality.HasFlag(SpeakerQualityFlags.Overlap),
+                turn.SpeakerId is null || (turn.Quality & (SpeakerQualityFlags.Ambiguous | SpeakerQualityFlags.InsufficientEvidence)) != 0)).ToArray();
+            var speakers = result.Registry.Speakers.Select(entry => new StoredSpeaker(entry.Identity.Id.ToString("D"),
+                job.SessionId, entry.Identity.DisplayName, entry.Identity.ExternalParticipantId, "Local segmentation and speaker embeddings")).ToArray();
+            if (!Store.CompleteDiarizationJob(job, CoreRegistrySerializer.Serialize(result.Registry), speakers, turns,
+                    startTicks, endTicks))
+            {
+                Notify("Speaker result was superseded by a pause, cancellation, or expired lease; the source remains retained.");
+                return;
+            }
+            RefreshSpeakerAssignments(job.SessionId, job.TrackId, startTicks, endTicks);
+            TranscriptChanged?.Invoke(job.SessionId);
+            if (!result.Diagnostics.IsDefaultOrEmpty) Notify("Speaker analysis: " + string.Join("; ", result.Diagnostics));
+        }
+        finally
+        {
+            if (workPath is not null && File.Exists(workPath)) File.Delete(workPath);
+        }
+    }
+
+    // The job's chunk plus the contiguous preceding chunks that were queued without a speaker job of their own.
+    private List<StoredAudioChunk> DiarizationWindow(StoredJob job, StoredAudioChunk chunk)
+    {
+        var chunks = Store.GetChunks(job.TrackId);
+        var window = new List<StoredAudioChunk> { chunk };
+        long total = chunk.SampleCount;
+        var index = -1;
+        for (var i = 0; i < chunks.Count; i++) if (chunks[i].Id == chunk.Id) { index = i; break; }
+        for (var i = index - 1; i >= 0; i--)
+        {
+            var candidate = chunks[i];
+            if (total + candidate.SampleCount > Pcm16Audio.MaximumSamples ||
+                !RecognitionWindowBuilder.Adjacent(candidate, window[0]) || Store.HasJob(candidate.Id, DiarizationProvider))
+                break;
+            window.Insert(0, candidate);
+            total += candidate.SampleCount;
+        }
+        return window;
+    }
+
+    private static async Task<bool> IsSilentChunkAsync(StoredAudioChunk chunk, CancellationToken cancellationToken)
+    {
+        // Invalid audio is left to the normal path, which reports it on the affected job.
+        try { return Pcm16Audio.IsSilent(await Pcm16Audio.ReadAsync(chunk.Path, chunk.SampleCount, cancellationToken)); }
+        catch (Exception error) when (error is InvalidDataException or IOException or ArgumentOutOfRangeException) { return false; }
     }
 
     private void RefreshSpeakerAssignments(Guid sessionId, Guid trackId, long startTicks, long endTicks)
@@ -1159,11 +1277,12 @@ public sealed class AppController : IAppController
             try
             {
                 Notify("Closing: finishing the current recognition response before checkpointing remaining work.");
-                if (activeJobTask is { } active)
-                    await Task.WhenAny(active, Task.Delay(TimeSpan.FromSeconds(65)));
+                var active = new[] { speechLane.Task, speakerLane.Task }.OfType<Task>().ToArray();
+                if (active.Length > 0)
+                    await Task.WhenAny(Task.WhenAll(active), Task.Delay(TimeSpan.FromSeconds(65)));
                 await shutdown.CancelAsync();
                 wake.Release();
-                await scheduler;
+                await Task.WhenAll(scheduler, speakerScheduler);
                 await Task.WhenAll(mediaTasks.Values);
                 if (modelSetup is { } setup) await Task.WhenAny(setup, Task.Delay(TimeSpan.FromSeconds(10)));
             }
@@ -1195,6 +1314,19 @@ public sealed class AppController : IAppController
     {
         public Channel<byte> Signals { get; } = Channel.CreateBounded<byte>(1);
         public Task Task { get; set; } = Task.CompletedTask;
+    }
+    private sealed class JobLane
+    {
+        public volatile Task? Task;
+        public volatile CancellationTokenSource? Cancellation;
+        public Guid? Session;
+        public volatile bool Cloud;
+    }
+    private sealed class WakeSignal
+    {
+        public SemaphoreSlim Speech { get; } = new(0);
+        public SemaphoreSlim Speaker { get; } = new(0);
+        public void Release() { Speech.Release(); Speaker.Release(); }
     }
     private sealed class ConsentReader(LibraryStore store) : ICloudConsentStore
     {

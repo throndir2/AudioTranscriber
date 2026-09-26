@@ -20,6 +20,8 @@ public interface IAppController : IAsyncDisposable
     bool DiarizationModelsReady { get; }
     event Action<AppNotification>? Notification;
     event Action<CaptureMeter>? LevelsChanged;
+    // Raised (on a background thread) when a session's transcript rows or speaker labels change.
+    event Action<Guid>? TranscriptChanged;
     IReadOnlyList<DeviceChoice> GetOutputDevices();
     IReadOnlyList<DeviceChoice> GetMicrophoneDevices();
     void SetNvidiaKey(string key, bool remember);

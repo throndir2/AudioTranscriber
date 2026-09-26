@@ -59,6 +59,7 @@ public sealed class MainViewModel : ObservableObject
     private Guid? liveSessionId;
     private string? lastLiveContent;
     private Task? liveWrite;
+    private bool liveWritePending;
     private string liveFileStatus = "Live transcript file is off.";
     private bool liveFileLoggedWrite, liveFileFailing;
     private Guid? watchedSessionId;
@@ -153,6 +154,7 @@ public sealed class MainViewModel : ObservableObject
         if (liveFileEnabled) liveFileStatus = ArmedLiveStatus();
         controller.Notification += OnNotification;
         controller.LevelsChanged += OnLevelsChanged;
+        controller.TranscriptChanged += OnTranscriptChanged;
         refreshTimer = new DispatcherTimer(TimeSpan.FromSeconds(3), DispatcherPriority.Background,
             (_, _) => { if (initialized && !closing) { Guard(RefreshLibrary); Guard(RefreshSetup); Guard(PollActivity); UpdateLiveFile(); } }, dispatcher);
         refreshTimer.Stop();
@@ -482,9 +484,21 @@ public sealed class MainViewModel : ObservableObject
         CommandManager.InvalidateRequerySuggested();
     }
 
+    // Mirror new transcript text to the live file as soon as a chunk is recognized, not on the next timer tick.
+    private void OnTranscriptChanged(Guid sessionId) => dispatcher.BeginInvoke(() =>
+    {
+        if (!closing && liveSessionId == sessionId) UpdateLiveFile();
+    });
+
     private void UpdateLiveFile()
     {
-        if (liveSessionId is not { } id || liveWrite is { IsCompleted: false }) return;
+        if (liveSessionId is not { } id) return;
+        if (liveWrite is { IsCompleted: false })
+        {
+            liveWritePending = true;
+            return;
+        }
+        liveWritePending = false;
         var path = LiveFilePath.Trim();
         if (path.Length == 0) return;
         var previous = lastLiveContent;
@@ -516,6 +530,10 @@ public sealed class MainViewModel : ObservableObject
             liveFileLoggedWrite = true;
             liveFileFailing = false;
         }).Task, TaskScheduler.Default).Unwrap();
+        liveWrite.ContinueWith(_ => dispatcher.BeginInvoke(() =>
+        {
+            if (liveWritePending && !closing) UpdateLiveFile();
+        }), TaskScheduler.Default);
     }
 
     private void Log(string text, ActivityKind kind = ActivityKind.Info, string? group = null)
@@ -1236,6 +1254,7 @@ public sealed class MainViewModel : ObservableObject
             await controller.DisposeAsync();
             controller.Notification -= OnNotification;
             controller.LevelsChanged -= OnLevelsChanged;
+            controller.TranscriptChanged -= OnTranscriptChanged;
             dialogs.CloseDeviceSignIn();
             disposed = true;
         }

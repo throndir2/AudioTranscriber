@@ -45,6 +45,26 @@ public static class Pcm16Audio
         return samples;
     }
 
+    // True when no 50 ms window reaches the RMS threshold (default about -42 dBFS): nothing worth recognizing.
+    public static bool IsSilent(ReadOnlySpan<byte> pcm16, double rmsThreshold = 0.008)
+    {
+        const int window = SampleRate / 20;
+        var limit = rmsThreshold * rmsThreshold * 32768.0 * 32768.0 * window;
+        var samples = pcm16.Length / 2;
+        for (var start = 0; start < samples; start += window)
+        {
+            var count = Math.Min(window, samples - start);
+            double sum = 0;
+            for (var i = start; i < start + count; i++)
+            {
+                double value = BinaryPrimitives.ReadInt16LittleEndian(pcm16.Slice(i * 2, 2));
+                sum += value * value;
+            }
+            if (sum * window / count >= limit) return false;
+        }
+        return true;
+    }
+
     private static void ValidateCount(long sampleCount)
     {
         if (sampleCount is <= 0 or > MaximumSamples)
