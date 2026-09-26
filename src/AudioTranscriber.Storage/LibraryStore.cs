@@ -350,7 +350,7 @@ public sealed class LibraryStore
             ("$session", sessionId), ("$limit", Math.Clamp(limit, 1, 1000))
         };
         var sql = """
-            SELECT t.*,coalesce(s.name,CASE WHEN t.speaker_id IS NULL THEN 'Unknown' ELSE t.speaker_id END) AS speaker_name
+            SELECT t.*,coalesce(s.name,CASE WHEN t.speaker_id IS NOT NULL THEN t.speaker_id WHEN (SELECT kind FROM tracks WHERE id=t.track_id)='Microphone' THEN 'Me (mic)' ELSE 'Unknown' END) AS speaker_name
             FROM segments t LEFT JOIN speakers s ON s.id=t.speaker_id AND s.session_id=t.session_id
             WHERE t.session_id=$session
             """;

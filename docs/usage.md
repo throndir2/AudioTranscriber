@@ -46,6 +46,10 @@ provider accuracy, or live Graph access.
    enable a NVIDIA provider or change cloud consent.
 3. Select the exact Windows output endpoint. Optionally enable a **separate
    microphone track**; loopback does not implicitly contain your microphone.
+   Mic rows that speaker analysis hasn't attributed show as **Me (mic)**, so the
+   live file separates your lines from everyone else's. Use headphones:
+   there is no echo cancellation, so speaker audio the mic picks up is
+   transcribed a second time on the mic track.
 4. Click **Start recording**. The global header displays recording state and the
    recording's session name, even if a different session is selected. Its red
    **Stop recording** control remains available across tabs. Meter activity is
