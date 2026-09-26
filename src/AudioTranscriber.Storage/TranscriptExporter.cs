@@ -54,7 +54,7 @@ public static class TranscriptExporter
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         if (extension == ".txt")
-                            await writer.WriteLineAsync($"[{Time(row.StartTicks, '.')} - {Time(row.EndTicks, '.')}] {row.SpeakerName}: {row.Text}");
+                            await writer.WriteLineAsync(TextLine(row));
                         else
                         {
                             if (extension == ".srt") await writer.WriteLineAsync((++index).ToString(CultureInfo.InvariantCulture));
@@ -88,6 +88,9 @@ public static class TranscriptExporter
             if (File.Exists(temporary)) File.Delete(temporary);
         }
     }
+
+    internal static string TextLine(TranscriptRow row) =>
+        $"[{Time(row.StartTicks, '.')} - {Time(row.EndTicks, '.')}] {row.SpeakerName}: {row.Text}";
 
     private static string Time(long ticks, char separator)
     {

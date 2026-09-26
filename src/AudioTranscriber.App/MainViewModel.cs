@@ -43,6 +43,12 @@ public sealed class MainViewModel : ObservableObject
     private int previousSucceeded = -1;
     private CaptureMeter pendingMeter = new(0, 0);
     private int meterQueued;
+    private string liveFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "AudioTranscriber", "live-transcript.txt");
+    private bool liveFileEnabled;
+    private Guid? liveSessionId;
+    private string? lastLiveContent;
+    private Task? liveWrite;
+    private string liveFileStatus = "Live transcript file is off.";
 
     public MainViewModel(IAppController controller, DesktopDialogs dialogs, Dispatcher dispatcher)
     {
@@ -105,10 +111,18 @@ public sealed class MainViewModel : ObservableObject
         ExportCommand = new AsyncCommand(ExportAsync, CanWorkWithSession);
         CancelOperationCommand = new RelayCommand(() => operationCancellation?.Cancel(),
             () => Busy && operationCancellation is not null && !closing);
+        BrowseLiveFileCommand = new RelayCommand(() =>
+        {
+            if (dialogs.SaveLiveTranscript(LiveFilePath) is { } path) LiveFilePath = path;
+        }, () => !closing);
+        LiveMirrorSelectedCommand = new RelayCommand(() => { if (SelectedSession is { } s) StartLiveFile(s.Id); },
+            () => SelectedSession is not null && !closing);
+        StopLiveFileCommand = new RelayCommand(StopLiveFile, () => liveSessionId is not null && !closing);
+        LoadLiveSettings();
         controller.Notification += OnNotification;
         controller.LevelsChanged += OnLevelsChanged;
         refreshTimer = new DispatcherTimer(TimeSpan.FromSeconds(3), DispatcherPriority.Background,
-            (_, _) => { if (initialized && !closing) Guard(RefreshLibrary); }, dispatcher);
+            (_, _) => { if (initialized && !closing) { Guard(RefreshLibrary); UpdateLiveFile(); } }, dispatcher);
         refreshTimer.Stop();
     }
 
@@ -251,6 +265,91 @@ public sealed class MainViewModel : ObservableObject
     public ICommand StopPlaybackCommand { get; }
     public ICommand ExportCommand { get; }
     public ICommand CancelOperationCommand { get; }
+    public ICommand BrowseLiveFileCommand { get; }
+    public ICommand LiveMirrorSelectedCommand { get; }
+    public ICommand StopLiveFileCommand { get; }
+
+    public string LiveFilePath
+    {
+        get => liveFilePath;
+        set { if (Set(ref liveFilePath, value ?? "")) { lastLiveContent = null; SaveLiveSettings(); } }
+    }
+    public bool LiveFileEnabled
+    {
+        get => liveFileEnabled;
+        set { if (Set(ref liveFileEnabled, value)) SaveLiveSettings(); }
+    }
+    public string LiveFileStatus { get => liveFileStatus; private set => Set(ref liveFileStatus, value); }
+
+    private string LiveSettingsPath => Path.Combine(controller.Store.RootDirectory, "live-transcript.json");
+
+    private void LoadLiveSettings()
+    {
+        try
+        {
+            if (!File.Exists(LiveSettingsPath)) return;
+            var saved = System.Text.Json.JsonSerializer.Deserialize<LiveFileSettings>(File.ReadAllText(LiveSettingsPath));
+            if (saved is null) return;
+            if (!string.IsNullOrWhiteSpace(saved.Path)) liveFilePath = saved.Path;
+            liveFileEnabled = saved.Enabled;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Text.Json.JsonException) { }
+    }
+
+    private void SaveLiveSettings()
+    {
+        try { File.WriteAllText(LiveSettingsPath, System.Text.Json.JsonSerializer.Serialize(new LiveFileSettings(LiveFilePath, LiveFileEnabled))); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+    }
+
+    private void StartLiveFile(Guid sessionId)
+    {
+        if (string.IsNullOrWhiteSpace(LiveFilePath))
+        {
+            SetStatus("Choose a live transcript file path first.", true);
+            return;
+        }
+        liveSessionId = sessionId;
+        lastLiveContent = null;
+        LiveFileStatus = $"Live transcript file active → {LiveFilePath.Trim()}";
+        CommandManager.InvalidateRequerySuggested();
+        UpdateLiveFile();
+    }
+
+    private void StopLiveFile()
+    {
+        liveSessionId = null;
+        LiveFileStatus = "Live transcript file stopped. The file was left in place.";
+        CommandManager.InvalidateRequerySuggested();
+    }
+
+    private void UpdateLiveFile()
+    {
+        if (liveSessionId is not { } id || liveWrite is { IsCompleted: false }) return;
+        var path = LiveFilePath.Trim();
+        if (path.Length == 0) return;
+        var previous = lastLiveContent;
+        var store = controller.Store;
+        liveWrite = Task.Run(() =>
+        {
+            var content = LiveTranscriptFile.Render(store, id);
+            if (content == previous) return (Content: content, Written: false);
+            LiveTranscriptFile.Write(path, content);
+            return (Content: content, Written: true);
+        }).ContinueWith(task => dispatcher.InvokeAsync(() =>
+        {
+            if (liveSessionId != id || !string.Equals(LiveFilePath.Trim(), path, StringComparison.Ordinal)) return;
+            if (task.IsFaulted)
+            {
+                LiveFileStatus = "Live file update failed; retrying: " + task.Exception?.GetBaseException().Message;
+                return;
+            }
+            lastLiveContent = task.Result.Content;
+            if (task.Result.Written) LiveFileStatus = $"Live file updated {DateTime.Now:HH:mm:ss} → {path}";
+        }).Task, TaskScheduler.Default).Unwrap();
+    }
+
+    private sealed record LiveFileSettings(string Path, bool Enabled);
 
     public async Task InitializeAsync()
     {
@@ -348,6 +447,7 @@ public sealed class MainViewModel : ObservableObject
         {
             NewCloudConsent = false;
             var session = await controller.StartRecordingAsync(name, output.Id, microphoneId, provider.Id, locale, consent, token);
+            if (LiveFileEnabled) StartLiveFile(session.Id);
             RefreshLibrary();
             SelectedSession = Sessions.FirstOrDefault(x => x.Id == session.Id) ?? session;
         });
@@ -389,6 +489,7 @@ public sealed class MainViewModel : ObservableObject
             SetStatus($"Importing stream {stream.Index}. Retaining a managed original; preparing audio…");
             NewCloudConsent = false;
             var session = await controller.ImportAudioAsync(name, path, stream.Index, provider.Id, locale, consent, token);
+            if (LiveFileEnabled) StartLiveFile(session.Id);
             RefreshLibrary();
             SelectedSession = Sessions.FirstOrDefault(x => x.Id == session.Id) ?? session;
             SetStatus("Audio imported. Jobs and originals are available in the selected session.");
@@ -661,6 +762,12 @@ public sealed class MainViewModel : ObservableObject
             if (activeOperation is not null) await activeOperation;
             if (stopTask is not null) await stopTask;
             if (controller.IsRecording) await controller.StopRecordingAsync();
+            if (liveWrite is not null) await liveWrite;
+            if (liveSessionId is { } liveId && LiveFilePath.Trim() is { Length: > 0 } livePath)
+            {
+                try { await Task.Run(() => LiveTranscriptFile.Write(livePath, LiveTranscriptFile.Render(controller.Store, liveId))); }
+                catch { }
+            }
             controller.StopPlayback();
             await controller.DisposeAsync();
             controller.Notification -= OnNotification;
