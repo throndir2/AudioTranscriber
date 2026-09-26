@@ -9,5 +9,10 @@ instructions: |
   dispatching the build-only workflow from main:
   `gh workflow run release.yml --ref main` (optional: `-f version=vX.Y.Z`; leaving it
   empty bumps the patch). Do not add tests or validation jobs to any workflow.
+  If Actions refuses to start the job (billing/spending limit), do not retry or change
+  billing. Release locally instead: `.\scripts\Publish.ps1 -OutputDirectory <tmp>\publish -RequireEmptyOutput`,
+  then `.\scripts\Release.ps1 -Phase Package ...`, create the tag with `gh api` on the merged
+  main commit, and run `Release.ps1 -Phase Publish` with `GH_TOKEN=$(gh auth token)` and
+  `GITHUB_REPOSITORY=throndir2/AudioTranscriber`.
 
   Local build: run `.\scripts\Setup.ps1` once per worktree, then use `.tools\dotnet\dotnet.exe`.
