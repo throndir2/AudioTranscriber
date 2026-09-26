@@ -2,6 +2,15 @@
   "version": 1,
   "dependencies": {
     "net10.0-windows7.0": {
+      "SoundFlow.Extensions.WebRtc.Apm": {
+        "type": "Direct",
+        "requested": "[1.4.0, )",
+        "resolved": "1.4.0",
+        "contentHash": "vsILVFDGVN32a3jmiYO+EhgmeVo+i4i+99/7KlCv2rbivNxPTmeIWVcgubJfXQW/clU5LydMskEu5tkpEVDxvw==",
+        "dependencies": {
+          "SoundFlow": "1.4.0"
+        }
+      },
       "Google.Protobuf": {
         "type": "Transitive",
         "resolved": "3.36.1",
@@ -191,6 +200,11 @@
         "type": "Transitive",
         "resolved": "1.4.2",
         "contentHash": "yjj+3zgz8zgXpiiC3ZdF/iyTBbz2fFvMxZFEBPUcwZjIvXOf37Ylm+K58hqMfIBt5JgU/Z2uoUS67JmTLe973A=="
+      },
+      "SoundFlow": {
+        "type": "Transitive",
+        "resolved": "1.4.0",
+        "contentHash": "PVc8NEpwmx16qJdOGRvc7Kpvs/3hNZBuldErmnMQSh9IClAA2UWrafcUIQUxki2GrWB2g71hPSDIUKEo3nRgeA=="
       },
       "SQLitePCLRaw.config.e_sqlite3": {
         "type": "Transitive",

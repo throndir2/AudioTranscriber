@@ -72,7 +72,7 @@ public sealed class HeadlessMcpTools
                 peakOutput = peakMicrophone = 0;
                 var session = await controller.StartRecordingAsync(args.String("name") ?? $"MCP recording {DateTime.Now:HH:mm:ss}",
                     output, microphone, args.String("provider_id") ?? "local-whisper", args.String("language") ?? "en",
-                    args.Bool("cloud_consent", false), token);
+                    args.Bool("cloud_consent", false), args.Bool("reduce_echo", true), token);
                 return McpToolResult.Json(Describe(session));
             },
             ("name", "string", "Session name", false),
@@ -80,7 +80,8 @@ public sealed class HeadlessMcpTools
             ("microphone_device_id", "string", "Microphone id, or 'default'; omit to skip the microphone track", false),
             ("provider_id", "string", "Provider id (default local-whisper)", false),
             ("language", "string", "Source language (default en)", false),
-            ("cloud_consent", "boolean", "Allow NVIDIA upload for this session (default false)", false)),
+            ("cloud_consent", "boolean", "Allow NVIDIA upload for this session (default false)", false),
+            ("reduce_echo", "boolean", "Remove speaker audio from the microphone track before transcription (default true)", false)),
         McpTool.Create("stop_recording", "Stop the active recording and seal original audio. Transcription continues in the background.",
             async (_, token) =>
             {

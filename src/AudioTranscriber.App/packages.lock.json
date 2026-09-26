@@ -198,6 +198,19 @@
         "resolved": "1.4.2",
         "contentHash": "yjj+3zgz8zgXpiiC3ZdF/iyTBbz2fFvMxZFEBPUcwZjIvXOf37Ylm+K58hqMfIBt5JgU/Z2uoUS67JmTLe973A=="
       },
+      "SoundFlow": {
+        "type": "Transitive",
+        "resolved": "1.4.0",
+        "contentHash": "PVc8NEpwmx16qJdOGRvc7Kpvs/3hNZBuldErmnMQSh9IClAA2UWrafcUIQUxki2GrWB2g71hPSDIUKEo3nRgeA=="
+      },
+      "SoundFlow.Extensions.WebRtc.Apm": {
+        "type": "Transitive",
+        "resolved": "1.4.0",
+        "contentHash": "vsILVFDGVN32a3jmiYO+EhgmeVo+i4i+99/7KlCv2rbivNxPTmeIWVcgubJfXQW/clU5LydMskEu5tkpEVDxvw==",
+        "dependencies": {
+          "SoundFlow": "1.4.0"
+        }
+      },
       "SQLitePCLRaw.config.e_sqlite3": {
         "type": "Transitive",
         "resolved": "3.0.5",
@@ -248,7 +261,8 @@
           "AudioTranscriber.Diarization": "[1.0.0, )",
           "AudioTranscriber.Integrations": "[1.0.0, )",
           "AudioTranscriber.Providers": "[1.0.0, )",
-          "AudioTranscriber.Storage": "[1.0.0, )"
+          "AudioTranscriber.Storage": "[1.0.0, )",
+          "SoundFlow.Extensions.WebRtc.Apm": "[1.4.0, )"
         }
       },
       "audiotranscriber.audio": {
@@ -340,6 +354,19 @@
         "type": "Transitive",
         "resolved": "1.13.8",
         "contentHash": "QbpkOX0LBcYq/AUZTIlrwz7tPunhqVAFT8A9+JnVw6a6TYRFKvSBwxIWUPbNfpyGYPkTFNunpFIJzcLyiek0gg=="
+      },
+      "SoundFlow": {
+        "type": "Transitive",
+        "resolved": "1.4.0",
+        "contentHash": "PVc8NEpwmx16qJdOGRvc7Kpvs/3hNZBuldErmnMQSh9IClAA2UWrafcUIQUxki2GrWB2g71hPSDIUKEo3nRgeA=="
+      },
+      "SoundFlow.Extensions.WebRtc.Apm": {
+        "type": "Transitive",
+        "resolved": "1.4.0",
+        "contentHash": "vsILVFDGVN32a3jmiYO+EhgmeVo+i4i+99/7KlCv2rbivNxPTmeIWVcgubJfXQW/clU5LydMskEu5tkpEVDxvw==",
+        "dependencies": {
+          "SoundFlow": "1.4.0"
+        }
       }
     }
   }
