@@ -11,6 +11,8 @@
     <NuGetLockFilePath Condition="$([MSBuild]::IsOSPlatform('Linux'))">packages.linux.lock.json</NuGetLockFilePath>
     <AssemblyName>AudioTranscriber.App</AssemblyName>
     <RootNamespace>AudioTranscriber.App</RootNamespace>
+    <!-- Regenerate with scripts\New-AppIcon.ps1. WPF windows fall back to this assembly icon. -->
+    <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\AudioTranscriber.Application\AudioTranscriber.Application.csproj" />
