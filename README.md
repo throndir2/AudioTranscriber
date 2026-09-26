@@ -101,7 +101,9 @@ Download the release ZIP, extract it, run `AudioTranscriber.App.exe`, and click
 **Start recording**. Everything has a working default:
 
 - Output: the default Windows output device. Microphone: your default microphone
-  as a separate track when one exists (use headphones to avoid double transcription).
+  as a separate track when one exists. Echo reduction is on, so no headset is needed:
+  speaker audio the mic picks up is removed before transcription instead of being
+  transcribed twice.
 - Transcription: local Whisper **large-v3-turbo** in English, on the GPU via Vulkan
   when available. The model (about 1.51 GiB) and the small speaker-labeling models
   (33.49 MB) download and verify automatically on first start; you can record

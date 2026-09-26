@@ -12,5 +12,7 @@
     <ProjectReference Include="..\AudioTranscriber.Worker\AudioTranscriber.Worker.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\AudioTranscriber.Storage\AudioTranscriber.Storage.csproj" />
     <ProjectReference Include="..\AudioTranscriber.Integrations\AudioTranscriber.Integrations.csproj" />
+    <!-- WebRTC AEC3 (BSD) via SoundFlow's MIT wrapper; removes speaker audio from the microphone before ASR. -->
+    <PackageReference Include="SoundFlow.Extensions.WebRtc.Apm" Version="1.4.0" />
   </ItemGroup>
 </Project>

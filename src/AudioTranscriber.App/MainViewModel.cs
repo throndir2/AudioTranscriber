@@ -24,7 +24,7 @@ public sealed class MainViewModel : ObservableObject
     private string sessionName = DefaultSessionName();
     private bool sessionNameIsDefault = true;
     private string language = "en";
-    private bool microphoneEnabled, newCloudConsent, selectedCloudConsent;
+    private bool microphoneEnabled, newCloudConsent, selectedCloudConsent, reduceEcho = true;
     private bool? savedMicrophoneEnabled;
     private bool microphoneDefaulted, vcInstalling, shownDiarizationReady;
     private string? shownWhisperPath;
@@ -284,6 +284,7 @@ public sealed class MainViewModel : ObservableObject
     public bool NewCloudConsent { get => newCloudConsent; set => Set(ref newCloudConsent, value); }
     public bool SelectedCloudConsent { get => selectedCloudConsent; set => Set(ref selectedCloudConsent, value); }
     public bool MicrophoneEnabled { get => microphoneEnabled; set => Set(ref microphoneEnabled, value); }
+    public bool ReduceEcho { get => reduceEcho; set => Set(ref reduceEcho, value); }
     public DeviceChoice? OutputDevice { get => outputDevice; set => Set(ref outputDevice, value); }
     public DeviceChoice? MicrophoneDevice { get => microphoneDevice; set => Set(ref microphoneDevice, value); }
     public double OutputLevel { get => outputLevel; private set => Set(ref outputLevel, value); }
@@ -636,7 +637,7 @@ public sealed class MainViewModel : ObservableObject
 
     private sealed record LiveFileSettings(string Path, bool Enabled);
 
-    private sealed record RecordingPreferences(bool? MicrophoneEnabled, string? ProviderId, string? Language);
+    private sealed record RecordingPreferences(bool? MicrophoneEnabled, string? ProviderId, string? Language, bool? ReduceEcho = null);
 
     private string RecordingPreferencesPath => Path.Combine(controller.Store.RootDirectory, "recording-defaults.json");
 
@@ -650,6 +651,7 @@ public sealed class MainViewModel : ObservableObject
             if (Providers.FirstOrDefault(x => x.Id == saved.ProviderId) is { } provider) selectedProvider = provider;
             if (!string.IsNullOrWhiteSpace(saved.Language)) language = saved.Language;
             savedMicrophoneEnabled = saved.MicrophoneEnabled;
+            reduceEcho = saved.ReduceEcho ?? true;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Text.Json.JsonException) { }
     }
@@ -659,7 +661,7 @@ public sealed class MainViewModel : ObservableObject
         try
         {
             File.WriteAllText(RecordingPreferencesPath, System.Text.Json.JsonSerializer.Serialize(
-                new RecordingPreferences(MicrophoneEnabled, SelectedProvider?.Id, Language.Trim())));
+                new RecordingPreferences(MicrophoneEnabled, SelectedProvider?.Id, Language.Trim(), ReduceEcho)));
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
     }
@@ -870,11 +872,12 @@ public sealed class MainViewModel : ObservableObject
         var locale = Language.Trim();
         var microphoneId = MicrophoneEnabled ? MicrophoneDevice?.Id : null;
         var consent = provider.IsCloud && NewCloudConsent;
+        var reduceEcho = ReduceEcho;
         SaveRecordingPreferences();
         await RunAsync("Starting the explicitly selected audio devices…", async token =>
         {
             NewCloudConsent = false;
-            var session = await controller.StartRecordingAsync(name, output.Id, microphoneId, provider.Id, locale, consent, token);
+            var session = await controller.StartRecordingAsync(name, output.Id, microphoneId, provider.Id, locale, consent, reduceEcho, token);
             if (sessionNameIsDefault) ResetSessionName();
             if (LiveFileEnabled) StartLiveFile(session.Id);
             RefreshLibrary();

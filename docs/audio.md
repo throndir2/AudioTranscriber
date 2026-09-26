@@ -107,6 +107,21 @@ Missing intervals separate continuity runs. Playback inserts timeline silence;
 normalization never concatenates across these session-time gaps as though they
 were speech. Timestamp-error packets use an explicitly flagged approximate QPC.
 
+## Microphone echo reduction
+
+Recording sessions started with **Reduce echo from speakers** store the output
+track ID in the microphone track's metadata. Before a microphone recognition
+window is sent to a provider, `EchoReduction` reads the output track's
+normalized PCM for the same session time (gaps are silence, plus 5 s of
+pre-roll so the filter has converged) and runs WebRTC AEC3
+(`SoundFlow.Extensions.WebRtc.Apm`, native `webrtc-apm.dll`) in 10 ms frames.
+Only the temporary work file changes; originals and normalized chunks stay
+raw. Windows with silent speakers are left untouched. AEC3 tracks echo delays
+of roughly 0–500 ms. While recording, the job is deferred until the output
+track covers the window, or 90 s have passed (loopback emits nothing while
+nothing plays). Rows produced this way record `speaker echo removed` in their
+provenance.
+
 ## Startup recovery
 
 Call `AudioArchiveCatalog.RecoverOriginals(root)` before scheduling recovered

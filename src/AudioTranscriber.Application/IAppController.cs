@@ -34,7 +34,7 @@ public interface IAppController : IAsyncDisposable
     Task InstallDiarizationModelsAsync(IProgress<string>? progress = null, CancellationToken cancellationToken = default);
     Task<MediaProbeSummary> ProbeMediaAsync(string path, CancellationToken cancellationToken = default);
     Task<StoredSession> StartRecordingAsync(string name, string outputDeviceId, string? microphoneDeviceId,
-        string providerId, string language, bool cloudConsent, CancellationToken cancellationToken = default);
+        string providerId, string language, bool cloudConsent, bool reduceEcho = true, CancellationToken cancellationToken = default);
     Task StopRecordingAsync(CancellationToken cancellationToken = default);
     Task<StoredSession> ImportAudioAsync(string name, string path, int streamIndex, string providerId,
         string language, bool cloudConsent, CancellationToken cancellationToken = default);

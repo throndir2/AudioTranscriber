@@ -263,7 +263,7 @@ public sealed class AppController : IAppController
     }
 
     public async Task<StoredSession> StartRecordingAsync(string name, string outputDeviceId, string? microphoneDeviceId,
-        string providerId, string language, bool cloudConsent, CancellationToken cancellationToken = default)
+        string providerId, string language, bool cloudConsent, bool reduceEcho = true, CancellationToken cancellationToken = default)
     {
         await captureGate.WaitAsync(cancellationToken);
         try
@@ -275,7 +275,8 @@ public sealed class AppController : IAppController
             microphoneTrackId = microphoneDeviceId is null ? null : Guid.NewGuid();
             Store.AddTrack(new(outputId, session.Id, "Loopback", "Windows output", null, 0, null));
             if (microphoneTrackId is { } mic)
-                Store.AddTrack(new(mic, session.Id, "Microphone", "Local microphone", null, 0, null));
+                Store.AddTrack(new(mic, session.Id, "Microphone", "Local microphone", null, 0,
+                    reduceEcho ? JsonSerializer.Serialize(new MicrophoneOptions(outputId)) : null));
             Store.SetConsent(session.Id, cloudConsent);
             Store.SetSessionState(session.Id, "Starting");
             RecordingSessionId = session.Id;
@@ -846,6 +847,17 @@ public sealed class AppController : IAppController
             var window = await RecognitionWindowBuilder.CreateAsync(chunk, index > 0 ? allChunks[index - 1] : null,
                 index + 1 < allChunks.Count ? allChunks[index + 1] : null, provider.Descriptor.Timing == TimingGranularity.Word,
                 workPath, cancellationToken);
+            var echoReduced = false;
+            if (EchoReferenceTrack(job) is { } referenceTrackId)
+            {
+                var reference = Store.GetChunks(referenceTrackId);
+                if (!EchoReferenceReady(job, window, reference, referenceTrackId))
+                {
+                    Store.DeferJob(job, "Waiting for the matching speaker audio to remove its echo from the microphone.", TimeSpan.FromSeconds(5));
+                    return;
+                }
+                echoReduced = await ReduceEchoAsync(window, allChunks, reference, cancellationToken);
+            }
             var source = JsonSerializer.Deserialize<NormalizedChunk>(chunk.MetadataJson)
                 ?? throw new InvalidDataException("Normalized source timing metadata is missing.");
             var request = new TranscriptionRequest(job.SessionId, job.TrackId, job.ChunkId, window.Path, window.SampleCount,
@@ -871,7 +883,8 @@ public sealed class AppController : IAppController
                     "The provider returned partial audio coverage or invalid timing. Its raw response is retained; this chunk needs review or an explicit retry."));
             var provenance = $"{job.ProviderId}; advertised-model={provider.Descriptor.Model}; observed-model={result.ObservedModel ?? "not returned"}; " +
                 $"track={job.TrackId:D}; normalized core={source.NormalizedStartSample}..{source.NormalizedEndSample} @16000Hz; " +
-                $"native frames={source.SourceFrameOffset}..{source.SourceFrameOffset + source.SourceFrameCount} @{source.SourceFormat.SampleRate}Hz";
+                $"native frames={source.SourceFrameOffset}..{source.SourceFrameOffset + source.SourceFrameCount} @{source.SourceFormat.SampleRate}Hz" +
+                (echoReduced ? "; speaker echo removed (WebRTC AEC3)" : "");
             var turns = Store.GetTurns(job.TrackId, window.SessionStartTicks,
                 window.SessionStartTicks + window.SampleCount * TimeSpan.TicksPerSecond / 16000L);
             IReadOnlyList<SegmentDraft> rows;
@@ -921,6 +934,35 @@ public sealed class AppController : IAppController
             await leaseLifetime.CancelAsync();
             await lease;
             if (workPath is not null && File.Exists(workPath)) File.Delete(workPath);
+        }
+    }
+
+    private Guid? EchoReferenceTrack(StoredJob job)
+    {
+        var track = Store.GetTracks(job.SessionId).FirstOrDefault(item => item.Id == job.TrackId);
+        if (track is not { Kind: "Microphone", MetadataJson: { } json }) return null;
+        try { return JsonSerializer.Deserialize<MicrophoneOptions>(json)?.EchoReferenceTrackId; }
+        catch (JsonException) { return null; }
+    }
+
+    private bool EchoReferenceReady(StoredJob job, RecognitionWindow window, IReadOnlyList<StoredAudioChunk> reference, Guid referenceTrackId)
+    {
+        // AEC needs speaker audio only up to (window end - acoustic delay), so a short missing tail is harmless.
+        var needed = checked(window.SessionStartTicks + window.SampleCount * TimeSpan.TicksPerSecond / 16000L - 100 * TimeSpan.TicksPerMillisecond);
+        if (reference.Any(item => item.StartTicks + item.SampleCount * TimeSpan.TicksPerSecond / 16000L >= needed)) return true;
+        if (!captureFeeds.ContainsKey(referenceTrackId) && !mediaTasks.ContainsKey(job.SessionId)) return true;
+        // Loopback produces no packets while nothing plays, so speaker audio still missing long after is silence.
+        return RecordingSessionId == job.SessionId && recordingClock.Elapsed.Ticks > needed + TimeSpan.FromSeconds(90).Ticks;
+    }
+
+    private async Task<bool> ReduceEchoAsync(RecognitionWindow window, IReadOnlyList<StoredAudioChunk> microphone,
+        IReadOnlyList<StoredAudioChunk> reference, CancellationToken cancellationToken)
+    {
+        try { return await EchoReduction.ApplyAsync(window, microphone, reference, cancellationToken); }
+        catch (Exception error) when (error is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException or InvalidOperationException)
+        {
+            Notify("Echo reduction is unavailable; the microphone is transcribed without it: " + error.Message, true);
+            return false;
         }
     }
 
@@ -1147,6 +1189,7 @@ public sealed class AppController : IAppController
     }
 
     private sealed record LocalSettings(string? WhisperModelPath, string? CloudBlockReason = null);
+    private sealed record MicrophoneOptions(Guid? EchoReferenceTrackId);
     private sealed record MediaCheckpoint(string SourcePath, int StreamIndex, ImportedMedia? Imported);
     private sealed class CaptureFeed
     {

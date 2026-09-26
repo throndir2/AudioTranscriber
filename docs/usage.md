@@ -94,9 +94,16 @@ provider accuracy, or live Graph access.
 3. The default Windows output endpoint is preselected. The **separate
    microphone track** is on by default when a microphone exists; loopback does not implicitly contain your microphone.
    Mic rows that speaker analysis hasn't attributed show as **Me (mic)**, so the
-   live file separates your lines from everyone else's. Use headphones:
-   there is no echo cancellation, so speaker audio the mic picks up is
-   transcribed a second time on the mic track.
+   live file separates your lines from everyone else's. **Reduce echo from
+   speakers** (on by default) lets you skip the headset: the output track is
+   exactly what your speakers played, so before transcribing each mic chunk the
+   app runs WebRTC's acoustic echo canceller (AEC3) to subtract that audio from
+   the mic. Remote voices are then not transcribed a second time as "Me", while
+   your own voice is kept, including when you talk over someone. It only
+   affects what is sent for recognition; the original mic audio is kept
+   unchanged. With headphones it has nothing to remove and leaves the mic as-is.
+   During recording, a mic chunk waits until the matching speaker audio is
+   ready (up to about 90 seconds while nothing is playing).
 4. Click **Start recording**. The global header displays recording state and the
    recording's session name, even if a different session is selected. Its red
    **Stop recording** control remains available across tabs. Meter activity is

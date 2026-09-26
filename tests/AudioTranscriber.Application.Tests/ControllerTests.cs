@@ -178,6 +178,36 @@ public sealed class ControllerTests
         await UntilAsync(() => fixture.App.Store.GetProgress(session.Id).Succeeded == 4);
     }
 
+    [Fact]
+    public async Task MicrophoneWaitsForSpeakerAudioAndHasItsEchoRemoved()
+    {
+        await using var fixture = new Fixture();
+        fixture.Provider.Release.TrySetResult();
+        var session = await fixture.App.StartRecordingAsync("Synthetic echo", "synthetic-output", "synthetic-mic",
+            "local-whisper", "en", false);
+        var random = new Random(5);
+        var speaker = new float[10 * 16000];
+        for (var i = 0; i < speaker.Length; i++)
+            speaker[i] = (float)((random.NextDouble() * 2 - 1) * 0.3 * Math.Max(0, Math.Sin(2 * Math.PI * 3.1 * i / 16000.0)));
+        var microphone = new float[speaker.Length];
+        for (var i = 1300; i < microphone.Length; i++) microphone[i] = speaker[i - 1280] * 0.4f + speaker[i - 1300] * 0.2f;
+        var micTrack = fixture.Capture.MicrophoneTrackId;
+        fixture.Capture.EmitAudio(micTrack, microphone);
+        await UntilAsync(() => fixture.App.Store.GetJobs(session.Id).Any(job =>
+            job.TrackId == micTrack && job.Error?.StartsWith("Waiting for the matching speaker audio", StringComparison.Ordinal) == true));
+        fixture.Capture.EmitAudio(fixture.Capture.TrackId, speaker);
+        await fixture.App.StopRecordingAsync();
+        await UntilAsync(() => fixture.Provider.TailDecibels.ContainsKey(micTrack), 30);
+        double raw = 0;
+        for (var i = 3 * 16000; i < microphone.Length; i++) raw += microphone[i] * microphone[i];
+        var rawDecibels = 10 * Math.Log10(raw / (microphone.Length - 3 * 16000));
+        Assert.True(rawDecibels - fixture.Provider.TailDecibels[micTrack] > 20,
+            $"Echo fell only from {rawDecibels:F1} dB to {fixture.Provider.TailDecibels[micTrack]:F1} dB.");
+        await UntilAsync(() => fixture.App.Store.GetTranscriptPage(session.Id).Any(row => row.TrackId == micTrack));
+        Assert.Contains(fixture.App.Store.GetTranscriptPage(session.Id), row =>
+            row.TrackId == micTrack && row.Provenance.Contains("speaker echo removed", StringComparison.Ordinal));
+    }
+
     private static async Task UntilAsync(Func<bool> condition, int seconds = 15)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(seconds));
@@ -222,20 +252,38 @@ public sealed class ControllerTests
         private long frames;
         private bool stopped;
         public Guid TrackId => options?.OutputTrackId ?? Guid.Empty;
+        public Guid MicrophoneTrackId => options?.MicrophoneTrackId ?? Guid.Empty;
+        private readonly Dictionary<Guid, long> trackFrames = new();
         public event Action<NativeChunk>? ChunkSealed;
         public event Action<AudioLevels>? Levels;
         public event Action<CaptureFault>? Fault;
         public IReadOnlyList<AudioDeviceInfo> GetOutputDevices() =>
             [new("synthetic-output", "Synthetic output, no desktop capture", TrackKind.Loopback, true, true)];
-        public IReadOnlyList<AudioDeviceInfo> GetMicrophoneDevices() => [];
+        public IReadOnlyList<AudioDeviceInfo> GetMicrophoneDevices() =>
+            [new("synthetic-mic", "Synthetic microphone, no desktop capture", TrackKind.Microphone, true, true)];
         public Task<CaptureSession> StartAsync(CaptureOptions request, CancellationToken cancellationToken = default)
         {
             options = request;
             frames = 0;
             stopped = false;
+            trackFrames.Clear();
             Directory.CreateDirectory(request.OutputDirectory);
             return Task.FromResult(new CaptureSession(request.SessionId, 0,
                 [new(TrackId, request.SessionId, TrackKind.Loopback, "Synthetic", AudioFormat.Pcm16Mono16K)]));
+        }
+        public void EmitAudio(Guid trackId, float[] samples)
+        {
+            var id = Guid.NewGuid();
+            var path = Path.Combine(options!.OutputDirectory, id.ToString("N") + ".synthetic-pcm");
+            var bytes = new byte[samples.Length * 2];
+            for (var i = 0; i < samples.Length; i++)
+                System.Buffers.Binary.BinaryPrimitives.WriteInt16LittleEndian(bytes.AsSpan(i * 2), (short)Math.Clamp(samples[i] * 32768f, -32768f, 32767f));
+            File.WriteAllBytes(path, bytes);
+            var start = trackFrames.GetValueOrDefault(trackId);
+            ChunkSealed?.Invoke(new(id, trackId, path, AudioFormat.Pcm16Mono16K, start, samples.Length,
+                AudioTime.FramesToTicks(start, 16000), continuity));
+            trackFrames[trackId] = start + samples.Length;
+            if (trackId == TrackId) frames = start + samples.Length;
         }
         public void Emit(int samples)
         {
@@ -303,11 +351,16 @@ public sealed class ControllerTests
         public int Calls => Volatile.Read(ref calls);
         public bool WasCanceled { get; private set; }
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public ConcurrentDictionary<Guid, double> TailDecibels { get; } = new();
         public ProviderDescriptor Descriptor { get; } = new(id, "Synthetic test provider", "no-model",
             id.StartsWith("nvidia-", StringComparison.Ordinal), TimingGranularity.Word);
         public async Task<TranscriptionResult> TranscribeAsync(TranscriptionRequest request, CancellationToken cancellationToken = default)
         {
             request.Validate();
+            var audio = await File.ReadAllBytesAsync(request.AudioPath, cancellationToken);
+            double energy = 0;
+            for (var i = 3 * 16000; i < audio.Length / 2; i++) energy += Math.Pow(BitConverter.ToInt16(audio, i * 2) / 32768.0, 2);
+            TailDecibels[request.TrackId] = 10 * Math.Log10(energy / Math.Max(1, audio.Length / 2 - 3 * 16000) + 1e-12);
             Interlocked.Increment(ref calls);
             try { await Release.Task.WaitAsync(cancellationToken); }
             catch (OperationCanceledException) { WasCanceled = true; throw; }
