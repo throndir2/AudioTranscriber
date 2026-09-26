@@ -1,4 +1,4 @@
-# AudioTranscriber
+# <img src="src/AudioTranscriber.App/Assets/AppIcon.png" alt="" width="40" align="top"> AudioTranscriber
 
 Native Windows x64 recording and transcription with a .NET 10 WPF desktop
 interface, durable local audio, searchable transcripts, and optional NVIDIA ASR.
