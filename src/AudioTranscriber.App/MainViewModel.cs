@@ -40,6 +40,11 @@ public sealed class MainViewModel : ObservableObject
     private string localModel = "No model selected in this window.";
     private string modelStatus = "";
     private Prerequisites.Report prerequisites = new(null, null, true);
+    private readonly AppUpdater updater = new();
+    private readonly CancellationTokenSource updateCancellation = new();
+    private readonly DispatcherTimer updateTimer;
+    private string updateStatus;
+    private bool updateBusy;
     private bool rememberKey;
     private int previousSucceeded = -1;
     private CaptureMeter pendingMeter = new(0, 0);
@@ -129,6 +134,88 @@ public sealed class MainViewModel : ObservableObject
         refreshTimer = new DispatcherTimer(TimeSpan.FromSeconds(3), DispatcherPriority.Background,
             (_, _) => { if (initialized && !closing) { Guard(RefreshLibrary); UpdateLiveFile(); } }, dispatcher);
         refreshTimer.Stop();
+        updateStatus = updater.IsSupported
+            ? updater.StagedTag is { } staged ? $"{staged} is downloaded and installs when you close the app." : "Updates have not been checked yet."
+            : "Automatic updates are available only in release ZIP builds.";
+        CheckForUpdatesCommand = new AsyncCommand(() => CheckForUpdatesAsync(manual: true), () => updater.IsSupported && !updateBusy && !closing);
+        RestartToUpdateCommand = new RelayCommand(() =>
+        {
+            updater.RelaunchAfterApply = true;
+            System.Windows.Application.Current.MainWindow?.Close();
+        }, () => UpdateReady && !closing);
+        updateTimer = new DispatcherTimer(TimeSpan.FromHours(6), DispatcherPriority.Background,
+            (_, _) => { if (updater.AutoUpdate && !closing) _ = CheckForUpdatesAsync(manual: false); }, dispatcher);
+        updateTimer.Stop();
+    }
+
+    public ICommand CheckForUpdatesCommand { get; }
+    public ICommand RestartToUpdateCommand { get; }
+    public string CurrentVersionText => updater.IsSupported
+        ? $"Installed version: {updater.CurrentTag} · updates come from the latest GitHub release of {AppUpdater.Repository}"
+        : "Development build: automatic updates are disabled (they apply to release ZIP builds only).";
+    public string UpdateStatus { get => updateStatus; private set => Set(ref updateStatus, value); }
+    public bool UpdateReady => updater.StagedTag is not null;
+    public string RestartToUpdateLabel => $"⟳  Restart to update ({updater.StagedTag})";
+    public bool AutoUpdate
+    {
+        get => updater.AutoUpdate;
+        set
+        {
+            updater.SetAutoUpdate(value);
+            Changed();
+            if (value && updater.IsSupported) _ = CheckForUpdatesAsync(manual: false);
+        }
+    }
+
+    /// <summary>Starts the background update check (release builds only; never in smoke mode).</summary>
+    public void StartUpdateChecks()
+    {
+        if (!updater.IsSupported) return;
+        updateTimer.Start();
+        if (updater.AutoUpdate) _ = CheckForUpdatesAsync(manual: false);
+    }
+
+    /// <summary>Called on application exit: hands a downloaded update to the helper that installs it.</summary>
+    public void ApplyPendingUpdate(IReadOnlyList<string> arguments)
+    {
+        try { updater.ApplyOnExit(arguments); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+    }
+
+    private async Task CheckForUpdatesAsync(bool manual)
+    {
+        if (!updater.IsSupported || updateBusy || closing) return;
+        updateBusy = true;
+        CommandManager.InvalidateRequerySuggested();
+        try
+        {
+            UpdateStatus = "Checking GitHub for a newer release…";
+            var release = await updater.CheckAsync(updateCancellation.Token);
+            if (release is null) { UpdateStatus = $"No public release was found. Last checked {DateTime.Now:t}."; return; }
+            if (!updater.IsNewer(release)) { UpdateStatus = $"Up to date ({updater.CurrentTag}). Last checked {DateTime.Now:t}."; return; }
+            if (updater.StagedTag == release.Tag) { UpdateStatus = $"{release.Tag} is downloaded and installs when you close the app."; return; }
+            if (!manual && !updater.AutoUpdate)
+            {
+                UpdateStatus = $"{release.Tag} is available. Choose Check for updates now to download it.";
+                return;
+            }
+            await updater.DownloadAsync(release, new Progress<string>(message => UpdateStatus = message), updateCancellation.Token);
+            UpdateStatus = $"{release.Tag} is downloaded and verified. It installs when you close the app, or choose Restart to update.";
+            Changed(nameof(UpdateReady));
+            Changed(nameof(RestartToUpdateLabel));
+            if (!StatusIsError) SetStatus($"Update {release.Tag} is ready. It installs when you close the app.");
+        }
+        catch (OperationCanceledException) when (updateCancellation.IsCancellationRequested) { }
+        catch (Exception error) when (error is System.Net.Http.HttpRequestException or IOException or InvalidDataException or
+            System.Text.Json.JsonException or UnauthorizedAccessException or KeyNotFoundException or InvalidOperationException or TaskCanceledException)
+        {
+            UpdateStatus = "Update check failed: " + error.Message;
+        }
+        finally
+        {
+            updateBusy = false;
+            CommandManager.InvalidateRequerySuggested();
+        }
     }
 
     public ObservableCollection<StoredSession> Sessions { get; } = [];
@@ -833,6 +920,8 @@ public sealed class MainViewModel : ObservableObject
         if (disposed) return;
         closing = true;
         refreshTimer.Stop();
+        updateTimer.Stop();
+        updateCancellation.Cancel();
         SetStatus("Closing: waiting for operations and original audio tails to finish…");
         try
         {

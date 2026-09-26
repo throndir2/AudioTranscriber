@@ -82,6 +82,10 @@ does not run tests, benchmarks, or ordinary branch/PR CI. The ZIP and SHA256 fil
 are published directly to the matching GitHub Release. See `docs\releases.md`
 for tag/rerun instructions, safeguards, and the locally verified Linux build.
 
+Installed release builds update themselves from the latest GitHub release: they
+download and SHA-256-verify the new ZIP in the background and install it when the
+app closes (or on **Restart to update**). See `docs\usage.md` → Updates.
+
 ## First session
 
 1. Choose the output device you actually hear. Enable a microphone only when you

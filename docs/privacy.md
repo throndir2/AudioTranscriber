@@ -15,6 +15,11 @@ not cause a recording to be sent to a cloud service. Local Whisper models are
 optional downloads; their download size and license should be reviewed before
 installation.
 
+Release builds check `api.github.com` for a newer AudioTranscriber release
+(shortly after startup and every six hours) and download it from GitHub. That
+request carries no audio, transcripts, credentials, or identifiers beyond what any
+HTTPS request reveals. Turn off automatic updates in Privacy / models → Updates.
+
 Each session requires explicit permission before its audio is sent to NVIDIA.
 This includes each enabled track, so separately transcribing microphone and
 output audio submits both tracks. Permission is checked for each outgoing job.

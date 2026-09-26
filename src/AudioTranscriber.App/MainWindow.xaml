@@ -15,6 +15,7 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <StackPanel>
                     <TextBlock Text="AudioTranscriber" FontSize="25" FontWeight="SemiBold" Foreground="White" />
@@ -27,6 +28,9 @@
                 <Button Grid.Column="2" Content="■  Stop recording" Command="{Binding StopRecordingCommand}"
                         Style="{StaticResource StopButton}" Visibility="{Binding IsRecording, Converter={StaticResource BoolVisibility}}"
                         ToolTip="Stops and seals audio. Does not cancel transcription." />
+                <Button Grid.Column="3" Content="{Binding RestartToUpdateLabel}" Command="{Binding RestartToUpdateCommand}"
+                        Style="{StaticResource PrimaryButton}" Margin="8,4,0,4" Visibility="{Binding UpdateReady, Converter={StaticResource BoolVisibility}}"
+                        ToolTip="A verified update is downloaded. Closes the app (finishing any recording safely), installs the update, and reopens it. Otherwise it installs the next time you close the app." />
             </Grid>
         </Border>
         <Grid Grid.Row="1" Margin="16">
@@ -292,6 +296,16 @@
                                     <Button Content="Install Visual C++ runtime…" Command="{Binding InstallVcRuntimeCommand}" Visibility="{Binding VcRuntimeMissing, Converter={StaticResource BoolVisibility}}" />
                                     <Button Content="Re-check prerequisites" Command="{Binding RecheckPrerequisitesCommand}" />
                                 </WrapPanel>
+                                <Separator Margin="0,8,0,16" />
+                                <TextBlock Text="Updates" Style="{StaticResource Heading}" />
+                                <TextBlock Text="{Binding CurrentVersionText}" Style="{StaticResource Help}" />
+                                <TextBlock Text="{Binding UpdateStatus}" TextWrapping="Wrap" FontWeight="SemiBold" AutomationProperties.LiveSetting="Polite" />
+                                <CheckBox IsChecked="{Binding AutoUpdate}" Content="Automatically download new releases and install them when the app closes" />
+                                <WrapPanel>
+                                    <Button Content="Check for updates now" Command="{Binding CheckForUpdatesCommand}" />
+                                    <Button Content="{Binding RestartToUpdateLabel}" Command="{Binding RestartToUpdateCommand}" Visibility="{Binding UpdateReady, Converter={StaticResource BoolVisibility}}" />
+                                </WrapPanel>
+                                <TextBlock Style="{StaticResource Help}" Text="Updates are the Windows ZIP from the latest GitHub release, verified against its published SHA-256 before use. They replace only the application folder; your library, recordings, settings, and models are untouched. Nothing installs while the app is running." />
                                 <Separator Margin="0,8,0,16" />
                                 <TextBlock Text="Your data, your decision" Style="{StaticResource Heading}" />
                                 <TextBlock Text="{Binding ConsentSummary}" FontWeight="SemiBold" />
