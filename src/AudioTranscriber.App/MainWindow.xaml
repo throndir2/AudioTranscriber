@@ -102,6 +102,19 @@
                                 </Grid>
                                 <TextBlock Text="{Binding ProviderHelp}" Style="{StaticResource Help}" />
                                 <TextBlock Text="Language is explicit: use a locale supported by the selected provider (for example, Parakeet en-GB, Canary en-US, Whisper en). Audio is not silently translated." Style="{StaticResource Help}" />
+                                <Border Background="#F4F7FA" BorderBrush="#D6E0E8" BorderThickness="1" CornerRadius="6" Padding="14" Margin="0,0,0,18">
+                                    <StackPanel>
+                                        <CheckBox IsChecked="{Binding LiveFileEnabled}" AutomationProperties.Name="Mirror new sessions to a live transcript file">
+                                            <TextBlock TextWrapping="Wrap" FontWeight="SemiBold" Text="Write the new session's transcript to a live text file" />
+                                        </CheckBox>
+                                        <TextBlock Style="{StaticResource Help}" Text="The file is refreshed every few seconds as transcript rows arrive and is never locked, so VS Code or other apps can keep it open and read it while it is being written. Treat it as read-only: edits in other apps are overwritten. Use Live file on the Transcript tab to mirror an existing session." />
+                                        <DockPanel>
+                                            <Button DockPanel.Dock="Right" Content="_Browse…" Command="{Binding BrowseLiveFileCommand}" />
+                                            <TextBox Text="{Binding LiveFilePath, UpdateSourceTrigger=LostFocus}" VerticalContentAlignment="Center" AutomationProperties.Name="Live transcript file path" />
+                                        </DockPanel>
+                                        <TextBlock Text="{Binding LiveFileStatus}" FontSize="12" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,4,0,0" />
+                                    </StackPanel>
+                                </Border>
                                 <Border Background="#EDF7F5" BorderBrush="#B8D8D2" BorderThickness="1" CornerRadius="6" Padding="14" Margin="0,0,0,18">
                                     <StackPanel>
                                         <TextBlock Text="Optional NVIDIA upload — this new session only" FontWeight="SemiBold" />
@@ -174,6 +187,8 @@
                             </Grid>
                             <DockPanel Grid.Row="1" Margin="0,0,0,6">
                                 <Button DockPanel.Dock="Right" Content="_Export…" Command="{Binding ExportCommand}" />
+                                <Button DockPanel.Dock="Right" Content="Stop live file" Command="{Binding StopLiveFileCommand}" />
+                                <Button DockPanel.Dock="Right" Content="_Live file" Command="{Binding LiveMirrorSelectedCommand}" ToolTip="Continuously mirror this session's transcript to the unlocked live text file chosen on Record / import." />
                                 <Button DockPanel.Dock="Right" Content="Analyze speakers" Command="{Binding DiarizeCommand}" ToolTip="Runs real local automatic diarization; explicitly install the small models first." />
                                 <TextBlock Text="Only 200 rows per keyset page. Double-click a row to play its own track." FontSize="12" TextWrapping="Wrap" Foreground="{StaticResource Muted}" />
                             </DockPanel>

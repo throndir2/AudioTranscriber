@@ -56,6 +56,21 @@ public sealed class DesktopDialogs(Func<Window> owner)
         return dialog.ShowDialog(owner()) == true ? dialog.FileName : null;
     }
 
+    public string? SaveLiveTranscript(string currentPath)
+    {
+        var dialog = new SaveFileDialog
+        {
+            Title = "Choose the live transcript file (kept unlocked so other apps can read it)",
+            FileName = string.IsNullOrWhiteSpace(currentPath) ? "live-transcript.txt" : Path.GetFileName(currentPath),
+            InitialDirectory = Path.GetDirectoryName(currentPath) is { Length: > 0 } folder && Directory.Exists(folder) ? folder : "",
+            Filter = "Plain text|*.txt|Markdown|*.md|All files|*.*",
+            DefaultExt = ".txt",
+            AddExtension = true,
+            OverwritePrompt = false
+        };
+        return dialog.ShowDialog(owner()) == true ? dialog.FileName : null;
+    }
+
     public bool Confirm(string title, string message) =>
         MessageBox.Show(owner(), message, title, MessageBoxButton.YesNo, MessageBoxImage.Question,
             MessageBoxResult.No) == MessageBoxResult.Yes;

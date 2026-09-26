@@ -258,7 +258,7 @@ function Publish-OwnedRelease([object]$Version, [string]$SourceCommit, [string]$
     Assert-RemoteReleaseTag $Version.Tag $SourceCommit ''
     if ($release.draft) {
         $release = Invoke-ReleaseApi -Method PATCH -Route "releases/$([long]$release.id)" -Body @{
-            draft = $false; prerelease = $Version.Prerelease; make_latest = 'false'
+            draft = $false; prerelease = $Version.Prerelease; make_latest = (-not $Version.Prerelease).ToString().ToLowerInvariant()
         }
     }
     Assert-RemoteReleaseTag $Version.Tag $SourceCommit ''

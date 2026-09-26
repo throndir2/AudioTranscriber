@@ -4,16 +4,22 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. v1.2.3). Leave empty to bump the patch of the highest existing vX.Y.Z tag.'
+        required: false
+        default: ''
 
 permissions: {}
 
 concurrency:
-  group: release-${{ github.ref_name }}
+  group: release-${{ inputs.version || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
   release:
-    if: github.ref_type == 'tag' && !github.event.deleted
+    if: github.event_name == 'workflow_dispatch' || (github.ref_type == 'tag' && !github.event.deleted)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -22,23 +28,51 @@ jobs:
       run:
         shell: pwsh
     env:
-      RELEASE_TAG: ${{ github.ref_name }}
-      RELEASE_EVENT_SHA: ${{ github.event.after }}
+      RELEASE_EVENT_SHA: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.after }}
       NUGET_PACKAGES: ${{ github.workspace }}/.tools/nuget
       DOTNET_CLI_TELEMETRY_OPTOUT: '1'
       DOTNET_NOLOGO: '1'
     steps:
-      - name: Check out the exact tag event revision
+      - name: Check out the exact event revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Create the release tag for a manual run
+        id: tag
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          $repo = $env:GITHUB_REPOSITORY
+          $tag = "$env:INPUT_VERSION".Trim()
+          if (-not $tag) {
+            $stable = @(gh api "repos/$repo/git/matching-refs/tags/v" --jq '.[].ref' |
+              ForEach-Object { $_ -replace '^refs/tags/', '' } | Where-Object { $_ -match '^v\d+\.\d+\.\d+$' })
+            $highest = $stable | Sort-Object { [version]$_.Substring(1) } -Descending | Select-Object -First 1
+            $tag = if ($highest -match '^v(\d+)\.(\d+)\.(\d+)$') { "v$($Matches[1]).$($Matches[2]).$([int]$Matches[3] + 1)" } else { 'v0.1.0' }
+          }
+          if (-not $tag.StartsWith('v')) { $tag = "v$tag" }
+          . ./scripts/Release.ps1
+          [void](Get-ReleaseVersion $tag)
+          $existing = gh api "repos/$repo/git/ref/tags/$tag" --jq '.object.sha' 2>$null
+          if ("$existing" -notmatch '^[0-9a-f]{40}$') {
+            gh api -X POST "repos/$repo/git/refs" -f "ref=refs/tags/$tag" -f "sha=$env:GITHUB_SHA" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Could not create tag $tag." }
+            Write-Output "Created tag $tag at $env:GITHUB_SHA"
+          } elseif ($existing -ne $env:GITHUB_SHA) {
+            throw "Tag $tag already exists on a different commit. Choose a new version."
+          }
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
       - name: Validate tag and inspect existing release
         id: prepare
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.tag.outputs.tag || github.ref_name }}
         run: |
           .\scripts\Release.ps1 -Phase Prepare -Tag $env:RELEASE_TAG
 
@@ -56,6 +90,7 @@ jobs:
         if: steps.prepare.outputs.needs-build == 'true'
         id: package
         env:
+          RELEASE_TAG: ${{ steps.tag.outputs.tag || github.ref_name }}
           RELEASE_COMMIT: ${{ steps.prepare.outputs.commit }}
         run: |
           $publish = Join-Path $env:RUNNER_TEMP 'publish'
@@ -67,6 +102,7 @@ jobs:
         if: steps.prepare.outputs.needs-publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.tag.outputs.tag || github.ref_name }}
           RELEASE_COMMIT: ${{ steps.prepare.outputs.commit }}
           RELEASE_ZIP: ${{ steps.package.outputs.zip }}
           RELEASE_CHECKSUM: ${{ steps.package.outputs.checksum }}

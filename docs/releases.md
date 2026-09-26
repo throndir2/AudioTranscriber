@@ -18,12 +18,20 @@ git push origin "refs/tags/$tag"
 Accepted tags are `vMAJOR.MINOR.PATCH` and SemVer prereleases such as
 `v1.2.3-rc.1`. Leading-zero numeric identifiers, branch names, arbitrary refs,
 and build metadata (`+...`) are rejected. Tags with a prerelease suffix create
-prereleases; stable tags do not. The workflow does not change an existing
-release's latest designation.
+prereleases; stable tags do not. Stable releases are marked as the repository's
+Latest release when published; prereleases are not.
 
-There is deliberately no manual branch-build trigger. Retry the original tagged
-run from the Actions UI instead. A rerun revalidates the remote tag, including
-annotated tags, against the exact checked-out commit and original push SHA.
+### Manual release (one click)
+
+Actions → **Release build** → **Run workflow**, pick the branch, and optionally
+enter a version. Leaving the version empty bumps the patch of the highest existing
+`vX.Y.Z` tag (for example `v0.1.0` → `v0.1.1`). The run creates that tag on the
+selected branch's current commit, then builds and publishes exactly like a tag
+push. An existing tag is reused only if it already points to that commit.
+Tags created by the run do not trigger a second run.
+
+Retry a failed run from the Actions UI. A rerun revalidates the remote tag,
+including annotated tags, against the exact checked-out commit and original event SHA.
 Deleted, moved, missing, or non-commit tags fail instead of building `main`.
 Nothing runs on an ordinary branch push.
 

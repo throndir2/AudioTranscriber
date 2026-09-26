@@ -42,7 +42,7 @@ function Invoke-ReleaseApi {
         throw 'Tag lookup must allow a missing release.'
     }
     if ($Method -eq 'PATCH' -and
-        ($Body.draft -ne $false -or $Body.prerelease -ne $false -or $Body.make_latest -cne 'false')) {
+        ($Body.draft -ne $false -or $Body.prerelease -ne $false -or $Body.make_latest -cne 'true')) {
         throw 'Finalization changed unexpected release metadata.'
     }
     if ($request.Error) { throw $request.Error }

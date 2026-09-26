@@ -90,6 +90,23 @@ search/page, to TXT, JSON, SRT, or WebVTT. JSON retains raw text/corrections and
 timing/source fields. Text/subtitle exports include a provenance sidecar. Export
 does not manufacture finer timing than the stored rows.
 
+### Live transcript file (read it in VS Code while recording)
+
+On **Record / import**, check **Write the new session's transcript to a live
+text file** and choose a path (default `Documents\AudioTranscriber\live-transcript.txt`;
+the path and checkbox are remembered). When you start a recording or import,
+the app rewrites that file every ~3 seconds whenever the transcript changes, in
+the same `[hh:mm:ss.fff - hh:mm:ss.fff] Speaker: text` format as the TXT export.
+Corrections and speaker renames are reflected on the next refresh.
+
+The file is opened without an exclusive lock (`FileShare.ReadWrite | Delete`) and
+closed after each update, so VS Code, Copilot, or any other reader can keep it open
+alongside other documents while it grows. VS Code reloads it automatically as long
+as you have not edited it. Treat it as read-only: edits made elsewhere are
+overwritten. To mirror an existing session instead, select it and click
+**Live file** on the Transcript tab; **Stop live file** stops updating and leaves
+the file in place.
+
 ## Processing and privacy
 
 **Jobs** displays all-job aggregate counts and the newest 100 job details/errors.
