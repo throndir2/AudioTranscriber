@@ -364,11 +364,7 @@ public sealed class LibraryStore
         {
             ("$session", sessionId), ("$limit", Math.Clamp(limit, 1, 1000))
         };
-        var sql = """
-            SELECT t.*,coalesce(s.name,CASE WHEN t.speaker_id IS NOT NULL THEN t.speaker_id WHEN (SELECT kind FROM tracks WHERE id=t.track_id)='Microphone' THEN 'Me (mic)' ELSE 'Unknown' END) AS speaker_name
-            FROM segments t LEFT JOIN speakers s ON s.id=t.speaker_id AND s.session_id=t.session_id
-            WHERE t.session_id=$session
-            """;
+        var sql = TranscriptSelect + " WHERE t.session_id=$session";
         if (!string.IsNullOrWhiteSpace(search))
         {
             sql += " AND t.rowid IN (SELECT rowid FROM transcript_fts WHERE transcript_fts MATCH $search)";
@@ -407,6 +403,21 @@ public sealed class LibraryStore
             cursor = new(last.StartTicks, last.Id);
         }
     }
+
+    /// <summary>Transcript rows in insertion order after a sequence number, for following a session live.</summary>
+    public IReadOnlyList<(long Sequence, TranscriptRow Row)> GetSegmentsAddedAfter(Guid sessionId, long afterSequence, int limit = 100) =>
+        Read(TranscriptSelect.Replace("SELECT t.*", "SELECT t.rowid AS seq,t.*", StringComparison.Ordinal) +
+            " WHERE t.session_id=$session AND t.rowid>$after ORDER BY t.rowid LIMIT $limit",
+            r => (L(r, "seq"), ReadTranscript(r)), ("$session", sessionId), ("$after", afterSequence), ("$limit", Math.Clamp(limit, 1, 1000)));
+
+    public long GetLatestSegmentSequence(Guid sessionId) =>
+        Read("SELECT coalesce(max(rowid),0) FROM segments WHERE session_id=$session", r => r.GetInt64(0), ("$session", sessionId)).Single();
+
+    public int CountSegments(Guid sessionId) =>
+        Read("SELECT count(*) FROM segments WHERE session_id=$session", r => (int)r.GetInt64(0), ("$session", sessionId)).Single();
+
+    public int CountJobSegments(Guid jobId) =>
+        Read("SELECT count(*) FROM segments WHERE job_id=$job", r => (int)r.GetInt64(0), ("$job", jobId)).Single();
 
     public void CorrectSegment(string id, string? correction) =>
         Write("UPDATE segments SET correction=$text WHERE id=$id", ("$text", correction), ("$id", id));
@@ -564,6 +575,11 @@ public sealed class LibraryStore
         new(S(r, "id"), G(r, "session_id"), G(r, "track_id"), L(r, "start_ticks"), L(r, "end_ticks"),
             S(r, "raw_text"), N(r, "correction"), N(r, "speaker_id"), S(r, "speaker_name"), S(r, "granularity"),
             S(r, "provenance"), L(r, "uncertain") != 0);
+
+    private const string TranscriptSelect = """
+        SELECT t.*,coalesce(s.name,CASE WHEN t.speaker_id IS NOT NULL THEN t.speaker_id WHEN (SELECT kind FROM tracks WHERE id=t.track_id)='Microphone' THEN 'Me (mic)' ELSE 'Unknown' END) AS speaker_name
+        FROM segments t LEFT JOIN speakers s ON s.id=t.speaker_id AND s.session_id=t.session_id
+        """;
 
     private const string Schema = """
         CREATE TABLE IF NOT EXISTS sessions(

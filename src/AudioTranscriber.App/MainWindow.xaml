@@ -109,9 +109,9 @@
                                 <Border Background="#F4F7FA" BorderBrush="#D6E0E8" BorderThickness="1" CornerRadius="6" Padding="14" Margin="0,0,0,18">
                                     <StackPanel>
                                         <CheckBox IsChecked="{Binding LiveFileEnabled}" AutomationProperties.Name="Mirror new sessions to a live transcript file">
-                                            <TextBlock TextWrapping="Wrap" FontWeight="SemiBold" Text="Write the new session's transcript to a live text file" />
+                                            <TextBlock TextWrapping="Wrap" FontWeight="SemiBold" Text="Write the transcript to a live text file (the current recording, or the next recording / import)" />
                                         </CheckBox>
-                                        <TextBlock Style="{StaticResource Help}" Text="The file is refreshed every few seconds as transcript rows arrive and is never locked, so VS Code or other apps can keep it open and read it while it is being written. Treat it as read-only: edits in other apps are overwritten. Use Live file on the Transcript tab to mirror an existing session." />
+                                        <TextBlock Style="{StaticResource Help}" Text="The file is refreshed every few seconds as transcript lines arrive and is never locked, so VS Code or other apps can keep it open and read it while it is being written. An existing file is overwritten. Treat it as read-only: edits in other apps are overwritten. Use Live file on the Transcript tab to mirror an existing session." />
                                         <DockPanel>
                                             <Button DockPanel.Dock="Right" Content="_Browse…" Command="{Binding BrowseLiveFileCommand}" />
                                             <TextBox Text="{Binding LiveFilePath, UpdateSourceTrigger=LostFocus}" VerticalContentAlignment="Center" AutomationProperties.Name="Live transcript file path" />
@@ -151,6 +151,44 @@
                                 </WrapPanel>
                                 <TextBlock Text="{Binding SetupStatus}" Visibility="{Binding HasSetupStatus, Converter={StaticResource BoolVisibility}}" Foreground="{StaticResource Accent}" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,4,0,6" AutomationProperties.LiveSetting="Polite" />
                                 <TextBlock Text="Stop waits for original tails to seal. Transcription pause/cancel are separate controls in Jobs. Endpoint loss is an error, never a silent switch to a different device." Style="{StaticResource Help}" />
+                                <DockPanel Margin="0,4,0,0">
+                                    <Button DockPanel.Dock="Right" Content="Clear" Command="{Binding ClearActivityCommand}" Padding="10,3" />
+                                    <Button DockPanel.Dock="Right" Content="Copy" Command="{Binding CopyActivityCommand}" Padding="10,3" />
+                                    <TextBlock Text="Live activity" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                </DockPanel>
+                                <TextBlock Style="{StaticResource Help}" Text="Shows what is happening right now: audio captured, each chunk being transcribed, every new transcript line as it arrives, errors, and live file writes. Audio is transcribed in about 24-second chunks, so the first line appears roughly a minute after you start." />
+                                <ListBox x:Name="ActivityList" ItemsSource="{Binding ActivityLog}" Height="260" Margin="0,0,0,8"
+                                         ScrollViewer.HorizontalScrollBarVisibility="Disabled" Background="#FBFCFD" BorderBrush="#D6E0E8"
+                                         AutomationProperties.Name="Live activity log">
+                                    <ListBox.ItemContainerStyle>
+                                        <Style TargetType="ListBoxItem">
+                                            <Setter Property="Padding" Value="2,1" />
+                                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                            <Setter Property="AutomationProperties.Name" Value="{Binding Text}" />
+                                        </Style>
+                                    </ListBox.ItemContainerStyle>
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="62" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="{Binding TimeText}" Foreground="{StaticResource Muted}" FontFamily="Consolas" FontSize="12" Margin="0,1,0,0" />
+                                                <TextBlock x:Name="EntryText" Grid.Column="1" Text="{Binding Text}" TextWrapping="Wrap" Foreground="#44515C" />
+                                            </Grid>
+                                            <DataTemplate.Triggers>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Transcript">
+                                                    <Setter TargetName="EntryText" Property="Foreground" Value="#10202E" />
+                                                    <Setter TargetName="EntryText" Property="FontWeight" Value="SemiBold" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Error">
+                                                    <Setter TargetName="EntryText" Property="Foreground" Value="#A52232" />
+                                                </DataTrigger>
+                                            </DataTemplate.Triggers>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
                                 <Separator Margin="0,8,0,18" />
                                 <TextBlock Text="Bring an existing recording" FontSize="18" FontWeight="SemiBold" />
                                 <TextBlock Style="{StaticResource Help}" Text="Import an audio or audio-bearing video file. FFprobe inspects streams first: a single audio stream is selected automatically; multiple streams require your choice. A managed original is retained and progress appears below. No entire multi-hour recording is loaded into the UI." />

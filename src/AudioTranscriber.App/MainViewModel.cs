@@ -60,6 +60,15 @@ public sealed class MainViewModel : ObservableObject
     private string? lastLiveContent;
     private Task? liveWrite;
     private string liveFileStatus = "Live transcript file is off.";
+    private bool liveFileLoggedWrite, liveFileFailing;
+    private Guid? watchedSessionId;
+    private long watchedSequence;
+    private readonly Dictionary<Guid, string> watchedJobs = new();
+    private readonly Dictionary<Guid, string> watchedTracks = new();
+    private readonly HashSet<string> watchedNotices = new();
+    private string? lastLogText;
+    private const int MaxActivityEntries = 1000;
+    private const string DiarizationProviderId = "local-diarization";
 
     public MainViewModel(IAppController controller, DesktopDialogs dialogs, Dispatcher dispatcher)
     {
@@ -134,11 +143,18 @@ public sealed class MainViewModel : ObservableObject
         LiveMirrorSelectedCommand = new RelayCommand(() => { if (SelectedSession is { } s) StartLiveFile(s.Id); },
             () => SelectedSession is not null && !closing);
         StopLiveFileCommand = new RelayCommand(StopLiveFile, () => liveSessionId is not null && !closing);
+        ClearActivityCommand = new RelayCommand(() => { ActivityLog.Clear(); lastLogText = null; });
+        CopyActivityCommand = new RelayCommand(() =>
+        {
+            try { System.Windows.Clipboard.SetText(string.Join(Environment.NewLine, ActivityLog)); }
+            catch (System.Runtime.InteropServices.ExternalException) { SetStatus("The clipboard is busy; try Copy again.", true); }
+        }, () => ActivityLog.Count > 0);
         LoadLiveSettings();
+        if (liveFileEnabled) liveFileStatus = ArmedLiveStatus();
         controller.Notification += OnNotification;
         controller.LevelsChanged += OnLevelsChanged;
         refreshTimer = new DispatcherTimer(TimeSpan.FromSeconds(3), DispatcherPriority.Background,
-            (_, _) => { if (initialized && !closing) { Guard(RefreshLibrary); Guard(RefreshSetup); UpdateLiveFile(); } }, dispatcher);
+            (_, _) => { if (initialized && !closing) { Guard(RefreshLibrary); Guard(RefreshSetup); Guard(PollActivity); UpdateLiveFile(); } }, dispatcher);
         refreshTimer.Stop();
         updateStatus = updater.IsSupported
             ? updater.StagedTag is { } staged ? $"{staged} is downloaded and installs when you close the app." : "Updates have not been checked yet."
@@ -378,18 +394,45 @@ public sealed class MainViewModel : ObservableObject
     public ICommand BrowseLiveFileCommand { get; }
     public ICommand LiveMirrorSelectedCommand { get; }
     public ICommand StopLiveFileCommand { get; }
+    public ICommand ClearActivityCommand { get; }
+    public ICommand CopyActivityCommand { get; }
+    public ObservableCollection<ActivityEntry> ActivityLog { get; } = [];
 
     public string LiveFilePath
     {
         get => liveFilePath;
-        set { if (Set(ref liveFilePath, value ?? "")) { lastLiveContent = null; SaveLiveSettings(); } }
+        set
+        {
+            if (!Set(ref liveFilePath, value ?? "")) return;
+            lastLiveContent = null;
+            liveFileLoggedWrite = false;
+            SaveLiveSettings();
+            if (liveSessionId is null && LiveFileEnabled) LiveFileStatus = ArmedLiveStatus();
+            else if (liveSessionId is not null) UpdateLiveFile();
+        }
     }
     public bool LiveFileEnabled
     {
         get => liveFileEnabled;
-        set { if (Set(ref liveFileEnabled, value)) SaveLiveSettings(); }
+        set
+        {
+            if (!Set(ref liveFileEnabled, value)) return;
+            SaveLiveSettings();
+            // Ticking the box during a recording mirrors that recording right away instead of waiting for the next session.
+            if (value && liveSessionId is null && controller.RecordingSessionId is { } recording) StartLiveFile(recording);
+            else if (!value && liveSessionId is not null) StopLiveFile();
+            else if (liveSessionId is null)
+            {
+                LiveFileStatus = value ? ArmedLiveStatus() : "Live transcript file is off.";
+                Log(value ? LiveFileStatus : "Live transcript file turned off.");
+            }
+        }
     }
     public string LiveFileStatus { get => liveFileStatus; private set => Set(ref liveFileStatus, value); }
+
+    private string ArmedLiveStatus() => string.IsNullOrWhiteSpace(LiveFilePath)
+        ? "Live file is on, but no file path is set."
+        : $"Live file is on: the next recording or import is written to {LiveFilePath.Trim()}";
 
     private string LiveSettingsPath => Path.Combine(controller.Store.RootDirectory, "live-transcript.json");
 
@@ -421,7 +464,11 @@ public sealed class MainViewModel : ObservableObject
         }
         liveSessionId = sessionId;
         lastLiveContent = null;
+        liveFileLoggedWrite = false;
+        liveFileFailing = false;
+        var name = Sessions.FirstOrDefault(x => x.Id == sessionId)?.Name ?? controller.Store.GetSession(sessionId).Name;
         LiveFileStatus = $"Live transcript file active → {LiveFilePath.Trim()}";
+        Log($"Live file on: mirroring \"{name}\" → {LiveFilePath.Trim()}");
         CommandManager.InvalidateRequerySuggested();
         UpdateLiveFile();
     }
@@ -430,6 +477,7 @@ public sealed class MainViewModel : ObservableObject
     {
         liveSessionId = null;
         LiveFileStatus = "Live transcript file stopped. The file was left in place.";
+        Log(LiveFileStatus);
         CommandManager.InvalidateRequerySuggested();
     }
 
@@ -442,21 +490,148 @@ public sealed class MainViewModel : ObservableObject
         var store = controller.Store;
         liveWrite = Task.Run(() =>
         {
-            var content = LiveTranscriptFile.Render(store, id);
-            if (content == previous) return (Content: content, Written: false);
-            LiveTranscriptFile.Write(path, content);
-            return (Content: content, Written: true);
+            var content = LiveTranscriptFile.Render(store, id, out var rows);
+            if (content == previous) return (Content: content, Rows: rows, Bytes: -1L);
+            return (Content: content, Rows: rows, Bytes: LiveTranscriptFile.Write(path, content));
         }).ContinueWith(task => dispatcher.InvokeAsync(() =>
         {
             if (liveSessionId != id || !string.Equals(LiveFilePath.Trim(), path, StringComparison.Ordinal)) return;
             if (task.IsFaulted)
             {
                 LiveFileStatus = "Live file update failed; retrying: " + task.Exception?.GetBaseException().Message;
+                if (!liveFileFailing) Log(LiveFileStatus, ActivityKind.Error);
+                liveFileFailing = true;
                 return;
             }
-            lastLiveContent = task.Result.Content;
-            if (task.Result.Written) LiveFileStatus = $"Live file updated {DateTime.Now:HH:mm:ss} → {path}";
+            var (content, rows, bytes) = task.Result;
+            lastLiveContent = content;
+            if (bytes < 0) return;
+            var lines = rows == 1 ? "1 transcript line" : $"{rows:N0} transcript lines";
+            LiveFileStatus = $"Live file updated {DateTime.Now:HH:mm:ss} · {lines} · {bytes:N0} bytes → {path}";
+            if (!liveFileLoggedWrite || liveFileFailing)
+                Log($"Live file written: {lines}, {bytes:N0} bytes on disk → {path}");
+            else if (rows > 0)
+                Log($"Live file updated: {lines} → {Path.GetFileName(path)}");
+            liveFileLoggedWrite = true;
+            liveFileFailing = false;
         }).Task, TaskScheduler.Default).Unwrap();
+    }
+
+    private void Log(string text, ActivityKind kind = ActivityKind.Info, string? group = null)
+    {
+        if (!dispatcher.CheckAccess()) { dispatcher.BeginInvoke(() => Log(text, kind, group)); return; }
+        if (closing || string.IsNullOrWhiteSpace(text)) return;
+        if (kind != ActivityKind.Transcript && text == lastLogText) return;
+        lastLogText = text;
+        var entry = new ActivityEntry(DateTime.Now, kind, text, group);
+        // Consecutive progress updates of the same kind (copying, audio ready through …) replace each other.
+        if (group is not null && ActivityLog.Count > 0 && ActivityLog[^1].Group == group) ActivityLog[^1] = entry;
+        else ActivityLog.Add(entry);
+        while (ActivityLog.Count > MaxActivityEntries) ActivityLog.RemoveAt(0);
+    }
+
+    private void LogNotification(string message)
+    {
+        for (var i = ActivityLog.Count - 1; i >= Math.Max(0, ActivityLog.Count - 50); i--)
+            if (ActivityLog[i].Text == message) return;
+        var digit = message.AsSpan().IndexOfAnyInRange('0', '9');
+        Log(message, ActivityKind.Info, digit >= 8 ? message[..digit] : null);
+    }
+
+    // Follows the recording, mirrored, or selected session and logs job progress plus each new transcript line.
+    private void PollActivity()
+    {
+        var target = controller.RecordingSessionId ?? liveSessionId ?? SelectedSession?.Id;
+        if (target is not { } id) return;
+        var store = controller.Store;
+        if (watchedSessionId != id)
+        {
+            watchedSessionId = id;
+            watchedSequence = store.GetLatestSegmentSequence(id);
+            watchedJobs.Clear();
+            watchedTracks.Clear();
+            watchedNotices.Clear();
+            foreach (var job in store.GetJobs(id, 300)) watchedJobs[job.Id] = JobKey(job);
+            var existing = store.CountSegments(id);
+            var name = Sessions.FirstOrDefault(x => x.Id == id)?.Name ?? store.GetSession(id).Name;
+            Log($"Following \"{name}\" ({(existing == 0 ? "no transcript lines yet" : $"{existing:N0} transcript lines so far")}). New lines appear here as they are transcribed.");
+            return;
+        }
+        foreach (var job in store.GetJobs(id, 300).Reverse())
+        {
+            var key = JobKey(job);
+            var known = watchedJobs.TryGetValue(job.Id, out var previous);
+            if (known && previous == key) continue;
+            watchedJobs[job.Id] = key;
+            LogJob(job, known);
+        }
+        var latest = store.GetLatestSegmentSequence(id);
+        if (latest <= watchedSequence) return;
+        const int limit = 100;
+        var rows = store.GetSegmentsAddedAfter(id, watchedSequence, limit);
+        foreach (var (sequence, row) in rows)
+        {
+            watchedSequence = sequence;
+            Log($"{TrackName(row.TrackId)} [{row.Timestamp}] {row.SpeakerName}: {row.Text.Trim()}", ActivityKind.Transcript);
+        }
+        if (latest > watchedSequence)
+        {
+            Log("…more lines were added at once; see the Transcript tab for all of them.");
+            watchedSequence = latest;
+        }
+    }
+
+    private static string JobKey(StoredJob job) => job.State + "|" + job.Error;
+
+    private void LogJob(StoredJob job, bool known)
+    {
+        var diarization = job.ProviderId == DiarizationProviderId;
+        var what = diarization ? "Speaker analysis" : "Transcription";
+        switch (job.State)
+        {
+            case "Running" when !diarization:
+                Log($"Transcribing {ChunkLabel(job)} with {job.ProviderId}…");
+                break;
+            case "Succeeded" when !diarization:
+                var count = controller.Store.CountJobSegments(job.Id);
+                Log($"Transcribed {ChunkLabel(job)}: " + (count == 0 ? "no speech detected." : count == 1 ? "1 line." : $"{count} lines."));
+                break;
+            case "Failed" or "Blocked" or "RetryWaiting" when diarization:
+                if (watchedNotices.Add(job.State + job.Error))
+                    Log($"Speaker analysis {(job.State == "RetryWaiting" ? "will retry" : job.State.ToLowerInvariant())}: {job.Error ?? "no detail"}", ActivityKind.Error);
+                break;
+            case "Failed" or "Blocked":
+                Log($"{what} {job.State.ToLowerInvariant()} for {ChunkLabel(job)}: {job.Error ?? "no detail"}", ActivityKind.Error);
+                break;
+            case "RetryWaiting":
+                Log($"{what} will retry for {ChunkLabel(job)}: {job.Error ?? "no detail"}", ActivityKind.Error);
+                break;
+            case "Pending" when job.Error is { Length: > 0 } reason:
+                if (watchedNotices.Add(reason)) Log($"{what} waiting: {reason}");
+                break;
+            case "Paused" or "Canceled" when known && !diarization:
+                Log($"Transcription {job.State.ToLowerInvariant()} for {ChunkLabel(job)}.");
+                break;
+        }
+    }
+
+    private string ChunkLabel(StoredJob job)
+    {
+        try
+        {
+            var chunk = controller.Store.GetChunk(job.ChunkId);
+            var end = chunk.StartTicks + chunk.SampleCount * TimeSpan.TicksPerSecond / 16000L;
+            return $"{TrackName(job.TrackId)} {TranscriptPresentation.Duration(chunk.StartTicks)}–{TranscriptPresentation.Duration(end)}";
+        }
+        catch (InvalidOperationException) { return TrackName(job.TrackId); }
+    }
+
+    private string TrackName(Guid trackId)
+    {
+        if (watchedTracks.TryGetValue(trackId, out var name)) return name;
+        if (watchedSessionId is { } session)
+            foreach (var track in controller.Store.GetTracks(session)) watchedTracks[track.Id] = track.Name;
+        return watchedTracks.TryGetValue(trackId, out name) ? name : "Track";
     }
 
     private sealed record LiveFileSettings(string Path, bool Enabled);
@@ -998,10 +1173,20 @@ public sealed class MainViewModel : ObservableObject
             _ => "The operation failed. Review the selected session's jobs and error state; no automatic cloud fallback is used."
         }, true);
     }
-    private void SetStatus(string message, bool error = false) { Status = message; StatusIsError = error; }
+    private void SetStatus(string message, bool error = false)
+    {
+        Status = message;
+        StatusIsError = error;
+        if (error) Log(message, ActivityKind.Error);
+    }
     private void OnNotification(AppNotification notification) => dispatcher.BeginInvoke(() =>
     {
-        if (!closing) { SetStatus(notification.Message, notification.IsError); Changed(nameof(IsRecording)); Changed(nameof(CaptureState)); }
+        if (!closing)
+        {
+            SetStatus(notification.Message, notification.IsError);
+            if (!notification.IsError) LogNotification(notification.Message);
+            Changed(nameof(IsRecording)); Changed(nameof(CaptureState));
+        }
     });
     private void OnLevelsChanged(CaptureMeter levels)
     {

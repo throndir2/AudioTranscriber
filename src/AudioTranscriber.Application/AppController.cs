@@ -713,6 +713,8 @@ public sealed class AppController : IAppController
 
     private async Task ConsumeNormalizedAsync(StoredSession session, IAsyncEnumerable<NormalizedChunk> chunks, CancellationToken cancellationToken)
     {
+        // Only word-timed providers read neighbor audio as context; others can transcribe each chunk as soon as it is sealed.
+        var waitForNext = UsesNeighborContext(session.ProviderId);
         StoredAudioChunk? previous = null;
         await foreach (var decoded in chunks.WithCancellation(cancellationToken))
         {
@@ -723,7 +725,8 @@ public sealed class AppController : IAppController
                 chunk.NormalizedStartSample, checked((int)chunk.SampleCount), chunk.SessionStartTicks, JsonSerializer.Serialize(chunk));
             Store.AddNormalizedChunk(stored);
             Store.QueueTranscription(stored, DiarizationProvider, session.Language, false);
-            if (previous is not null) QueueAsr(previous, session);
+            if (!waitForNext) QueueAsr(stored, session);
+            else if (previous is not null) QueueAsr(previous, session);
             previous = stored;
             wake.Release();
             Notify($"Audio ready through {TimeSpan.FromTicks(chunk.SessionEndTicks):g}; recording/import is independent of recognition.");
@@ -731,6 +734,9 @@ public sealed class AppController : IAppController
         if (previous is not null) QueueAsr(previous, session);
         wake.Release();
     }
+
+    private static bool UsesNeighborContext(string providerId) =>
+        NvidiaModelCatalog.All.Any(model => model.Id == providerId && model.VerifiedWordTiming);
 
     private void QueueAsr(StoredAudioChunk chunk, StoredSession session) =>
         Store.QueueTranscription(chunk, session.ProviderId, session.Language, RequireProvider(session.ProviderId).IsCloud);

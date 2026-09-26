@@ -143,12 +143,18 @@ does not manufacture finer timing than the stored rows.
 
 ### Live transcript file (read it in VS Code while recording)
 
-On **Record / import**, check **Write the new session's transcript to a live
-text file** and choose a path (default `Documents\AudioTranscriber\live-transcript.txt`;
-the path and checkbox are remembered). When you start a recording or import,
-the app rewrites that file every ~3 seconds whenever the transcript changes, in
+On **Record / import**, check **Write the transcript to a live text file** and
+choose a path (default `Documents\AudioTranscriber\live-transcript.txt`; an existing
+file is overwritten; the path and checkbox are remembered). Checking the box while
+a recording is running starts mirroring that recording immediately; otherwise the
+next recording or import is mirrored. Unchecking it stops updates and leaves the file.
+The app rewrites that file every ~3 seconds whenever the transcript changes, in
 the same `[hh:mm:ss.fff - hh:mm:ss.fff] Speaker: text` format as the TXT export.
-Corrections and speaker renames are reflected on the next refresh.
+Corrections and speaker renames are reflected on the next refresh. The status line
+under the path shows the last write time, line count, and bytes on disk.
+
+Recognition works on ~24-second chunks and waits for the following chunk as
+context, so the first lines usually appear about a minute after recording starts.
 
 The file is opened without an exclusive lock (`FileShare.ReadWrite | Delete`) and
 closed after each update, so VS Code, Copilot, or any other reader can keep it open
@@ -157,6 +163,14 @@ as you have not edited it. Treat it as read-only: edits made elsewhere are
 overwritten. To mirror an existing session instead, select it and click
 **Live file** on the Transcript tab; **Stop live file** stops updating and leaves
 the file in place.
+
+### Live activity
+
+The **Live activity** panel on Record / import follows the current recording (or
+the mirrored / selected session) and shows, with timestamps: audio captured so far,
+each chunk as it starts and finishes transcribing (including "no speech detected"),
+every new transcript line, errors and waits (for example a model still downloading),
+and every live file write. **Copy** puts the log on the clipboard.
 
 ## Processing and privacy
 

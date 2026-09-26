@@ -21,6 +21,15 @@ public partial class MainWindow : Window
         this.viewModel = viewModel;
         DataContext = viewModel;
         Closing += OnClosing;
+        viewModel.ActivityLog.CollectionChanged += (_, e) =>
+        {
+            // Defer until the ListBox has processed the change; scrolling inside the event corrupts its generator.
+            if (e.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Add)
+                Dispatcher.BeginInvoke(() =>
+                {
+                    if (viewModel.ActivityLog.Count > 0) ActivityList.ScrollIntoView(viewModel.ActivityLog[^1]);
+                }, System.Windows.Threading.DispatcherPriority.Background);
+        };
     }
 
     private void SaveKeyClick(object sender, RoutedEventArgs e)
