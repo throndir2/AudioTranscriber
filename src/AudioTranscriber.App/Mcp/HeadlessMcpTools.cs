@@ -249,7 +249,7 @@ public sealed class HeadlessMcpTools
             workerExecutable = File.Exists(Path.Combine(AppContext.BaseDirectory, "AudioTranscriber.Worker.dll"))
                 ? Path.Combine(AppContext.BaseDirectory, "AudioTranscriber.Worker.exe") : "development worker (dotnet host)",
             controller.IsRecording, controller.RecordingSessionId,
-            controller.DiarizationModelsReady, controller.WhisperModelPath, controller.HasNvidiaKey,
+            controller.DiarizationModelsReady, controller.WhisperModelPath, controller.HasNvidiaKey, localGpu = controller.LocalGpuStatus,
             prerequisites.FFmpeg, prerequisites.FFprobe, prerequisites.VcRuntimeReady,
             recentErrors = notifications.Where(item => item.IsError).TakeLast(5)
         };

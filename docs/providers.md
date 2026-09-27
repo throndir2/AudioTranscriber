@@ -258,6 +258,54 @@ Replacing chunks below each threshold with Parakeet gave:
 The lowest segment score predicted errors better than a token-weighted mean or the
 single lowest token. This is a small sample, so treat about 1 point as noise.
 
+## Parakeet on a local NVIDIA GPU (NVIDIA speech NIM)
+
+After the default models are ready, the desktop app checks the PC and, when it can,
+runs Parakeet on the local GPU. Unsure Whisper chunks then go there instead of to the
+hosted route: **no upload and no session consent needed**, and no hosted quota.
+The check, in order:
+
+1. `nvidia-smi` finds an NVIDIA GPU with **compute capability 8.0+** (RTX 30-series
+   or newer; NVIDIA officially lists RTX 40xx and newer for WSL 2). The largest one is used.
+2. The GPU memory selects the profile (NVIDIA's published requirement in brackets):
+   - ≥ ~20 GB: `parakeet-0.6b-tdt`, `type=multi` (TDT v3, the same model as the hosted
+     fallback; 14.0 GB).
+   - ≥ ~7.5 GB: `parakeet-0-6b-ctc-en-us`, batch-size-1 offline profile (3.1 GB).
+3. Docker Desktop is running (WSL 2 backend, which passes the GPU through).
+4. An NVIDIA key is set. It is used to pull the image from `nvcr.io`.
+
+The first start signs in to `nvcr.io` (the key goes over stdin into Docker's
+credential store) and pulls the image (**13.1 / 11.2 GB compressed**). It then
+creates the container `audiotranscriber-parakeet`, published on `127.0.0.1:59051`
+(gRPC) and `127.0.0.1:59000` (health) only. NIM then downloads and optimizes the
+model; NVIDIA says this can take up to 30 minutes. The container is stopped when the
+app closes and reused next time, so later starts skip the downloads. NIM reads the
+key from `NGC_API_KEY`, which is passed from the app's environment rather than the
+command line, but Docker keeps it in the container configuration (`docker inspect`).
+
+Requests use plaintext gRPC to 127.0.0.1 with no credentials, `en-US`, and word
+offsets; only English sessions use it. If the GPU route fails on a chunk, the
+Whisper text is kept. There is no automatic switch to hosted for that chunk. The
+reason for not using the GPU is shown in Privacy / models (and MCP `status.localGpu`).
+Opt out with `"LocalGpuParakeet": false` in `preferences.json`.
+
+Accuracy on the same 48 clips: local Whisper turbo plus a TDT v3 fallback scored
+8.09% WER, the same as the hosted fallback. With a CTC 0.6B fallback it scored
+9.49%; CTC 0.6B alone scored 8.99%. The CTC figures were measured through its hosted
+streaming route, because NVIDIA hosts that model only in streaming mode.
+
+**Licence:** NVIDIA lets Developer Program members self-host NIM free for research,
+development, and testing, on up to 16 GPUs. Production use needs an NVIDIA AI
+Enterprise licence.
+
+Verified 2026-09-26 on a PC without a usable NVIDIA GPU:
+- The probe correctly declined.
+- A fake local Riva server on 127.0.0.1:59051 received the real controller's fallback
+  request, with no credentials, and its word-timed text replaced Whisper's.
+- `nvcr.io` accepted the key for both images.
+
+The real NIM container itself was not run.
+
 ## Protocol/dependency provenance
 
 Unmodified upstream schemas under `src\AudioTranscriber.Providers\Protocol`:

@@ -225,7 +225,10 @@ uploads; already submitted audio cannot be recalled.
 With **local Whisper**, the same consent checkbox turns on the low-confidence
 fallback instead of full upload: only chunks Whisper is unsure about are sent to
 hosted Parakeet (English sessions, key required). Those transcript lines show
-`nvidia-parakeet-tdt-v3` and the Whisper score in their provenance.
+`nvidia-parakeet-tdt-v3` and the Whisper score in their provenance. On a PC where
+Parakeet runs on the local NVIDIA GPU, those chunks are re-checked locally instead,
+without upload or consent. Those lines show `local-gpu-parakeet-…`, and Privacy /
+models shows what the GPU check found.
 
 Enter a key only in the **Privacy / models** password box. **Use entered key**
 clears the field and uses memory-only storage by default. Explicitly checking
