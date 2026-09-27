@@ -272,6 +272,8 @@ public sealed class MainViewModel : ObservableObject
     public string QueueSummary { get => queueSummary; private set => Set(ref queueSummary, value); }
     public string KeyStatus => controller.HasNvidiaKey ? "A key is available (never displayed)." : "No NVIDIA key. Recording and local work remain available.";
     public string ModelStatus { get => modelStatus; private set => Set(ref modelStatus, value); }
+    public string LocalGpuStatus { get => localGpuStatus; private set => Set(ref localGpuStatus, value); }
+    private string localGpuStatus = "Checking for a usable NVIDIA GPU after the default models are ready…";
     public string PrerequisiteStatus => prerequisites.Summary;
     public bool PrerequisitesReady => prerequisites.AllReady;
     public bool VcRuntimeMissing => !prerequisites.VcRuntimeReady;
@@ -304,7 +306,7 @@ public sealed class MainViewModel : ObservableObject
         }
     }
     public string ProviderHelp => SelectedProvider is { } p
-        ? $"{(p.IsCloud ? "NVIDIA-hosted. Upload requires this session's consent AND a key." : "Local. If you allow NVIDIA uploads below (and a key is set), only chunks Whisper is unsure about are re-sent to hosted Parakeet; English sessions only.")} {p.TimingDescription}"
+        ? $"{(p.IsCloud ? "NVIDIA-hosted. Upload requires this session's consent AND a key." : "Local. English chunks Whisper is unsure about are re-checked by Parakeet: on this PC's NVIDIA GPU when it's running (no upload), otherwise hosted Parakeet only if you allow NVIDIA uploads below.")} {p.TimingDescription}"
         : "Choose a transcription provider.";
     private bool HasNewSessionDetails => !string.IsNullOrWhiteSpace(SessionName) && !string.IsNullOrWhiteSpace(Language) && SelectedProvider is not null;
 
@@ -735,6 +737,7 @@ public sealed class MainViewModel : ObservableObject
     private void RefreshSetup()
     {
         SetupStatus = controller.SetupStatus ?? "";
+        if (controller.LocalGpuStatus is { } gpu) LocalGpuStatus = gpu;
         if (controller.WhisperModelPath is { } path && path != shownWhisperPath)
         {
             shownWhisperPath = path;

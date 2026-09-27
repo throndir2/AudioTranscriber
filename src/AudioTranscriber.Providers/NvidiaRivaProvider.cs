@@ -102,7 +102,9 @@ public sealed class NvidiaRivaProvider : ITranscriptionProvider
             throw new ProviderException(ProviderFailureKind.ConsentRequired, "cloud-consent-required");
     }
 
-    internal RecognizeRequest CreateRequest(byte[] pcm, string locale) => new()
+    internal RecognizeRequest CreateRequest(byte[] pcm, string locale) => BuildRequest(pcm, locale, model.VerifiedWordTiming);
+
+    internal static RecognizeRequest BuildRequest(byte[] pcm, string locale, bool wordTiming) => new()
     {
         Audio = ByteString.CopyFrom(pcm),
         Config = new RecognitionConfig
@@ -113,14 +115,17 @@ public sealed class NvidiaRivaProvider : ITranscriptionProvider
             LanguageCode = locale,
             MaxAlternatives = 1,
             EnableAutomaticPunctuation = true,
-            EnableWordTimeOffsets = model.VerifiedWordTiming,
+            EnableWordTimeOffsets = wordTiming,
             ProfanityFilter = false,
             VerbatimTranscripts = true
-            // Model stays unset: the function ID routes the hosted model.
+            // Model stays unset: the function ID (hosted) or the single deployed profile (local) selects it.
         }
     };
 
-    internal static TranscriptionResult ParseResponse(NvidiaModel model, long sampleCount, RecognizeResponse response)
+    internal static TranscriptionResult ParseResponse(NvidiaModel model, long sampleCount, RecognizeResponse response) =>
+        ParseResponse(model.Id, model.VerifiedWordTiming, sampleCount, response);
+
+    internal static TranscriptionResult ParseResponse(string providerId, bool wordTiming, long sampleCount, RecognizeResponse response)
     {
         if (response.CalculateSize() > 4 * 1024 * 1024)
             throw new ProviderException(ProviderFailureKind.InvalidResponse, "response-too-large");
@@ -139,7 +144,7 @@ public sealed class NvidiaRivaProvider : ITranscriptionProvider
             var alternative = result.Alternatives[0];
             var words = ImmutableArray.CreateBuilder<TranscriptionWord>();
             var invalidTimes = 0;
-            if (model.VerifiedWordTiming)
+            if (wordTiming)
             {
                 var previousStart = -1;
                 foreach (var word in alternative.Words)
@@ -172,7 +177,7 @@ public sealed class NvidiaRivaProvider : ITranscriptionProvider
         // Preserve every result/alternative and raw numeric values, not request headers or server metadata.
         var safeResponse = new RecognizeResponse();
         safeResponse.Results.Add(response.Results);
-        return new(model.Id, null,
+        return new(providerId, null,
             segments.Count == 0 ? TranscriptionStatus.Empty : partial ? TranscriptionStatus.Partial : TranscriptionStatus.Succeeded,
             segments.ToImmutable(), JsonFormatter.Default.Format(safeResponse), diagnostics.ToImmutable());
     }

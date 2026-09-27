@@ -12,7 +12,7 @@ leaves the original recording on disk.
 | --- | --- |
 | Recording | Visible Start/Stop, selected WASAPI endpoint, separate optional mic, native-format rotated WAVs, explicit gaps/overflow/disk errors |
 | Long imports | FFprobe audio-stream selection, managed original copy, continuous FFmpeg normalization, resumable durable work |
-| Recognition | Local Whisper large-v3-turbo by default (auto-downloaded); three optional NVIDIA Riva routes; optional hosted Parakeet re-check of low-confidence Whisper chunks for sessions with NVIDIA upload consent; source-language ASR, no translation or automatic fallback on errors |
+| Recognition | Local Whisper large-v3-turbo by default (auto-downloaded); three optional NVIDIA Riva routes; low-confidence Whisper chunks re-checked by Parakeet on the local NVIDIA GPU when available (NVIDIA NIM in Docker), otherwise hosted Parakeet for sessions with upload consent; source-language ASR, no translation or automatic fallback on errors |
 | Speakers | Local segmentation plus clean-turn embeddings and persistent IDs; editable names; overlap/short-turn uncertainty |
 | Transcript | SQLite FTS, bounded pages, speaker filtering, corrections separate from source text, timestamp seek and playback |
 | Exchange | Text, JSON, SRT, WebVTT; local voice-tag VTT import; configured delegated Teams transcript retrieval |

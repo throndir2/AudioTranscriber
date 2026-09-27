@@ -21,6 +21,11 @@ public sealed class AppController : IAppController
     private const string FallbackProviderId = "nvidia-parakeet-tdt-v3";
     private const double DefaultFallbackBelowConfidence = 0.85;
     private volatile string? fallbackSuspended;
+    // Parakeet on this PC's NVIDIA GPU (NVIDIA speech NIM in Docker), when the machine can run it.
+    private volatile LocalRivaProvider? localGpu;
+    private volatile LocalNimHost? nimHost;
+    private Task? localGpuStart;
+    private volatile string? localGpuStatus, localGpuSetupStatus;
     private const int LiveChunkMaxSeconds = 6;
     private const int LivePauseSplitAfterMilliseconds = 1500;
     private readonly IAudioCaptureService capture;
@@ -142,6 +147,7 @@ public sealed class AppController : IAppController
         credentials.SetMemoryOnly(key);
         HasNvidiaKey = true;
         fallbackSuspended = null;
+        if (localGpu is null && modelSetup is not null) StartLocalGpu();
         if (remember)
             Task.Run(() => credentials.SaveForCurrentUserAsync(credentialPath, true)).GetAwaiter().GetResult();
         else if (File.Exists(credentialPath)) File.Delete(credentialPath);
@@ -165,7 +171,8 @@ public sealed class AppController : IAppController
         Notify("Local Whisper model selected. Queued local transcription continues with it.");
     }
 
-    public string? SetupStatus => setupStatus;
+    public string? SetupStatus => setupStatus ?? localGpuSetupStatus;
+    public string? LocalGpuStatus => localGpuStatus;
     public bool ModelSetupRunning => modelSetup is { IsCompleted: false };
 
     /// <summary>Downloads the default speaker and Whisper models when missing, then releases work that waited for them.</summary>
@@ -229,6 +236,65 @@ public sealed class AppController : IAppController
                 "). Recording still works; install it from Privacy / models and queued audio is transcribed afterward.", true);
         }
         finally { setupStatus = null; }
+        StartLocalGpu();
+    }
+
+    private void StartLocalGpu()
+    {
+        lock (setupGate)
+        {
+            if (localGpuStart is { IsCompleted: false } || localGpu is not null) return;
+            localGpuStart = Task.Run(() => StartLocalGpuAsync(shutdown.Token));
+        }
+    }
+
+    /// <summary>Checks this PC for an NVIDIA GPU that can serve Parakeet locally, and starts it in Docker when it can.</summary>
+    private async Task StartLocalGpuAsync(CancellationToken token)
+    {
+        if (providerOverride is not null || !settings.LocalGpuParakeet) return;
+        try
+        {
+            var gpus = await GpuProbe.QueryNvidiaGpusAsync(token);
+            if (LocalNimCatalog.Select(gpus) is not { } choice)
+            {
+                localGpuStatus = gpus.Count == 0
+                    ? "No NVIDIA GPU is available, so unsure Whisper chunks use hosted Parakeet (only in sessions that allow NVIDIA uploads)."
+                    : string.Join(", ", gpus.Select(gpu => $"{gpu.Name} ({gpu.MemoryMiB / 1024.0:0.#} GB, compute {gpu.ComputeCapability:0.0})")) +
+                      " can't run NVIDIA's Parakeet container: it needs compute capability 8.0+ (RTX 30-series or newer) and 8 GB. Hosted Parakeet is used instead.";
+                return;
+            }
+            var (gpu, profile) = choice;
+            var docker = LocalNimHost.FindDocker();
+            var host = docker is null ? null : new LocalNimHost(docker);
+            if (host is null || !await host.IsDockerRunningAsync(token))
+            {
+                localGpuStatus = $"{gpu.Name} can run Parakeet locally, but Docker Desktop is {(docker is null ? "not installed" : "not running")}. " +
+                    "Start Docker Desktop (WSL 2 backend), then restart AudioTranscriber to use the GPU.";
+                Notify(localGpuStatus);
+                return;
+            }
+            using var key = await credentials.GetAsync(token);
+            if (key is null)
+            {
+                localGpuStatus = $"{gpu.Name} can run Parakeet locally. Enter an NVIDIA key in Privacy / models so NVIDIA's container can be downloaded; it then starts automatically.";
+                return;
+            }
+            localGpuStatus = localGpuSetupStatus = $"Starting {profile.DisplayName} on {gpu.Name}…";
+            nimHost = host;
+            await host.StartAsync(profile, gpu, key, new InlineProgress<string>(message =>
+                localGpuStatus = localGpuSetupStatus = message + " Transcription keeps working meanwhile."), token);
+            localGpu = new LocalRivaProvider(profile);
+            localGpuStatus = $"{profile.DisplayName} is running on {gpu.Name}: unsure Whisper chunks are re-checked on this PC, with no upload.";
+            Notify(localGpuStatus);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception error) when (error is InvalidOperationException or TimeoutException or IOException or
+            HttpRequestException or System.ComponentModel.Win32Exception)
+        {
+            localGpuStatus = "Parakeet could not start on the GPU (" + error.Message + "). Hosted Parakeet is used instead.";
+            Notify(localGpuStatus, true);
+        }
+        finally { localGpuSetupStatus = null; }
     }
 
     private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
@@ -1245,8 +1311,9 @@ public sealed class AppController : IAppController
     }
 
     /// <summary>
-    /// When local Whisper is unsure about a chunk and the session explicitly allows NVIDIA uploads,
-    /// the same audio is re-recognized by hosted Parakeet. Any hosted failure keeps the local text.
+    /// When local Whisper is unsure about a chunk, the same audio is re-recognized by Parakeet: on this PC's GPU when
+    /// that is running (no upload), otherwise hosted Parakeet if the session explicitly allows NVIDIA uploads.
+    /// Any Parakeet failure keeps the local text.
     /// </summary>
     private async Task<(ITranscriptionProvider Provider, TranscriptionResult Result, double Score, double Threshold)?> RunConfidenceFallbackAsync(
         StoredJob job, TranscriptionRequest request, TranscriptionResult local, CancellationToken cancellationToken)
@@ -1254,13 +1321,17 @@ public sealed class AppController : IAppController
         if (job.ProviderId != "local-whisper" || local.Status != TranscriptionStatus.Succeeded) return null;
         var threshold = settings.FallbackBelowConfidence ?? DefaultFallbackBelowConfidence;
         if (ChunkConfidence(local.Segments) is not { } score || score >= threshold) return null;
-        if (!HasNvidiaKey || fallbackSuspended is not null || settings.CloudBlockReason is not null ||
+        ITranscriptionProvider target;
+        if (localGpu is { } gpu && LocalRivaProvider.SupportsLanguage(job.Language)) target = gpu;
+        else if (!HasNvidiaKey || fallbackSuspended is not null || settings.CloudBlockReason is not null ||
             !IsFallbackLanguage(job.Language) || !Store.GetSession(job.SessionId).CloudConsent) return null;
-        var hosted = CreateProvider(FallbackProviderId);
-        try { return (hosted, NormalizeResult(await hosted.TranscribeAsync(request, cancellationToken)), score, threshold); }
+        else target = CreateProvider(FallbackProviderId);
+        try { return (target, NormalizeResult(await target.TranscribeAsync(request, cancellationToken)), score, threshold); }
         catch (TranscriptionProviderException error)
         {
-            if (error.Error.Code is ProviderErrorCode.Authentication or ProviderErrorCode.PermissionDenied or ProviderErrorCode.QuotaExceeded)
+            if (!target.Descriptor.IsCloud)
+                Notify("Parakeet on the GPU failed for one chunk; local Whisper text is kept: " + error.Error.SafeMessage, true);
+            else if (error.Error.Code is ProviderErrorCode.Authentication or ProviderErrorCode.PermissionDenied or ProviderErrorCode.QuotaExceeded)
             {
                 fallbackSuspended = error.Error.SafeMessage;
                 Notify("Hosted Parakeet fallback is off until the NVIDIA key is set again (" + error.Error.SafeMessage + "). Local Whisper text is kept.", true);
@@ -1596,6 +1667,9 @@ public sealed class AppController : IAppController
                 await Task.WhenAll(mediaTasks.Values);
                 await Task.WhenAll(backgroundTasks.Values);
                 if (modelSetup is { } setup) await Task.WhenAny(setup, Task.Delay(TimeSpan.FromSeconds(10)));
+                if (localGpuStart is { } gpuStart) await Task.WhenAny(gpuStart, Task.Delay(TimeSpan.FromSeconds(10)));
+                // Free the GPU memory; the stopped container keeps its downloaded, optimized model for the next start.
+                if (nimHost is { } host) await Task.WhenAny(host.StopAsync(), Task.Delay(TimeSpan.FromSeconds(20)));
             }
             finally
             {
@@ -1605,6 +1679,7 @@ public sealed class AppController : IAppController
                     var cleanup = new List<Task> { playback.DisposeAsync().AsTask(), capture.DisposeAsync().AsTask() };
                     if (timelinePlayer is not null) cleanup.Add(timelinePlayer.DisposeAsync().AsTask());
                     cleanup.AddRange(providerCache.Values.Select(provider => provider.DisposeAsync().AsTask()));
+                    if (localGpu is { } gpu) cleanup.Add(gpu.DisposeAsync().AsTask());
                     await Task.WhenAll(cleanup);
                 }
                 finally
@@ -1618,7 +1693,8 @@ public sealed class AppController : IAppController
         }
     }
 
-    private sealed record LocalSettings(string? WhisperModelPath, string? CloudBlockReason = null, double? FallbackBelowConfidence = null);
+    private sealed record LocalSettings(string? WhisperModelPath, string? CloudBlockReason = null, double? FallbackBelowConfidence = null,
+        bool LocalGpuParakeet = true);
     private sealed record MicrophoneOptions(Guid? EchoReferenceTrackId);
     private sealed record MediaCheckpoint(string SourcePath, int StreamIndex, ImportedMedia? Imported);
     private sealed class CaptureFeed

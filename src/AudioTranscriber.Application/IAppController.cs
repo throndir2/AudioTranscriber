@@ -29,6 +29,8 @@ public interface IAppController : IAsyncDisposable
     void SetLocalWhisperModel(string path);
     string? WhisperModelPath { get; }
     string? SetupStatus { get; }
+    // What the local NVIDIA GPU check found, and whether Parakeet is running on it.
+    string? LocalGpuStatus { get; }
     bool ModelSetupRunning { get; }
     Task EnsureDefaultModelsAsync();
     void RetryBlockedLocalWork();

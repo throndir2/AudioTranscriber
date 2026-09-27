@@ -46,6 +46,12 @@ English session; without consent, nothing is uploaded. A hosted error keeps the
 local text; an authentication, permission, or quota error stops the fallback until
 the key is set again.
 
+When Parakeet runs on this PC's NVIDIA GPU (see `docs\providers.md`), those unsure
+chunks go to the local container on 127.0.0.1 instead, so no audio is uploaded and
+no consent is needed. The NVIDIA key is then used only to download NVIDIA's
+container. Docker stores it in its credential store and in the container's
+configuration.
+
 ## Secrets
 
 Use memory-only keys unless you explicitly choose Windows-protected persistence.
