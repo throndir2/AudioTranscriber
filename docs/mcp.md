@@ -33,7 +33,8 @@ self-contained speaker worker.
 `set_whisper_model`, `install_diarization_models`, `start_recording`, `stop_recording`, `levels`, `play_audio`,
 `import_audio`, `list_sessions`, `session_details`, `wait_for_jobs`, `get_transcript`, `analyze_speakers`,
 `control_jobs`, `rename_speaker` (an existing name merges), `assign_speaker` (label row ids from `get_transcript`;
-the voice is learned in the background), `export_transcript`, `notifications`.
+the voice is learned in the background), `export_transcript`, `delete_sessions` (comma-separated ids; removes rows
+and retained audio), `notifications`.
 
 Typical loopback test: `start_recording` → `play_audio` (plays a file to the same output endpoint) →
 `stop_recording` (reports peak capture level) → `wait_for_jobs` → `get_transcript`. Background failures, such as

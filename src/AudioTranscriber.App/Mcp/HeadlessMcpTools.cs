@@ -207,6 +207,14 @@ public sealed class HeadlessMcpTools
             },
             ("session_id", "string", "Session GUID", true),
             ("action", "string", "pause | resume | cancel", true)),
+        McpTool.Create("delete_sessions", "Permanently delete sessions with their transcript, speakers, jobs and retained audio. The recording session is refused.",
+            async (args, token) =>
+            {
+                var ids = args.RequireString("session_ids").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(Guid.Parse).ToArray();
+                return McpToolResult.Json(await controller.DeleteSessionsAsync(ids, token));
+            },
+            ("session_ids", "string", "Comma-separated session GUIDs", true)),
         McpTool.Create("rename_speaker", "Rename a speaker throughout a session. Using another speaker's name merges the two (voice profiles combine).",
             async (args, token) =>
             {

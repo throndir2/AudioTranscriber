@@ -9,6 +9,7 @@ public sealed record MediaStreamChoice(int Index, string Description);
 public sealed record MediaProbeSummary(string Path, double DurationSeconds, IReadOnlyList<MediaStreamChoice> Streams);
 public sealed record AppNotification(string Message, bool IsError = false);
 public sealed record CaptureMeter(double Output, double Microphone);
+public sealed record SessionDeletion(int Deleted, IReadOnlyList<string> LeftoverFolders);
 
 public interface IAppController : IAsyncDisposable
 {
@@ -63,6 +64,8 @@ public interface IAppController : IAsyncDisposable
     void ResumeTranscription(Guid sessionId);
     void CancelTranscription(Guid sessionId);
     void SetCloudConsent(Guid sessionId, bool consent);
+    // Permanently removes sessions: stops their work, then deletes their rows and retained audio. Refuses the recording session.
+    Task<SessionDeletion> DeleteSessionsAsync(IReadOnlyCollection<Guid> sessionIds, CancellationToken cancellationToken = default);
     Task PlayAsync(Guid sessionId, Guid trackId, long sessionTicks, CancellationToken cancellationToken = default);
     void StopPlayback();
 }

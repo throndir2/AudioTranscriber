@@ -836,6 +836,83 @@ public sealed class AppController : IAppController
             : "Future NVIDIA uploads are disabled. Audio already sent cannot be recalled.");
     }
 
+    public async Task<SessionDeletion> DeleteSessionsAsync(IReadOnlyCollection<Guid> sessionIds, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(sessionIds);
+        var ids = sessionIds.ToHashSet();
+        if (ids.Count == 0) return new(0, []);
+        if (RecordingSessionId is { } recording && ids.Contains(recording))
+            throw new InvalidOperationException("Stop the recording before deleting its session.");
+        foreach (var id in ids)
+        {
+            if (mediaCancellation.TryGetValue(id, out var media)) media.Cancel();
+            try { Store.CancelJobs(id); }
+            catch (InvalidOperationException) { }
+        }
+        CancelActiveJobs(lane => lane.Session is { } session && ids.Contains(session));
+        // Let canceled work release its files before they are removed; voice learning is not per-session cancelable.
+        var running = ids.Select(id => mediaTasks.TryGetValue(id, out var task) ? task : null)
+            .Concat(new[] { speechLane, speakerLane }.Where(lane => lane.Session is { } s && ids.Contains(s)).Select(lane => lane.Task))
+            .Concat(backgroundTasks.Values)
+            .OfType<Task>().ToArray();
+        if (running.Length > 0)
+            await Task.WhenAny(Task.WhenAll(running), Task.Delay(TimeSpan.FromSeconds(30), cancellationToken));
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            await playback.StopAsync(CancellationToken.None);
+            if (timelinePlayer is not null) await timelinePlayer.StopAsync();
+        }
+        catch (Exception error) when (IsOperational(error)) { }
+
+        var sessionsRoot = Path.Combine(Store.RootDirectory, "sessions") + Path.DirectorySeparatorChar;
+        var deleted = 0;
+        var leftovers = new List<string>();
+        foreach (var id in ids)
+        {
+            var directory = await Task.Run(() => Store.DeleteSession(id), CancellationToken.None);
+            if (directory is null) continue;
+            deleted++;
+            var full = Path.GetFullPath(directory);
+            if (full.StartsWith(sessionsRoot, StringComparison.OrdinalIgnoreCase) && !await TryDeleteDirectoryAsync(full))
+                leftovers.Add(full);
+        }
+        var what = deleted == 1 ? "1 session and its" : $"{deleted:N0} sessions and their";
+        Notify(leftovers.Count == 0
+            ? $"Deleted {what} retained audio."
+            : $"Deleted {what} records. {leftovers.Count:N0} folder(s) were in use and remain on disk: {string.Join("; ", leftovers)}",
+            leftovers.Count > 0);
+        return new(deleted, leftovers);
+    }
+
+    private static async Task<bool> TryDeleteDirectoryAsync(string path)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                if (!Directory.Exists(path)) return true;
+                await Task.Run(() =>
+                {
+                    // Retained import copies are sealed read-only.
+                    foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
+                    {
+                        var attributes = File.GetAttributes(file);
+                        if (attributes.HasFlag(FileAttributes.ReadOnly)) File.SetAttributes(file, attributes & ~FileAttributes.ReadOnly);
+                    }
+                    Directory.Delete(path, true);
+                });
+                return true;
+            }
+            catch (DirectoryNotFoundException) { return true; }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                if (attempt >= 5) return false;
+                await Task.Delay(300 * attempt);
+            }
+        }
+    }
+
     public async Task PlayAsync(Guid sessionId, Guid trackId, long sessionTicks, CancellationToken cancellationToken = default)
     {
         var track = Store.GetTracks(sessionId).Single(item => item.Id == trackId);

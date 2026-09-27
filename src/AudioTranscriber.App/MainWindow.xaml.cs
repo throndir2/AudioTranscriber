@@ -151,6 +151,51 @@ public partial class MainWindow : Window
         }, enabled: rows.Count == 1));
     }
 
+    // Right-clicking a session selects it first, so the menu and the main pane agree on which one it acts on.
+    private void SessionListRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        var source = e.OriginalSource as DependencyObject;
+        while (source is not null && source is not ListBoxItem)
+            source = source is Visual or System.Windows.Media.Media3D.Visual3D
+                ? VisualTreeHelper.GetParent(source) : LogicalTreeHelper.GetParent(source);
+        if (source is ListBoxItem item)
+        {
+            item.IsSelected = true;
+            item.Focus();
+        }
+    }
+
+    private void SessionListContextMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        var menu = SessionList.ContextMenu;
+        menu.Items.Clear();
+        // Close the menu before a confirmation dialog opens rather than leaving it hanging behind the modal.
+        Action Later(Action action) => () =>
+        {
+            menu.IsOpen = false;
+            Dispatcher.BeginInvoke(action, System.Windows.Threading.DispatcherPriority.Input);
+        };
+        if (viewModel.SelectedSession is { } session)
+        {
+            var name = session.Name.Length > 40 ? session.Name[..39] + "…" : session.Name;
+            var header = viewModel.IsRecordingSession(session.Id)
+                ? $"Delete \"{name}\" (stop recording first)"
+                : $"Delete \"{name}\"…";
+            menu.Items.Add(Item(header, Later(() => _ = viewModel.DeleteSessionAsync(session)), enabled: viewModel.CanDeleteSession(session)));
+            menu.Items.Add(new Separator());
+        }
+        menu.Items.Add(Item("Delete old sessions…", Later(() => viewModel.DeleteSessionsCommand.Execute(null)),
+            enabled: viewModel.DeleteSessionsCommand.CanExecute(null)));
+    }
+
+    private void SessionListKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Delete || Keyboard.Modifiers != ModifierKeys.None) return;
+        e.Handled = true;
+        if (viewModel.DeleteSessionCommand.CanExecute(null)) viewModel.DeleteSessionCommand.Execute(null);
+        else if (viewModel.SelectedSession is { } session && viewModel.IsRecordingSession(session.Id)) _ = viewModel.DeleteSessionAsync(session);
+    }
+
     private static MenuItem Item(string header, Action action, bool isChecked = false, bool enabled = true)
     {
         // Underscores in speaker names are literal, not access keys.
