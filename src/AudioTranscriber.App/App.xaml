@@ -9,6 +9,7 @@
             </ResourceDictionary.MergedDictionaries>
             <BooleanToVisibilityConverter x:Key="BoolVisibility" />
             <Style TargetType="Window">
+                <Setter Property="Icon" Value="pack://application:,,,/AudioTranscriber.App;component/Assets/AppIcon.ico" />
                 <Setter Property="FontFamily" Value="Segoe UI" />
                 <Setter Property="FontSize" Value="14" />
                 <Setter Property="Foreground" Value="{StaticResource Ink}" />
