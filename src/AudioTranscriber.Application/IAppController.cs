@@ -29,6 +29,9 @@ public interface IAppController : IAsyncDisposable
     void SetLocalWhisperModel(string path);
     string? WhisperModelPath { get; }
     string? SetupStatus { get; }
+    // True when the default local Parakeet model is installed.
+    bool ParakeetModelReady { get; }
+    Task InstallParakeetModelAsync(IProgress<string>? progress = null, CancellationToken cancellationToken = default);
     // What the local NVIDIA GPU check found, and whether Parakeet is running on it.
     string? LocalGpuStatus { get; }
     bool ModelSetupRunning { get; }

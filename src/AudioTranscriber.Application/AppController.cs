@@ -26,6 +26,9 @@ public sealed class AppController : IAppController
     private volatile LocalNimHost? nimHost;
     private Task? localGpuStart;
     private volatile string? localGpuStatus, localGpuSetupStatus;
+    private Task? whisperSetup;
+    private volatile string? whisperSetupStatus;
+    private volatile bool whisperSetupFailed;
     private const int LiveChunkMaxSeconds = 6;
     private const int LivePauseSplitAfterMilliseconds = 1500;
     private readonly IAudioCaptureService capture;
@@ -78,7 +81,8 @@ public sealed class AppController : IAppController
     public IReadOnlyList<ProviderOption> Providers { get; } = NvidiaModelCatalog.All
         .Select(model => new ProviderOption(model.Id, model.DisplayName, true,
             model.VerifiedWordTiming ? "Word timestamps when returned" : "Coarse audio-chunk timestamps"))
-        .Append(new("local-whisper", "Local Whisper · large-v3-turbo recommended (GPU via Vulkan when available)", false, "Segment timestamps"))
+        .Append(new(SherpaParakeetProvider.ProviderId, "Local Parakeet TDT v3 · recommended (runs on this PC; 25 European languages)", false, "Word timestamps"))
+        .Append(new("local-whisper", "Local Whisper · large-v3-turbo (any language; GPU via Vulkan when available)", false, "Segment timestamps"))
         .ToArray();
     public event Action<AppNotification>? Notification;
     public event Action<CaptureMeter>? LevelsChanged;
@@ -171,11 +175,13 @@ public sealed class AppController : IAppController
         Notify("Local Whisper model selected. Queued local transcription continues with it.");
     }
 
-    public string? SetupStatus => setupStatus ?? localGpuSetupStatus;
+    public string? SetupStatus => setupStatus ?? whisperSetupStatus ?? localGpuSetupStatus;
     public string? LocalGpuStatus => localGpuStatus;
-    public bool ModelSetupRunning => modelSetup is { IsCompleted: false };
+    public bool ModelSetupRunning => modelSetup is { IsCompleted: false } || whisperSetup is { IsCompleted: false };
+    public bool ParakeetModelReady => ParakeetModels.IsInstalled(ParakeetModelDirectory);
+    private string ParakeetModelDirectory => Path.Combine(Path.GetDirectoryName(modelDirectory)!, "parakeet");
 
-    /// <summary>Downloads the default speaker and Whisper models when missing, then releases work that waited for them.</summary>
+    /// <summary>Downloads the default speaker and Parakeet models when missing, then releases work that waited for them.</summary>
     public Task EnsureDefaultModelsAsync()
     {
         lock (setupGate)
@@ -188,7 +194,16 @@ public sealed class AppController : IAppController
     public void RetryBlockedLocalWork()
     {
         if (WhisperModelPath is not null) Store.ReleaseProviderJobs("local-whisper");
+        if (ParakeetModelReady) Store.ReleaseProviderJobs(SherpaParakeetProvider.ProviderId);
         if (DiarizationModelsReady) Store.ReleaseProviderJobs(DiarizationProvider);
+        wake.Release();
+    }
+
+    public async Task InstallParakeetModelAsync(IProgress<string>? progress = null, CancellationToken cancellationToken = default)
+    {
+        await ParakeetModels.InstallAsync(ParakeetModelDirectory, progress, cancellationToken);
+        progress?.Report("Parakeet TDT v3 is installed and verified.");
+        Store.ReleaseProviderJobs(SherpaParakeetProvider.ProviderId);
         wake.Release();
     }
 
@@ -214,29 +229,63 @@ public sealed class AppController : IAppController
         }
         try
         {
-            if (WhisperModelPath is null)
+            if (!ParakeetModelReady)
             {
-                var model = LocalWhisperModelCatalog.Recommended;
-                var totalMiB = model.Bytes / 1048576;
-                setupStatus = $"Downloading the Whisper transcription model ({totalMiB:N0} MiB)…";
-                var path = await VerifiedModelDownload.InstallWhisperAsync(model, WhisperModelDirectory, true,
-                    new InlineProgress<long>(bytes => setupStatus =
-                        $"Downloading the Whisper transcription model: {bytes * 100 / model.Bytes}% ({bytes / 1048576:N0} / {totalMiB:N0} MiB). " +
-                        "Recording works now; queued audio is transcribed as soon as it finishes."), token);
-                if (WhisperModelPath is null) UpdateSettings(current => current with { WhisperModelPath = path });
-                Notify("Whisper large-v3-turbo downloaded and verified. Queued audio is being transcribed.");
+                setupStatus = $"Downloading the Parakeet transcription model ({ParakeetModels.ArchiveBytes / 1_048_576:N0} MiB)…";
+                await ParakeetModels.InstallAsync(ParakeetModelDirectory, new InlineProgress<string>(message => setupStatus =
+                    message + " Recording works now; queued audio is transcribed as soon as it finishes."), token);
+                Notify("Parakeet TDT v3 downloaded and verified. Queued audio is being transcribed.");
             }
-            Store.ReleaseProviderJobs("local-whisper");
+            Store.ReleaseProviderJobs(SherpaParakeetProvider.ProviderId);
             wake.Release();
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         catch (Exception error)
         {
-            Notify("The Whisper model could not be downloaded automatically (" + error.Message +
-                "). Recording still works; install it from Privacy / models and queued audio is transcribed afterward.", true);
+            Notify("The Parakeet model could not be downloaded automatically (" + error.Message +
+                "). Recording still works; install it from Privacy / models, or choose Local Whisper.", true);
         }
         finally { setupStatus = null; }
+        if (WhisperModelPath is not null) Store.ReleaseProviderJobs("local-whisper");
         StartLocalGpu();
+    }
+
+    /// <summary>Whisper is optional now: its model downloads the first time a Whisper session needs it.</summary>
+    private bool StartWhisperDownload()
+    {
+        if (providerOverride is not null || WhisperModelPath is not null) return false;
+        lock (setupGate)
+        {
+            if (whisperSetup is { IsCompleted: false }) return true;
+            if (whisperSetupFailed) return false;
+            whisperSetup = Task.Run(async () =>
+            {
+                var token = shutdown.Token;
+                var model = LocalWhisperModelCatalog.Recommended;
+                var totalMiB = model.Bytes / 1048576;
+                try
+                {
+                    whisperSetupStatus = $"Downloading the Whisper transcription model ({totalMiB:N0} MiB)…";
+                    var path = await VerifiedModelDownload.InstallWhisperAsync(model, WhisperModelDirectory, true,
+                        new InlineProgress<long>(bytes => whisperSetupStatus =
+                            $"Downloading the Whisper transcription model: {bytes * 100 / model.Bytes}% ({bytes / 1048576:N0} / {totalMiB:N0} MiB). " +
+                            "Queued Whisper audio is transcribed as soon as it finishes."), token);
+                    if (WhisperModelPath is null) UpdateSettings(current => current with { WhisperModelPath = path });
+                    Notify("Whisper large-v3-turbo downloaded and verified. Queued Whisper audio is being transcribed.");
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+                catch (Exception error)
+                {
+                    whisperSetupFailed = true;
+                    Notify("The Whisper model could not be downloaded automatically (" + error.Message +
+                        "). Install it from Privacy / models; queued Whisper audio is transcribed afterward.", true);
+                }
+                finally { whisperSetupStatus = null; }
+                Store.ReleaseProviderJobs("local-whisper");
+                wake.Release();
+            });
+            return true;
+        }
     }
 
     private void StartLocalGpu()
@@ -248,50 +297,60 @@ public sealed class AppController : IAppController
         }
     }
 
-    /// <summary>Checks this PC for an NVIDIA GPU that can serve Parakeet locally, and starts it in Docker when it can.</summary>
+    /// <summary>
+    /// Checks this PC for an NVIDIA GPU that NVIDIA's Parakeet container can use. The container runs only when the user opts in
+    /// ("LocalGpuParakeet": true): on Windows it supports only Parakeet CTC, which tested less accurate than CPU Parakeet TDT.
+    /// </summary>
     private async Task StartLocalGpuAsync(CancellationToken token)
     {
-        if (providerOverride is not null || !settings.LocalGpuParakeet) return;
+        if (providerOverride is not null) return;
         try
         {
             var gpus = await GpuProbe.QueryNvidiaGpusAsync(token);
             if (LocalNimCatalog.Select(gpus) is not { } choice)
             {
                 localGpuStatus = gpus.Count == 0
-                    ? "No NVIDIA GPU is available, so unsure Whisper chunks use hosted Parakeet (only in sessions that allow NVIDIA uploads)."
+                    ? "No NVIDIA GPU was found. Parakeet runs on the CPU, which is fast and the most accurate local option."
                     : string.Join(", ", gpus.Select(gpu => $"{gpu.Name} ({gpu.MemoryMiB / 1024.0:0.#} GB, compute {gpu.ComputeCapability:0.0})")) +
-                      " can't run NVIDIA's Parakeet container: it needs compute capability 8.0+ (RTX 30-series or newer) and 8 GB. Hosted Parakeet is used instead.";
+                      " can't run NVIDIA's Parakeet container (it needs an RTX 30-series or newer with 8 GB). Parakeet runs on the CPU.";
                 return;
             }
             var (gpu, profile) = choice;
+            if (!settings.LocalGpuParakeet)
+            {
+                localGpuStatus = $"{gpu.Name} can run NVIDIA's Parakeet container, but on Windows (Docker Desktop / WSL 2) NVIDIA supports only " +
+                    "the CTC model there, which tested less accurate than Parakeet TDT on the CPU (7.8% vs 6.9% word errors). CPU Parakeet is used. " +
+                    "To move Parakeet to the GPU anyway (less CPU load), set \"LocalGpuParakeet\": true in preferences.json and run Docker Desktop.";
+                return;
+            }
             var docker = LocalNimHost.FindDocker();
             var host = docker is null ? null : new LocalNimHost(docker);
             if (host is null || !await host.IsDockerRunningAsync(token))
             {
-                localGpuStatus = $"{gpu.Name} can run Parakeet locally, but Docker Desktop is {(docker is null ? "not installed" : "not running")}. " +
-                    "Start Docker Desktop (WSL 2 backend), then restart AudioTranscriber to use the GPU.";
+                localGpuStatus = $"{gpu.Name} can run Parakeet, but Docker Desktop is {(docker is null ? "not installed" : "not running")}. " +
+                    "Start Docker Desktop (WSL 2 backend), then restart AudioTranscriber to use the GPU. CPU Parakeet is used meanwhile.";
                 Notify(localGpuStatus);
                 return;
             }
             using var key = await credentials.GetAsync(token);
             if (key is null)
             {
-                localGpuStatus = $"{gpu.Name} can run Parakeet locally. Enter an NVIDIA key in Privacy / models so NVIDIA's container can be downloaded; it then starts automatically.";
+                localGpuStatus = $"{gpu.Name} can run Parakeet. Enter an NVIDIA key in Privacy / models so NVIDIA's container can be downloaded; CPU Parakeet is used meanwhile.";
                 return;
             }
             localGpuStatus = localGpuSetupStatus = $"Starting {profile.DisplayName} on {gpu.Name}…";
             nimHost = host;
             await host.StartAsync(profile, gpu, key, new InlineProgress<string>(message =>
-                localGpuStatus = localGpuSetupStatus = message + " Transcription keeps working meanwhile."), token);
+                localGpuStatus = localGpuSetupStatus = message + " Transcription keeps working on the CPU meanwhile."), token);
             localGpu = new LocalRivaProvider(profile);
-            localGpuStatus = $"{profile.DisplayName} is running on {gpu.Name}: unsure Whisper chunks are re-checked on this PC, with no upload.";
+            localGpuStatus = $"{profile.DisplayName} is running on {gpu.Name}: English Parakeet work uses the GPU, with no upload.";
             Notify(localGpuStatus);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         catch (Exception error) when (error is InvalidOperationException or TimeoutException or IOException or
             HttpRequestException or System.ComponentModel.Win32Exception)
         {
-            localGpuStatus = "Parakeet could not start on the GPU (" + error.Message + "). Hosted Parakeet is used instead.";
+            localGpuStatus = "Parakeet could not start on the GPU (" + error.Message + "). CPU Parakeet is used instead.";
             Notify(localGpuStatus, true);
         }
         finally { localGpuSetupStatus = null; }
@@ -316,6 +375,7 @@ public sealed class AppController : IAppController
             new Progress<long>(bytes => progress?.Report($"Downloading {model.FileName}: {bytes * 100 / model.Bytes}% ({bytes / 1048576:N0} / {model.Bytes / 1048576:N0} MiB)")),
             cancellationToken);
         SetLocalWhisperModel(path);
+        whisperSetupFailed = false;
         progress?.Report($"{model.FileName} installed, verified, and selected.");
     }
 
@@ -345,6 +405,7 @@ public sealed class AppController : IAppController
         {
             if (IsRecording) throw new InvalidOperationException("Stop the current recording before starting another.");
             RequireProvider(providerId);
+            if (providerId == "local-whisper") StartWhisperDownload();
             var session = Store.CreateSession(name, providerId, language);
             var outputId = Guid.NewGuid();
             microphoneTrackId = microphoneDeviceId is null ? null : Guid.NewGuid();
@@ -438,6 +499,7 @@ public sealed class AppController : IAppController
         string language, bool cloudConsent, CancellationToken cancellationToken = default)
     {
         RequireProvider(providerId);
+        if (providerId == "local-whisper") StartWhisperDownload();
         var session = Store.CreateSession(name, providerId, language);
         var track = new StoredTrack(Guid.NewGuid(), session.Id, "Imported", Path.GetFileName(path), null, streamIndex,
             JsonSerializer.Serialize(new MediaCheckpoint(Path.GetFullPath(path), streamIndex, null)));
@@ -1178,10 +1240,23 @@ public sealed class AppController : IAppController
                 await ProcessDiarizationAsync(job, chunk, cancellationToken);
                 return;
             }
-            if (job.ProviderId == "local-whisper" && providerOverride is null && WhisperModelPath is null && ModelSetupRunning)
+            if (job.ProviderId == "local-whisper" && providerOverride is null && WhisperModelPath is null && StartWhisperDownload())
             {
                 Store.DeferJob(job, "Waiting for the Whisper model download to finish; transcription starts automatically.", TimeSpan.FromSeconds(60));
                 if (WhisperModelPath is not null) Store.ReleaseProviderJobs("local-whisper");
+                return;
+            }
+            // Opted-in GPU Parakeet (English only) takes over from the CPU model when it is running.
+            var useGpu = job.ProviderId == SherpaParakeetProvider.ProviderId && localGpu is not null && LocalRivaProvider.SupportsLanguage(job.Language);
+            if (job.ProviderId == SherpaParakeetProvider.ProviderId && providerOverride is null && !useGpu && !ParakeetModelReady)
+            {
+                if (modelSetup is { IsCompleted: false })
+                {
+                    Store.DeferJob(job, "Waiting for the Parakeet model download to finish; transcription starts automatically.", TimeSpan.FromSeconds(60));
+                    if (ParakeetModelReady) Store.ReleaseProviderJobs(SherpaParakeetProvider.ProviderId);
+                    return;
+                }
+                Store.FailJob(job, "The Parakeet model is not installed. Install it from Privacy / models (or choose Local Whisper); this audio is transcribed afterward.", "Blocked");
                 return;
             }
             if (await IsSilentChunkAsync(chunk, cancellationToken))
@@ -1190,7 +1265,7 @@ public sealed class AppController : IAppController
                 Store.CompleteJob(job, [], skipped, "skipped:silence");
                 return;
             }
-            var provider = CreateProvider(job.ProviderId);
+            var provider = useGpu && localGpu is { } gpuProvider ? gpuProvider : CreateProvider(job.ProviderId);
             var allChunks = Store.GetChunks(job.TrackId);
             var index = allChunks.ToList().FindIndex(item => item.Id == chunk.Id);
             if (index < 0) throw new InvalidDataException("The queued audio chunk is not retained.");
@@ -1311,8 +1386,8 @@ public sealed class AppController : IAppController
     }
 
     /// <summary>
-    /// When local Whisper is unsure about a chunk, the same audio is re-recognized by Parakeet: on this PC's GPU when
-    /// that is running (no upload), otherwise hosted Parakeet if the session explicitly allows NVIDIA uploads.
+    /// When local Whisper is unsure about a chunk, the same audio is re-recognized by Parakeet on this PC (the opted-in GPU
+    /// container, else the CPU model), or else by hosted Parakeet if the session explicitly allows NVIDIA uploads.
     /// Any Parakeet failure keeps the local text.
     /// </summary>
     private async Task<(ITranscriptionProvider Provider, TranscriptionResult Result, double Score, double Threshold)?> RunConfidenceFallbackAsync(
@@ -1323,6 +1398,8 @@ public sealed class AppController : IAppController
         if (ChunkConfidence(local.Segments) is not { } score || score >= threshold) return null;
         ITranscriptionProvider target;
         if (localGpu is { } gpu && LocalRivaProvider.SupportsLanguage(job.Language)) target = gpu;
+        else if (providerOverride is null && ParakeetModelReady && SherpaParakeetProvider.SupportsLanguage(job.Language))
+            target = CreateProvider(SherpaParakeetProvider.ProviderId);
         else if (!HasNvidiaKey || fallbackSuspended is not null || settings.CloudBlockReason is not null ||
             !IsFallbackLanguage(job.Language) || !Store.GetSession(job.SessionId).CloudConsent) return null;
         else target = CreateProvider(FallbackProviderId);
@@ -1330,7 +1407,7 @@ public sealed class AppController : IAppController
         catch (TranscriptionProviderException error)
         {
             if (!target.Descriptor.IsCloud)
-                Notify("Parakeet on the GPU failed for one chunk; local Whisper text is kept: " + error.Error.SafeMessage, true);
+                Notify("Local Parakeet failed for one chunk; local Whisper text is kept: " + error.Error.SafeMessage, true);
             else if (error.Error.Code is ProviderErrorCode.Authentication or ProviderErrorCode.PermissionDenied or ProviderErrorCode.QuotaExceeded)
             {
                 fallbackSuspended = error.Error.SafeMessage;
@@ -1577,6 +1654,7 @@ public sealed class AppController : IAppController
                     "No local Whisper model is installed yet. Install the recommended model from Privacy / models; this audio is transcribed automatically afterward. No cloud fallback was used."));
             return new LocalWhisperProvider(settings.WhisperModelPath);
         }
+        if (id == SherpaParakeetProvider.ProviderId) return new SherpaParakeetProvider(ParakeetModelDirectory);
         return new NvidiaRivaProvider(NvidiaModelCatalog.Get(id), credentials, new ConsentReader(Store));
     }
 
@@ -1694,7 +1772,7 @@ public sealed class AppController : IAppController
     }
 
     private sealed record LocalSettings(string? WhisperModelPath, string? CloudBlockReason = null, double? FallbackBelowConfidence = null,
-        bool LocalGpuParakeet = true);
+        bool LocalGpuParakeet = false);
     private sealed record MicrophoneOptions(Guid? EchoReferenceTrackId);
     private sealed record MediaCheckpoint(string SourcePath, int StreamIndex, ImportedMedia? Imported);
     private sealed class CaptureFeed

@@ -16,25 +16,19 @@ public sealed record LocalNimProfile(
 
 public static class LocalNimCatalog
 {
-    // GPU memory figures are NVIDIA's published per-profile requirements (ASR NIM support matrix, 2026-09).
-    // Minimums leave room for local Whisper, which also runs on the GPU.
-    public static LocalNimProfile ParakeetTdt { get; } = new(
-        "local-gpu-parakeet-tdt-v3", "Parakeet TDT v3 on this PC's GPU", "parakeet-0.6b-tdt", "type=multi",
-        "en-US", 14.02, 20_000);
+    // Docker Desktop runs NIM through WSL 2, where NVIDIA supports only the Parakeet CTC models (ASR NIM support
+    // matrix, 2026-09). CTC 1.1B is the more accurate of the two; its offline profile needs 5.83 GB of GPU memory.
     public static LocalNimProfile ParakeetCtc { get; } = new(
-        "local-gpu-parakeet-ctc-0.6b", "Parakeet CTC 0.6B on this PC's GPU", "parakeet-0-6b-ctc-en-us",
-        "name=parakeet-0-6b-ctc-en-us,bs=1,mode=ofl,diarizer=disabled,vad=default", "en-US", 3.08, 7_600);
+        "local-gpu-parakeet-ctc-1.1b", "Parakeet CTC 1.1B on this PC's GPU", "parakeet-1-1b-ctc-en-us",
+        "mode=ofl,vad=default,diarizer=disabled", "en-US", 5.83, 7_600);
     public const double MinimumComputeCapability = 8.0;
 
-    /// <summary>Picks the largest NVIDIA GPU that NVIDIA's speech NIM supports, and the best profile that fits it.</summary>
+    /// <summary>Picks the largest NVIDIA GPU that NVIDIA's speech NIM supports, when it has room for the profile.</summary>
     public static (NvidiaGpu Gpu, LocalNimProfile Profile)? Select(IEnumerable<NvidiaGpu> gpus)
     {
         var best = gpus.Where(gpu => gpu.ComputeCapability >= MinimumComputeCapability)
             .OrderByDescending(gpu => gpu.MemoryMiB).FirstOrDefault();
-        if (best is null) return null;
-        var profile = best.MemoryMiB >= ParakeetTdt.MinimumVramMiB ? ParakeetTdt
-            : best.MemoryMiB >= ParakeetCtc.MinimumVramMiB ? ParakeetCtc : null;
-        return profile is null ? null : (best, profile);
+        return best is not null && best.MemoryMiB >= ParakeetCtc.MinimumVramMiB ? (best, ParakeetCtc) : null;
     }
 }
 
@@ -130,7 +124,7 @@ public sealed class LocalNimHost
             await Require(Docker(["pull", profile.Image], Timeout.InfiniteTimeSpan, cancellationToken, onLine: line =>
             {
                 if (line.Contains("Pull complete", StringComparison.Ordinal) || line.Contains("Already exists", StringComparison.Ordinal))
-                    progress?.Report($"Downloading NVIDIA's Parakeet GPU container (one time, about {(profile == LocalNimCatalog.ParakeetTdt ? 13 : 11)} GB): {++layers} layers done…");
+                    progress?.Report($"Downloading NVIDIA's Parakeet GPU container (one time, about 9 GB): {++layers} layers done…");
             }), "download " + profile.Image);
             progress?.Report($"Creating the Parakeet container on {gpu.Name}…");
             // NGC_API_KEY is passed by name so the key comes from this process's environment, never the command line.

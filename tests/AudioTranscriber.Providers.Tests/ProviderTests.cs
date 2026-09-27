@@ -207,7 +207,7 @@ public sealed class ProviderTests : IDisposable
         var gpus = GpuProbe.Parse("0, NVIDIA GeForce RTX 2070 SUPER, 8192, 7.5, 581.57\r\n1, NVIDIA GeForce RTX 4090, 24564, 8.9, 581.57\nbad line\n");
         Assert.Equal(2, gpus.Count);
         var choice = LocalNimCatalog.Select(gpus);
-        Assert.Equal((gpus[1], LocalNimCatalog.ParakeetTdt), choice);
+        Assert.Equal((gpus[1], LocalNimCatalog.ParakeetCtc), choice);
         Assert.Equal(LocalNimCatalog.ParakeetCtc, LocalNimCatalog.Select(GpuProbe.Parse("0, NVIDIA GeForce RTX 4060, 8188, 8.9, 581.57"))?.Profile);
         Assert.Null(LocalNimCatalog.Select([gpus[0]]));
         Assert.Null(LocalNimCatalog.Select(GpuProbe.Parse("0, NVIDIA GeForce RTX 3050, 6144, 8.6, 581.57")));
@@ -223,7 +223,7 @@ public sealed class ProviderTests : IDisposable
         Assert.Contains($"127.0.0.1:{LocalNimHost.GrpcPort}:50051", arguments);
         Assert.Contains($"127.0.0.1:{LocalNimHost.HttpPort}:9000", arguments);
         Assert.Contains("device=1", arguments);
-        Assert.Equal("nvcr.io/nim/nvidia/parakeet-0-6b-ctc-en-us:latest", arguments[^1]);
+        Assert.Equal("nvcr.io/nim/nvidia/parakeet-1-1b-ctc-en-us:latest", arguments[^1]);
     }
 
     [Fact]

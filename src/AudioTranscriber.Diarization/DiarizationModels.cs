@@ -61,9 +61,9 @@ public static class DiarizationModels
 
     public static async Task DownloadAsync(HttpClient client, Uri url, string destination,
         long expectedBytes, string expectedSha256, IProgress<long>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, long maximumBytes = 64 * 1024 * 1024)
     {
-        if (url.Scheme != Uri.UriSchemeHttps || expectedBytes is <= 0 or > 64 * 1024 * 1024)
+        if (url.Scheme != Uri.UriSchemeHttps || expectedBytes <= 0 || expectedBytes > maximumBytes)
             throw new ArgumentException("Model download requires HTTPS and a bounded size.");
         destination = LocalPaths.RequireDirectoryPath(destination);
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
@@ -136,11 +136,13 @@ public static class DiarizationModels
     }
 
     public static async Task ExtractSafeTarAsync(Stream uncompressedTar, string destinationDirectory,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, string rootName = "sherpa-onnx-pyannote-segmentation-3-0",
+        long maximumTotalBytes = 12 * 1024 * 1024)
     {
         var root = LocalPaths.RequireDirectoryPath(destinationDirectory);
         Directory.CreateDirectory(root);
-        using var boundedInput = new LimitedReadStream(uncompressedTar, 16 * 1024 * 1024);
+        // Allow tar headers/padding on top of the declared file bytes.
+        using var boundedInput = new LimitedReadStream(uncompressedTar, maximumTotalBytes + 4 * 1024 * 1024);
         using var reader = new TarReader(boundedInput, leaveOpen: true);
         long totalBytes = 0;
         var entries = 0;
@@ -149,14 +151,14 @@ public static class DiarizationModels
         while ((entry = await reader.GetNextEntryAsync(copyData: false, cancellationToken)) is not null)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (++entries > 32 || entry.Length < 0 || (totalBytes += entry.Length) > 12 * 1024 * 1024)
-                throw new InvalidDataException("Segmentation archive exceeds extraction limits.");
+            if (++entries > 32 || entry.Length < 0 || (totalBytes += entry.Length) > maximumTotalBytes)
+                throw new InvalidDataException("Model archive exceeds extraction limits.");
             var components = entry.Name.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries);
             if (Path.IsPathRooted(entry.Name) || entry.Name.Contains(':') || components.Length is 0 or > 4 ||
                 components.Any(c => c is "." or ".." || c.EndsWith('.') || c.EndsWith(' ')) ||
-                components[0] != "sherpa-onnx-pyannote-segmentation-3-0" ||
+                components[0] != rootName ||
                 entry.EntryType is not (TarEntryType.Directory or TarEntryType.RegularFile or TarEntryType.V7RegularFile))
-                throw new InvalidDataException("Unsafe segmentation archive entry.");
+                throw new InvalidDataException("Unsafe model archive entry.");
             var path = Path.GetFullPath(Path.Combine(root, Path.Combine(components)));
             var rootPrefix = Path.EndsInDirectorySeparator(root) ? root : root + Path.DirectorySeparatorChar;
             if (!path.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase) || !seen.Add(path))

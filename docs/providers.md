@@ -4,8 +4,9 @@ Metadata checked **2026-09-11 UTC**. Catalog identity is not a guarantee of
 availability on a particular account, a runtime model name, or free quota.
 Source ASR only: no translation, chat request, reference hints, or automatic
 cloud fallback on errors. The one cloud re-check is the opt-in
-[low-confidence fallback](#low-confidence-fallback-to-hosted-parakeet) below.
-New/local-only sessions require no NVIDIA credential.
+[low-confidence fallback](#low-confidence-fallback-for-local-whisper) below.
+New sessions default to [local Parakeet](#local-parakeet-default); local sessions
+require no NVIDIA credential.
 
 ## Hosted catalog and wire contract
 
@@ -116,7 +117,7 @@ Resource exhaustion stops the endpoint: it is not presumed to be a harmless
 temporary rate limit. The provider does not retry; orchestration may schedule
 capped transient retries after rechecking consent.
 
-## Optional real local Whisper
+## Optional local Whisper
 
 `LocalWhisperProvider(string modelPath)` implements the same Core interface.
 It loads a local GGML model lazily on the first request, hashes it for observed
@@ -190,10 +191,11 @@ implementation; no Whisper weights were downloaded.
 Use `LocalWhisperModelCatalog.All` to show the size/license **before**
 `VerifiedModelDownload.InstallWhisperAsync(model, directory,
 explicitlyApproved: true, progress, cancellationToken)`. Provider construction
-never downloads. The desktop app (not smoke mode or tests) calls
-`AppController.EnsureDefaultModelsAsync()` on startup, which installs the
-recommended large-v3-turbo model through this downloader when no model is
-present; local Whisper jobs queued meanwhile wait and run once it is verified.
+never downloads. The desktop app no longer downloads Whisper at startup (Parakeet
+is the default). The first time a Local Whisper session is recorded or imported, or
+one of its jobs runs without a model, `AppController` installs the recommended
+large-v3-turbo model through this downloader; Whisper jobs queued meanwhile wait
+and run once it is verified.
 The downloader
 streams into an owned partial file, enforces exact bytes, checks SHA256, and
 atomically renames only a verified file.
@@ -215,7 +217,7 @@ GGML converted by whisper.cpp contributors:
 
 `LocalWhisperModelCatalog.Recommended` is large-v3-turbo: large-v3's encoder
 with a 4-layer decoder, roughly 5–8× faster at near-equal accuracy. The desktop
-app installs it on request into the sibling `whisper` directory of the
+app installs it on demand into the sibling `whisper` directory of the
 diarization model directory, and auto-selects it there at startup.
 
 Download origin: `ggerganov/whisper.cpp` on Hugging Face, revision
@@ -228,24 +230,73 @@ Small models are optional CPU-friendly choices, not an accuracy ranking.
 Larger models exceed 1 GiB and can require substantial memory. No weights were
 downloaded merely to validate the build.
 
-## Low-confidence fallback to hosted Parakeet
+## Local Parakeet (default)
 
-A local Whisper chunk is re-sent to `nvidia-parakeet-tdt-v3` when **all** of these
-hold: its lowest segment `Confidence` is below the threshold (default **0.85**),
-the session has NVIDIA upload consent, an NVIDIA key is set, the session language
-is `en`/`en-GB`, and cloud work is not blocked. The same core-only PCM window is
-sent (no extra context). A non-partial Parakeet result, including an empty one,
-replaces Whisper's text for that chunk and brings word timestamps. The provenance
-notes the Whisper score, and the raw attempt keeps both results (`LowConfidenceFallback`).
-A partial Parakeet response or any hosted error keeps the Whisper text.
-Authentication, permission, or quota errors turn the fallback off until a key is
-entered again. Override the threshold with `"FallbackBelowConfidence": 0.9` in the
-data root's `preferences.json`.
+`SherpaParakeetProvider` (id `local-parakeet`, in `AudioTranscriber.Diarization`) is
+the default for new sessions. It runs NVIDIA **Parakeet TDT 0.6B v3** on the CPU
+through the sherpa-onnx 1.13.8 runtime the app already ships for speaker analysis.
+It needs no key and uploads nothing. The model is sherpa-onnx's int8 ONNX export:
+`sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2`, **487,170,055 bytes**, SHA256
+`5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf`. The weights
+are CC BY 4.0 (NVIDIA); sherpa-onnx is Apache-2.0.
+
+At startup the app downloads the archive into the sibling `parakeet` directory of
+the diarization models and checks the archive hash. It then unpacks it through the
+same bounded tar reader, checks the size and SHA256 of each loaded file, and writes
+a `NOTICE.txt` next to the model. The files take about 640 MB on disk.
+
+It covers 25 European languages (bg, cs, da, de, el, en, es, et, fi, fr, hr, hu, it,
+lt, lv, mt, nl, pl, pt, ro, ru, sk, sl, sv, uk) and detects which one is spoken.
+Sessions in other languages must use Local Whisper; Parakeet rejects them with
+`UnsupportedLanguage`.
+
+Output is one word-timed segment per chunk, so recognition windows get 3 s of
+neighbouring context like the hosted word-timed routes. Words are built from the
+SentencePiece tokens: a leading space starts a word. Times come from the token
+timestamps plus TDT durations. Each word and segment has a `Confidence`, the mean
+token probability from `ys_log_probs`. The managed wrapper doesn't expose these, so
+the provider reads the native `SherpaOnnxGetOfflineStreamResultAsJson`. Inference is
+serialized. Threads are `ProcessorCount / 4`, clamped to 2–4: ONNX Runtime's worker
+threads spin, so more threads buy little speed for much more CPU.
+
+Measured 2026-09-27 on an i7-13700K (24 logical CPUs), with the same 48 public
+English clips as below: 7.4 minutes, first clip excluded as warm-up.
+
+| Engine | WER | Speed | CPU seconds per audio second | Peak RAM |
+|---|---|---|---|---|
+| **Parakeet TDT v3, CPU, 2 threads** | **6.85%** | 14× real time | **0.21** | 0.95 GB |
+| Parakeet TDT v3, CPU, 4 threads | 6.85% | 20× real time | 0.40 | 0.95 GB |
+| Whisper large-v3-turbo, CPU, 8 threads | 10.56% | 1.3× real time | 5.94 | 1.8 GB |
+| Whisper large-v3-turbo, Vulkan on the Intel UHD 770 iGPU | 10.56% | 1.4× real time | 0.15 (GPU does the work) | 2.2 GB |
+| Hosted Parakeet TDT v3 (reference) | 6.44% | network | — | — |
+
+So Parakeet is far lighter on the CPU than Whisper on the CPU, about 15–28× less CPU
+per second of audio. It is about as light as Whisper offloaded to a GPU, while being
+10–15× faster and making about a third fewer word errors.
+
+## Low-confidence fallback for Local Whisper
+
+When a Local Whisper chunk's lowest segment `Confidence` is below the threshold
+(default **0.85**), the same core-only PCM window is re-recognized by Parakeet,
+trying these in order:
+
+1. The opted-in GPU container (below), when it is running and the session is English.
+2. Local CPU Parakeet, when its model is installed and the language is supported. No
+   upload and no consent needed.
+3. Hosted `nvidia-parakeet-tdt-v3`. This needs **all** of: the session's NVIDIA upload
+   consent, an NVIDIA key, an `en`/`en-GB` session, and cloud work not blocked.
+
+A non-partial Parakeet result, including an empty one, replaces Whisper's text for
+that chunk and brings word timestamps. The provenance notes the Whisper score, and
+the raw attempt keeps both results (`LowConfidenceFallback`). A partial response or
+any error keeps the Whisper text. Hosted authentication, permission, or quota errors
+turn the hosted fallback off until a key is entered again. Override the threshold
+with `"FallbackBelowConfidence": 0.9` in the data root's `preferences.json`.
 
 Calibration (2026-09-26, 48 public English clips, 7.4 minutes, 1,212 words from
 the Open ASR Leaderboard AMI, Earnings-22, VoxPopuli, and LibriSpeech test-other
 sets): local large-v3-turbo scored 10.56% WER; hosted Parakeet TDT v3 scored 6.44%.
-Replacing chunks below each threshold with Parakeet gave:
+Replacing chunks below each threshold with hosted Parakeet gave:
 
 | Threshold | Chunks sent | WER |
 |---|---|---|
@@ -255,56 +306,81 @@ Replacing chunks below each threshold with Parakeet gave:
 | 0.90 | 38% | 7.18% |
 | all | 100% | 6.44% |
 
-The lowest segment score predicted errors better than a token-weighted mean or the
-single lowest token. This is a small sample, so treat about 1 point as noise.
+With local CPU Parakeet as the target, 0.85 gave 8.75%. The lowest segment score
+predicted errors better than a token-weighted mean or the single lowest token. This
+is a small sample, so treat about 1 point as noise.
 
-## Parakeet on a local NVIDIA GPU (NVIDIA speech NIM)
+## Paid LLM fallback: tested, not adopted
 
-After the default models are ready, the desktop app checks the PC and, when it can,
-runs Parakeet on the local GPU. Unsure Whisper chunks then go there instead of to the
-hosted route: **no upload and no session consent needed**, and no hosted quota.
-The check, in order:
+Parakeet's token confidence separates easy clips from hard ones well. The 12 least
+confident of the 48 clips had 10.4% WER, against about 2% for the 12 most confident.
+If those 12 were fixed perfectly, overall WER would fall from 6.85% to 4.04%. On
+2026-09-27 six OpenRouter audio models were tested on all 48 clips at temperature 0
+with a verbatim-transcript prompt, for $0.43 in total:
 
-1. `nvidia-smi` finds an NVIDIA GPU with **compute capability 8.0+** (RTX 30-series
-   or newer; NVIDIA officially lists RTX 40xx and newer for WSL 2). The largest one is used.
-2. The GPU memory selects the profile (NVIDIA's published requirement in brackets):
-   - ≥ ~20 GB: `parakeet-0.6b-tdt`, `type=multi` (TDT v3, the same model as the hosted
-     fallback; 14.0 GB).
-   - ≥ ~7.5 GB: `parakeet-0-6b-ctc-en-us`, batch-size-1 offline profile (3.1 GB).
-3. Docker Desktop is running (WSL 2 backend, which passes the GPU through).
-4. An NVIDIA key is set. It is used to pull the image from `nvcr.io`.
+| Model | WER, all 48 | WER, 12 hardest | Overall with those 12 escalated | $ per audio hour |
+|---|---|---|---|---|
+| CPU Parakeet TDT v3 (baseline) | 6.85% | 10.4% | — | 0 |
+| qwen/qwen3.8-omni-flash | 6.77% | 11.6% | 7.18% | 0.06 |
+| mistralai/voxtral-small-24b-2507 | 6.93% | 11.0% | 7.01% | 0.34 |
+| google/gemini-3.8-flash | 7.26% | 12.5% | 7.43% | 0.12 |
+| google/gemini-3.1-pro-preview | 7.51% | 11.0% | 7.01% | 1.59 |
+| openai/gpt-audio-mini | 10.56% | 13.4% | 7.67% | 0.06 |
+| openai/gpt-audio | 27.64% | 14.9% | 8.09% | 1.31 |
 
-The first start signs in to `nvcr.io` (the key goes over stdin into Docker's
-credential store) and pulls the image (**13.1 / 11.2 GB compressed**). It then
-creates the container `audiotranscriber-parakeet`, published on `127.0.0.1:59051`
-(gRPC) and `127.0.0.1:59000` (health) only. NIM then downloads and optimizes the
-model; NVIDIA says this can take up to 30 minutes. The container is stopped when the
-app closes and reused next time, so later starts skip the downloads. NIM reads the
-key from `NGC_API_KEY`, which is passed from the app's environment rather than the
-command line, but Docker keeps it in the container configuration (`docker inspect`).
+On those hard clips, no model beat Parakeet by itself, so plain escalation made the
+overall result worse. A second variant sent the audio **plus Parakeet's draft** and
+asked for corrections, for $0.15 in total. That helped a little:
 
-Requests use plaintext gRPC to 127.0.0.1 with no credentials, `en-US`, and word
-offsets; only English sessions use it. If the GPU route fails on a chunk, the
-Whisper text is kept. There is no automatic switch to hosted for that chunk. The
-reason for not using the GPU is shown in Privacy / models (and MCP `status.localGpu`).
-Opt out with `"LocalGpuParakeet": false` in `preferences.json`.
+| Draft correction by | 12 hardest | Overall |
+|---|---|---|
+| Qwen 3.8 Omni Flash | 9.1% | 6.52% |
+| Gemini 3.1 Pro | 10.1% | 6.77% |
+| Gemini 3.8 Flash | 10.7% | 6.93% |
+| Voxtral Small | 11.0% | 7.01% |
 
-Accuracy on the same 48 clips: local Whisper turbo plus a TDT v3 fallback scored
-8.09% WER, the same as the hosted fallback. With a CTC 0.6B fallback it scored
-9.49%; CTC 0.6B alone scored 8.99%. The CTC figures were measured through its hosted
-streaming route, because NVIDIA hosts that model only in streaming mode.
+The best case was 4 fewer word errors out of 1,212, within noise, so no paid
+fallback is built. The hard clips are overlapping, far-field, disfluent meeting
+speech that every model struggles with. The free NVIDIA-hosted Nemotron 3 Nano Omni
+scored 11.4% on the same 12 clips.
 
-**Licence:** NVIDIA lets Developer Program members self-host NIM free for research,
-development, and testing, on up to 16 GPUs. Production use needs an NVIDIA AI
-Enterprise licence.
+## Parakeet on a local NVIDIA GPU (NVIDIA speech NIM, opt-in)
+
+After the default models are ready, the desktop app runs `nvidia-smi` to find the
+largest NVIDIA GPU with **compute capability 8.0+** (RTX 30-series or newer) and at
+least ~7.5 GB. It reports what it found in Privacy / models (and MCP
+`status.localGpu`), but **does not use the GPU by default**. On Windows, NVIDIA's
+speech container runs through Docker Desktop's WSL 2 backend, and NVIDIA's support
+matrix marks only Parakeet CTC 0.6B and 1.1B as WSL 2-supported. TDT is marked
+unsupported. CTC 1.1B (7.76% WER through NVIDIA's hosted route) and CTC 0.6B
+(8.99%) are both less accurate than TDT on the CPU (6.85%), and the CPU route is
+already 14–20× real time. The NIM licence also covers only research, development,
+and testing for Developer Program members; production use needs NVIDIA AI Enterprise.
+Docker Desktop's own licence is free only for personal use and small businesses.
+
+To trade that accuracy for lower CPU load, set `"LocalGpuParakeet": true` in
+`preferences.json`, run Docker Desktop, and set an NVIDIA key. The app then:
+1. Signs in to `nvcr.io`; the key goes over stdin into Docker's credential store.
+2. Pulls `nvcr.io/nim/nvidia/parakeet-1-1b-ctc-en-us` once, **8.8 GB compressed**.
+3. Creates the container `audiotranscriber-parakeet` with the offline profile
+   `mode=ofl,vad=default,diarizer=disabled` (5.83 GB GPU memory). It is published on
+   `127.0.0.1:59051` (gRPC) and `127.0.0.1:59000` (health) only.
+
+NIM then downloads and optimizes the model, which can take up to 30 minutes. While it
+runs, English `local-parakeet` jobs and the Whisper fallback use the GPU; other
+languages stay on the CPU. The container stops when the app closes and is reused next
+time. `NGC_API_KEY` is passed from the app's environment rather than the command
+line, but Docker keeps it in the container configuration (`docker inspect`). Requests
+use plaintext gRPC to 127.0.0.1 with no credentials. A GPU failure keeps the Whisper
+text in fallback mode. The app does not install Docker Desktop itself.
 
 Verified 2026-09-26 on a PC without a usable NVIDIA GPU:
-- The probe correctly declined.
-- A fake local Riva server on 127.0.0.1:59051 received the real controller's fallback
-  request, with no credentials, and its word-timed text replaced Whisper's.
-- `nvcr.io` accepted the key for both images.
+- The probe declined.
+- A fake local Riva server on 127.0.0.1:59051 received the controller's request with
+  no credentials.
+- `nvcr.io` accepted the key.
 
-The real NIM container itself was not run.
+The real container itself was not run.
 
 ## Protocol/dependency provenance
 

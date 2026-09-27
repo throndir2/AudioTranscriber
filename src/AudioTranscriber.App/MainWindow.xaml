@@ -201,7 +201,7 @@
                                 <Border DockPanel.Dock="Top" Style="{StaticResource HeroCard}">
                                     <StackPanel>
                                         <ContentControl Style="{StaticResource SectionHeader}" Content="Start with your audio" />
-                                        <TextBlock Style="{StaticResource Help}" Text="Just press Start recording: the defaults are ready (default output device, your microphone as a separate track, local Whisper, English). It works without cloud consent or a key. Output and microphone are archived as separate tracks; originals survive slow or unavailable transcription." />
+                                        <TextBlock Style="{StaticResource Help}" Text="Just press Start recording: the defaults are ready (default output device, your microphone as a separate track, local Parakeet, English). It works without cloud consent or a key. Output and microphone are archived as separate tracks; originals survive slow or unavailable transcription." />
                                         <WrapPanel>
                                             <Button Content="●  _Start recording" Style="{StaticResource PrimaryButton}" Command="{Binding StartRecordingCommand}" />
                                             <Button Content="■  Stop recording" Style="{StaticResource StopButton}" Command="{Binding StopRecordingCommand}" />
@@ -234,7 +234,7 @@
                                                     </StackPanel>
                                                     <StackPanel Grid.Column="2">
                                                         <Label Content="Source _language" Target="{Binding ElementName=LanguageInput}" />
-                                                        <TextBox x:Name="LanguageInput" Margin="0,3,0,8" Text="{Binding Language, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Source language" ToolTip="Explicit provider-supported source language; no translation. Examples: local en; Parakeet en-GB; Canary en-US; hosted Whisper en." />
+                                                        <TextBox x:Name="LanguageInput" Margin="0,3,0,8" Text="{Binding Language, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Source language" ToolTip="Explicit provider-supported source language; no translation. Examples: local Parakeet en, de, fr…; local Whisper any ISO code; hosted Parakeet en-GB; Canary en-US; hosted Whisper en." />
                                                     </StackPanel>
                                                 </Grid>
                                                 <TextBlock Text="{Binding ProviderHelp}" Style="{StaticResource Help}" />
@@ -286,7 +286,7 @@
                                                     <TextBlock DockPanel.Dock="Left" Style="{StaticResource Glyph}" Text="&#xE753;" Foreground="#F2A195" FontSize="15" Margin="0,0,10,0" />
                                                     <TextBlock Text="Optional NVIDIA upload — this new session only" FontFamily="{StaticResource DisplayFont}" FontSize="16" FontWeight="SemiBold" Foreground="#F2B3A8" />
                                                 </DockPanel>
-                                                <TextBlock Style="{StaticResource Help}" Text="If enabled, audio from this session's selected output, separate microphone, or imported audio track is sent to the selected NVIDIA-hosted ASR service. With local Whisper selected, only the chunks Whisper is unsure about are sent, to hosted Parakeet (English sessions, NVIDIA key required); everything else stays on this PC. NVIDIA terms and service logging apply. Free access has finite, account/model-dependent quotas; it is not unlimited or guaranteed. Send only audio you are permitted to upload, and no personal or confidential data. Already sent audio cannot be recalled." />
+                                                <TextBlock Style="{StaticResource Help}" Text="If enabled, audio from this session's selected output, separate microphone, or imported audio track is sent to the selected NVIDIA-hosted ASR service. With local Whisper selected, only the chunks Whisper is unsure about are sent, to hosted Parakeet, and only when local Parakeet isn't installed (English sessions, NVIDIA key required); everything else stays on this PC. Local Parakeet sessions never upload. NVIDIA terms and service logging apply. Free access has finite, account/model-dependent quotas; it is not unlimited or guaranteed. Send only audio you are permitted to upload, and no personal or confidential data. Already sent audio cannot be recalled." />
                                                 <CheckBox IsChecked="{Binding NewCloudConsent}" AutomationProperties.Name="Explicit NVIDIA upload consent for this new session">
                                                     <TextBlock TextWrapping="Wrap" Text="I understand these terms and explicitly permit NVIDIA uploads for this new session. (Off by default; reset after creation.)" />
                                                 </CheckBox>
@@ -554,9 +554,19 @@
                                     </Border>
                                     <Border Style="{StaticResource Card}">
                                         <StackPanel>
-                                            <ContentControl Style="{StaticResource SectionHeader}" Content="Local Whisper" />
-                                            <TextBlock Style="{StaticResource Help}" Text="Default: Whisper large-v3-turbo (about 1.51 GiB, MIT), downloaded and SHA256-verified automatically on first start. You can record while it downloads; queued audio is transcribed as soon as it is ready. It runs on your GPU through Vulkan when a GPU driver is present (NVIDIA, AMD, or Intel), otherwise on the CPU. The runtime used is shown in the status bar after each chunk. Whisper transcribes all voices but does not label speakers; speaker analysis does that." />
+                                            <ContentControl Style="{StaticResource SectionHeader}" Content="Local Parakeet (default transcription)" />
+                                            <TextBlock Style="{StaticResource Help}" Text="NVIDIA Parakeet TDT 0.6B v3 (CC BY 4.0), int8 ONNX export from sherpa-onnx: 465 MiB download, about 640 MB on disk, downloaded and SHA256-verified automatically on first start. It runs on the CPU (about 14–20× real time on a desktop CPU, ~1 GB RAM), needs no key, and uploads nothing. In testing it made about a third fewer word errors than Whisper large-v3-turbo while using far less CPU. 25 European languages, detected automatically; choose Local Whisper for other languages." />
+                                            <TextBlock Text="{Binding ParakeetStatus}" TextWrapping="Wrap" FontWeight="SemiBold" />
                                             <TextBlock Text="{Binding SetupStatus}" Visibility="{Binding HasSetupStatus, Converter={StaticResource BoolVisibility}}" Foreground="{StaticResource Accent}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                            <WrapPanel>
+                                                <Button Content="Install / repair Parakeet model…" Command="{Binding InstallParakeetModelCommand}" />
+                                            </WrapPanel>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource Card}">
+                                        <StackPanel>
+                                            <ContentControl Style="{StaticResource SectionHeader}" Content="Local Whisper (optional)" />
+                                            <TextBlock Style="{StaticResource Help}" Text="Whisper large-v3-turbo (about 1.51 GiB, MIT) downloads and is SHA256-verified the first time you record or import with Local Whisper. Choose it for languages Parakeet doesn't support or if you prefer its output. It runs on your GPU through Vulkan when a GPU driver is present (NVIDIA, AMD, or Intel), otherwise on the CPU, where it is much heavier than Parakeet. The runtime used is shown in the status bar after each chunk. Whisper transcribes all voices but does not label speakers; speaker analysis does that." />
                                             <WrapPanel>
                                                 <Button Content="Install recommended model (large-v3-turbo)…" Command="{Binding InstallWhisperModelCommand}" />
                                                 <Button Content="Choose existing Whisper model…" Command="{Binding ChooseWhisperModelCommand}" />
@@ -590,7 +600,7 @@
                                                 <Button Content="Clear key" Click="ClearKeyClick" />
                                             </WrapPanel>
                                             <CheckBox Content="Remember key with Windows current-user DPAPI (off by default)" IsChecked="{Binding RememberKey}" />
-                                            <TextBlock Text="Memory-only by default. The password field is cleared after use. No keys in configuration, logs, command-line arguments, transcripts, or exports. Graph authentication is separate. If Parakeet runs on this PC's GPU, Docker keeps the key to download and run NVIDIA's container." Style="{StaticResource Help}" />
+                                            <TextBlock Text="Memory-only by default. The password field is cleared after use. No keys in configuration, logs, command-line arguments, transcripts, or exports. Graph authentication is separate. If you opt in to GPU Parakeet, Docker keeps the key to download and run NVIDIA's container." Style="{StaticResource Help}" />
                                         </StackPanel>
                                     </Border>
                                     <Border Style="{StaticResource Card}">
@@ -607,8 +617,8 @@
                                     </Border>
                                     <Border Style="{StaticResource Card}">
                                         <StackPanel>
-                                            <ContentControl Style="{StaticResource SectionHeader}" Content="Parakeet on this PC's GPU" />
-                                            <TextBlock Style="{StaticResource Help}" Text="At startup the app checks for an NVIDIA GPU that NVIDIA's speech container supports (compute capability 8.0+, RTX 30-series or newer, 8 GB+) and a running Docker Desktop. If both are there and an NVIDIA key is set, it downloads NVIDIA's Parakeet container once (about 11–13 GB), runs it on 127.0.0.1 only, and re-checks the chunks Whisper is unsure about on the GPU instead of uploading them. The container stops when the app closes. Turn off with &quot;LocalGpuParakeet&quot;: false in preferences.json." />
+                                            <ContentControl Style="{StaticResource SectionHeader}" Content="NVIDIA GPU check" />
+                                            <TextBlock Style="{StaticResource Help}" Text="At startup the app looks for an NVIDIA GPU that NVIDIA's Parakeet container supports (RTX 30-series or newer, 8 GB+). On Windows that container runs through Docker Desktop (WSL 2), where NVIDIA supports only Parakeet CTC, which tested less accurate than Parakeet TDT on the CPU, so the CPU model stays in use. To move English Parakeet work to the GPU anyway (less CPU load), set &quot;LocalGpuParakeet&quot;: true in preferences.json, run Docker Desktop, and set an NVIDIA key; the ~9 GB container then downloads once, runs on 127.0.0.1 only, and stops when the app closes." />
                                             <TextBlock Text="{Binding LocalGpuStatus}" TextWrapping="Wrap" FontWeight="SemiBold" />
                                         </StackPanel>
                                     </Border>
