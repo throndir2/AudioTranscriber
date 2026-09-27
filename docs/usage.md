@@ -272,10 +272,17 @@ sherpa-onnx's int8 ONNX export: a 487,170,055-byte archive that unpacks to about
 SHA256, and uses it for every Parakeet session. It runs on the CPU with 2–4 threads,
 about 14–20× real time on a desktop CPU, using ~1 GB of RAM. If the download fails,
 **Install / repair Parakeet model…** on **Privacy & models** retries it, and blocked
-audio is transcribed afterward. **NVIDIA GPU check** on the same page shows whether
-this PC has a GPU NVIDIA's Parakeet container supports. On Windows that container
-supports only the less accurate CTC model, so the CPU model stays in use unless you
-opt in (see [provider setup](providers.md)).
+audio is transcribed afterward.
+
+**Parakeet on the NVIDIA GPU:** when the app finds an NVIDIA GPU that can run CUDA
+12 (GTX 10-series or newer, 4 GB+, driver 527.41+), it asks once whether to download
+the GPU runtime. That is about 4.4 GB: NVIDIA's CUDA runtime, cuBLAS and cuDNN, ONNX
+Runtime's CUDA build, and the full-precision model, and it requires accepting
+NVIDIA's licence terms. If you say yes, Parakeet runs on the GPU in a separate worker
+process, several times faster on long imports and with almost no CPU load. If you
+say no, or anything fails, it stays on the CPU. **Use the GPU for Parakeet…** and
+**Use the CPU only** on the same page change the choice later (see
+[provider setup](providers.md)).
 
 Local Whisper's default model is **large-v3-turbo** (1,624,555,275 bytes,
 MIT). It's close to large-v3 accuracy at several times the speed. The app

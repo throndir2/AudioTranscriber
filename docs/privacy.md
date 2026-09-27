@@ -49,11 +49,12 @@ needs an NVIDIA key and an English session; without consent, nothing is uploaded
 A hosted error keeps the local text; an authentication, permission, or quota error
 stops the hosted fallback until the key is set again.
 
-If you opt in to Parakeet on this PC's NVIDIA GPU (`"LocalGpuParakeet": true`; see
-`docs\providers.md`), English Parakeet work goes to the local container on
-127.0.0.1, so no audio is uploaded and no consent is needed. The NVIDIA key is then
-used only to download NVIDIA's container. Docker stores it in its credential store
-and in the container's configuration.
+If this PC has a suitable NVIDIA GPU, the app asks once whether to download NVIDIA's
+CUDA runtime, cuBLAS, cuDNN and a full-precision Parakeet model (about 4.4 GB) to
+run Parakeet on the GPU. These come from NVIDIA's, GitHub's, and Hugging Face's public
+download servers, are pinned by SHA256, and require accepting NVIDIA's CUDA and cuDNN
+licence terms. GPU Parakeet runs in a local worker process. No audio is uploaded, and
+no key or consent is involved.
 
 No paid or LLM transcription service is used. Six OpenRouter audio models were
 evaluated on public clips only (see `docs\providers.md`) and did not improve

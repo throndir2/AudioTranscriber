@@ -14,6 +14,16 @@ internal static class Program
                 Console.WriteLine("Verified local models installed (artifact download budget: 33,488,994 bytes; see bundled model notices).");
                 return 0;
             }
+            if (args is ["--parakeet-server", var runtime, var model, var provider])
+            {
+                try { return await ParakeetGpuServer.RunAsync(runtime, model, provider, Console.In, Console.Out); }
+                catch (Exception error) when (error is not OutOfMemoryException)
+                {
+                    // Native CUDA/ONNX Runtime messages (e.g. "no CUDA-capable device") explain why the GPU can't be used.
+                    Console.Error.WriteLine($"{error.GetType().Name}: {error.Message}");
+                    return 1;
+                }
+            }
             if (args is not ["--diarize", var requestPath, var resultPath])
             {
                 Console.Error.WriteLine("Usage: AudioTranscriber.Worker --diarize <local-request.json> <new-local-result.json> OR --install-models <local-model-directory>");
