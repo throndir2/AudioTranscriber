@@ -61,17 +61,19 @@ public sealed class LocalWhisperProvider : ITranscriptionProvider
             var maximumMs = (request.SampleCount * 1000 + 15999) / 16000;
             await foreach (var segment in processor.ProcessAsync(Pcm16Audio.ToFloatSamples(pcm), cancellationToken))
             {
+                var (confidence, lowestToken, textTokens) = SegmentConfidence(segment.Tokens);
                 evidence.Add(new { segment.Text, StartMilliseconds = segment.Start.TotalMilliseconds,
-                    EndMilliseconds = segment.End.TotalMilliseconds });
+                    EndMilliseconds = segment.End.TotalMilliseconds, Confidence = confidence,
+                    LowestTokenProbability = lowestToken, TextTokens = textTokens, segment.NoSpeechProbability });
                 if (string.IsNullOrWhiteSpace(segment.Text)) continue;
                 var start = (long)segment.Start.TotalMilliseconds;
                 var end = (long)segment.End.TotalMilliseconds;
                 if (start < 0 || end < start || end > maximumMs)
                 {
                     diagnostics.Add("local-segment-timing-invalid");
-                    segments.Add(new(segment.Text, 0, maximumMs, TimingGranularity.Chunk, []));
+                    segments.Add(new(segment.Text, 0, maximumMs, TimingGranularity.Chunk, [], confidence));
                 }
-                else segments.Add(new(segment.Text, start, end, TimingGranularity.Segment, []));
+                else segments.Add(new(segment.Text, start, end, TimingGranularity.Segment, [], confidence));
             }
             cancellationToken.ThrowIfCancellationRequested();
             diagnostics.Add("word-timing-unavailable");
@@ -87,6 +89,17 @@ public sealed class LocalWhisperProvider : ITranscriptionProvider
         catch (Exception)
         { throw new ProviderException(ProviderFailureKind.LocalModelMissing, "local-inference-unavailable").ToContractException(); }
         finally { gate.Release(); }
+    }
+
+    /// <summary>Mean decoder probability of the segment's text tokens; whisper.cpp control tokens look like "[_BEG_]".</summary>
+    internal static (double? Mean, double? Lowest, int Count) SegmentConfidence(IEnumerable<WhisperToken>? tokens)
+    {
+        var probabilities = (tokens ?? []).Where(token => token is not null &&
+                !(token.Text is { } text && text.StartsWith("[_", StringComparison.Ordinal) && text.EndsWith(']')) &&
+                float.IsFinite(token.Probability) && token.Probability is >= 0 and <= 1)
+            .Select(token => (double)token.Probability).ToArray();
+        return probabilities.Length == 0 ? (null, null, 0)
+            : (Math.Round(probabilities.Average(), 4), Math.Round(probabilities.Min(), 4), probabilities.Length);
     }
 
     public async ValueTask DisposeAsync()

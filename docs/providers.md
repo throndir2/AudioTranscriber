@@ -3,7 +3,9 @@
 Metadata checked **2026-09-11 UTC**. Catalog identity is not a guarantee of
 availability on a particular account, a runtime model name, or free quota.
 Source ASR only: no translation, chat request, reference hints, or automatic
-cloud fallback. New/local-only sessions require no NVIDIA credential.
+cloud fallback on errors. The one cloud re-check is the opt-in
+[low-confidence fallback](#low-confidence-fallback-to-hosted-parakeet) below.
+New/local-only sessions require no NVIDIA credential.
 
 ## Hosted catalog and wire contract
 
@@ -131,9 +133,14 @@ the CPU (i7-13700K, 8 threads). A dedicated GPU should be much faster, but the
 RTX card was not enumerated during testing, so that is unmeasured. The pinned
 native whisper.cpp gitlink is
 `f24588a272ae8e23280d9c220536437164e6ed28` (MIT, ggml authors).
-Segment timing is retained, words/confidence are not fabricated.
+Segment timing is retained; words are not fabricated. Each segment gets a
+`Confidence`: the mean decoder probability of its text tokens (whisper.cpp
+control tokens such as `[_BEG_]` and timestamps are excluded). The raw evidence
+also keeps the lowest token probability, text-token count, and no-speech
+probability. This is the model's own estimate, not a calibrated accuracy.
 `WithLanguage` and `WithNoContext` are used; `WithTranslate` is never enabled.
-No credential or cloud fallback exists on this path. Cancellation is cooperative
+No credential exists on this path, and model or inference errors never fall back
+to the cloud. Cancellation is cooperative
 through the binding, not a guarantee of immediately interrupting native model
 load. Inference is bounded to 30-second inputs.
 
@@ -220,6 +227,36 @@ Binding/runtime: <https://github.com/sandrohanea/whisper.net>,
 Small models are optional CPU-friendly choices, not an accuracy ranking.
 Larger models exceed 1 GiB and can require substantial memory. No weights were
 downloaded merely to validate the build.
+
+## Low-confidence fallback to hosted Parakeet
+
+A local Whisper chunk is re-sent to `nvidia-parakeet-tdt-v3` when **all** of these
+hold: its lowest segment `Confidence` is below the threshold (default **0.85**),
+the session has NVIDIA upload consent, an NVIDIA key is set, the session language
+is `en`/`en-GB`, and cloud work is not blocked. The same core-only PCM window is
+sent (no extra context). A non-partial Parakeet result, including an empty one,
+replaces Whisper's text for that chunk and brings word timestamps. The provenance
+notes the Whisper score, and the raw attempt keeps both results (`LowConfidenceFallback`).
+A partial Parakeet response or any hosted error keeps the Whisper text.
+Authentication, permission, or quota errors turn the fallback off until a key is
+entered again. Override the threshold with `"FallbackBelowConfidence": 0.9` in the
+data root's `preferences.json`.
+
+Calibration (2026-09-26, 48 public English clips, 7.4 minutes, 1,212 words from
+the Open ASR Leaderboard AMI, Earnings-22, VoxPopuli, and LibriSpeech test-other
+sets): local large-v3-turbo scored 10.56% WER; hosted Parakeet TDT v3 scored 6.44%.
+Replacing chunks below each threshold with Parakeet gave:
+
+| Threshold | Chunks sent | WER |
+|---|---|---|
+| none | 0% | 10.56% |
+| 0.80 | 17% | 8.83% |
+| **0.85** | **23%** | **8.09%** |
+| 0.90 | 38% | 7.18% |
+| all | 100% | 6.44% |
+
+The lowest segment score predicted errors better than a token-weighted mean or the
+single lowest token. This is a small sample, so treat about 1 point as noise.
 
 ## Protocol/dependency provenance
 

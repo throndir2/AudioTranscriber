@@ -17,6 +17,10 @@ namespace AudioTranscriber.Application;
 public sealed class AppController : IAppController
 {
     private const string DiarizationProvider = "local-diarization";
+    // Hosted route used when local Whisper is unsure; see docs/providers.md for how the threshold was chosen.
+    private const string FallbackProviderId = "nvidia-parakeet-tdt-v3";
+    private const double DefaultFallbackBelowConfidence = 0.85;
+    private volatile string? fallbackSuspended;
     private const int LiveChunkMaxSeconds = 6;
     private const int LivePauseSplitAfterMilliseconds = 1500;
     private readonly IAudioCaptureService capture;
@@ -137,6 +141,7 @@ public sealed class AppController : IAppController
     {
         credentials.SetMemoryOnly(key);
         HasNvidiaKey = true;
+        fallbackSuspended = null;
         if (remember)
             Task.Run(() => credentials.SaveForCurrentUserAsync(credentialPath, true)).GetAwaiter().GetResult();
         else if (File.Exists(credentialPath)) File.Delete(credentialPath);
@@ -1144,26 +1149,30 @@ public sealed class AppController : IAppController
                 job.Language, window.SessionStartTicks, window.CoreStartSample, window.CoreSampleCount,
                 checked(chunk.StartSample - window.CoreStartSample),
                 checked(source.SourceFrameOffset - Core.AudioTime.Scale(window.CoreStartSample, source.SourceFormat.SampleRate, 16000)));
-            var result = await provider.TranscribeAsync(request, cancellationToken);
-            if (result.Segments.IsDefault)
-                throw new TranscriptionProviderException(new(ProviderErrorCode.InvalidResponse, "The provider omitted its required segment collection."));
-            result = result with
+            var result = NormalizeResult(await provider.TranscribeAsync(request, cancellationToken));
+            object? fallbackEvidence = null;
+            string? fallbackNote = null;
+            if (await RunConfidenceFallbackAsync(job, request, result, cancellationToken) is { } fallback)
             {
-                Diagnostics = result.Diagnostics.IsDefault ? [] : result.Diagnostics,
-                Segments = result.Segments.Select(segment => segment with
+                var used = fallback.Result.Status != TranscriptionStatus.Partial;
+                fallbackEvidence = new { fallback.Score, fallback.Threshold, Used = used, Local = result, Hosted = fallback.Result };
+                if (used)
                 {
-                    Words = segment.Words.IsDefault ? [] : segment.Words
-                }).ToImmutableArray()
-            };
-            var evidence = JsonSerializer.Serialize(new { Version = 1, Request = request, Result = result });
+                    provider = fallback.Provider;
+                    result = fallback.Result;
+                    fallbackNote = $"low-confidence fallback from local Whisper (score {fallback.Score:0.00} < {fallback.Threshold:0.00})";
+                }
+            }
+            var evidence = JsonSerializer.Serialize(new { Version = 1, Request = request, Result = result, LowConfidenceFallback = fallbackEvidence });
             var modelIdentity = result.ObservedModel is { } observed ? "observed:" + observed : "advertised:" + provider.Descriptor.Model;
             Store.SaveRawAttempt(job, evidence, modelIdentity);
             if (result.Status == TranscriptionStatus.Partial)
                 throw new TranscriptionProviderException(new(ProviderErrorCode.InvalidResponse,
                     "The provider returned partial audio coverage or invalid timing. Its raw response is retained; this chunk needs review or an explicit retry."));
-            var provenance = $"{job.ProviderId}; advertised-model={provider.Descriptor.Model}; observed-model={result.ObservedModel ?? "not returned"}; " +
+            var provenance = $"{provider.Descriptor.Id}; advertised-model={provider.Descriptor.Model}; observed-model={result.ObservedModel ?? "not returned"}; " +
                 $"track={job.TrackId:D}; normalized core={source.NormalizedStartSample}..{source.NormalizedEndSample} @16000Hz; " +
                 $"native frames={source.SourceFrameOffset}..{source.SourceFrameOffset + source.SourceFrameCount} @{source.SourceFormat.SampleRate}Hz" +
+                (fallbackNote is null ? "" : "; " + fallbackNote) +
                 (echoReduced ? "; speaker echo removed (WebRTC AEC3)" : "");
             var turns = Store.GetTurns(job.TrackId, window.SessionStartTicks,
                 window.SessionStartTicks + window.SampleCount * TimeSpan.TicksPerSecond / 16000L);
@@ -1219,6 +1228,60 @@ public sealed class AppController : IAppController
             await lease;
             if (workPath is not null && File.Exists(workPath)) File.Delete(workPath);
         }
+    }
+
+    private static TranscriptionResult NormalizeResult(TranscriptionResult result)
+    {
+        if (result.Segments.IsDefault)
+            throw new TranscriptionProviderException(new(ProviderErrorCode.InvalidResponse, "The provider omitted its required segment collection."));
+        return result with
+        {
+            Diagnostics = result.Diagnostics.IsDefault ? [] : result.Diagnostics,
+            Segments = result.Segments.Select(segment => segment with
+            {
+                Words = segment.Words.IsDefault ? [] : segment.Words
+            }).ToImmutableArray()
+        };
+    }
+
+    /// <summary>
+    /// When local Whisper is unsure about a chunk and the session explicitly allows NVIDIA uploads,
+    /// the same audio is re-recognized by hosted Parakeet. Any hosted failure keeps the local text.
+    /// </summary>
+    private async Task<(ITranscriptionProvider Provider, TranscriptionResult Result, double Score, double Threshold)?> RunConfidenceFallbackAsync(
+        StoredJob job, TranscriptionRequest request, TranscriptionResult local, CancellationToken cancellationToken)
+    {
+        if (job.ProviderId != "local-whisper" || local.Status != TranscriptionStatus.Succeeded) return null;
+        var threshold = settings.FallbackBelowConfidence ?? DefaultFallbackBelowConfidence;
+        if (ChunkConfidence(local.Segments) is not { } score || score >= threshold) return null;
+        if (!HasNvidiaKey || fallbackSuspended is not null || settings.CloudBlockReason is not null ||
+            !IsFallbackLanguage(job.Language) || !Store.GetSession(job.SessionId).CloudConsent) return null;
+        var hosted = CreateProvider(FallbackProviderId);
+        try { return (hosted, NormalizeResult(await hosted.TranscribeAsync(request, cancellationToken)), score, threshold); }
+        catch (TranscriptionProviderException error)
+        {
+            if (error.Error.Code is ProviderErrorCode.Authentication or ProviderErrorCode.PermissionDenied or ProviderErrorCode.QuotaExceeded)
+            {
+                fallbackSuspended = error.Error.SafeMessage;
+                Notify("Hosted Parakeet fallback is off until the NVIDIA key is set again (" + error.Error.SafeMessage + "). Local Whisper text is kept.", true);
+            }
+            else Notify("Hosted Parakeet fallback failed for one chunk; local Whisper text is kept: " + error.Error.SafeMessage, true);
+            return null;
+        }
+    }
+
+    internal static double? ChunkConfidence(IReadOnlyList<TranscriptionSegment> segments)
+    {
+        // The least confident segment decides: one garbled phrase is enough to re-check the whole chunk.
+        var scores = segments.Where(segment => !string.IsNullOrWhiteSpace(segment.Text) && segment.Confidence is not null)
+            .Select(segment => segment.Confidence!.Value).ToArray();
+        return scores.Length == 0 ? null : scores.Min();
+    }
+
+    private static bool IsFallbackLanguage(string language)
+    {
+        try { NvidiaModelCatalog.Get(FallbackProviderId).GetLocale(language); return true; }
+        catch (ProviderException) { return false; }
     }
 
     private Guid? EchoReferenceTrack(StoredJob job)
@@ -1555,7 +1618,7 @@ public sealed class AppController : IAppController
         }
     }
 
-    private sealed record LocalSettings(string? WhisperModelPath, string? CloudBlockReason = null);
+    private sealed record LocalSettings(string? WhisperModelPath, string? CloudBlockReason = null, double? FallbackBelowConfidence = null);
     private sealed record MicrophoneOptions(Guid? EchoReferenceTrackId);
     private sealed record MediaCheckpoint(string SourcePath, int StreamIndex, ImportedMedia? Imported);
     private sealed class CaptureFeed
@@ -1582,9 +1645,12 @@ public sealed class AppController : IAppController
         {
             cancellationToken.ThrowIfCancellationRequested();
             var session = store.GetSession(sessionId);
+            // A local-Whisper session's upload consent covers only the hosted low-confidence fallback route.
+            var granted = session.CloudConsent && (session.ProviderId == providerId ||
+                session.ProviderId == "local-whisper" && providerId == FallbackProviderId);
             return Task.FromResult<CloudConsent?>(new(sessionId, providerId,
                 store.GetTracks(sessionId).Select(track => track.Id).ToImmutableArray(),
-                session.CloudConsent && session.ProviderId == providerId ? ConsentState.Granted : ConsentState.NotGranted,
+                granted ? ConsentState.Granted : ConsentState.NotGranted,
                 DateTimeOffset.UtcNow, "nvidia-upload-disclosure-2026-09-11"));
         }
     }
