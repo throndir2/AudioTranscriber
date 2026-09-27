@@ -3,11 +3,12 @@
 AudioTranscriber is a native .NET 10 x64 WPF application. It works out of the
 box: open it and click **Start recording**. Defaults are the default Windows
 output device, your default microphone as a separate track (when one exists),
-local Whisper, and English. It never starts audio capture or requests cloud
+local Parakeet, and English. It never starts audio capture or requests cloud
 consent when its window opens. On first start it downloads and verifies the
-default local models (Whisper large-v3-turbo and the small speaker models) in the
+default local models (Parakeet TDT v3 and the small speaker models) in the
 background; you can record meanwhile and queued audio is transcribed once they
-are ready. Recording and audio import do not require a NVIDIA key. Existing
+are ready. Local Whisper's model downloads the first time a Whisper session needs
+it. Recording and audio import do not require a NVIDIA key. Existing
 consented jobs may be resumed by the application controller; revoke consent or
 pause jobs when you do not want further processing.
 
@@ -97,10 +98,13 @@ provider accuracy, or live Graph access.
 ## Record or import
 
 1. Open **Record / import**. Every field has a default: a timestamped session
-   name, local Whisper, and `en`. Provider, language, and the microphone choice
-   are remembered from your last recording. Nothing silently translates the transcript.
-   Examples include Parakeet `en-GB`, Canary `en-US`, and Whisper `en`; consult the
-   provider's supported locales for other languages.
+   name, local Parakeet, and `en`. Provider, language, and the microphone choice
+   are remembered from your last recording (a saved Local Whisper default from an
+   older version moves to Parakeet once, if Parakeet supports its language).
+   Nothing silently translates the transcript. Local Parakeet accepts 25 European
+   languages (`en`, `de`, `fr`, …); choose Local Whisper for others. Hosted examples
+   include Parakeet `en-GB`, Canary `en-US`, and Whisper `en`; consult the provider's
+   supported locales for other languages.
 2. Leave cloud consent off for private/local work. Missing local models do not
    enable a NVIDIA provider or change cloud consent.
 3. The default Windows output endpoint is preselected. The **separate
@@ -198,7 +202,7 @@ under the path shows the last write time, line count, and bytes on disk.
 
 Recordings are cut into short chunks at natural pauses (at least 1.5 seconds,
 at most 6 seconds), so a line usually lands in the file a few seconds after
-the speaker pauses (depending on Whisper speed); silent chunks are skipped. Text is written first with the
+the speaker pauses (Parakeet takes well under a second per chunk; Whisper can take several); silent chunks are skipped. Text is written first with the
 speaker shown as `Unknown`; speaker analysis runs separately on ~20-second
 windows and fills the names in afterwards.
 
@@ -234,13 +238,12 @@ audio, with no personal or confidential data. Consent is never inherited from th
 new-session checkbox by the next session. **Revoke cloud consent** stops future
 uploads; already submitted audio cannot be recalled.
 
-With **local Whisper**, the same consent checkbox turns on the low-confidence
-fallback instead of full upload: only chunks Whisper is unsure about are sent to
-hosted Parakeet (English sessions, key required). Those transcript lines show
-`nvidia-parakeet-tdt-v3` and the Whisper score in their provenance. On a PC where
-Parakeet runs on the local NVIDIA GPU, those chunks are re-checked locally instead,
-without upload or consent. Those lines show `local-gpu-parakeet-…`, and Privacy /
-models shows what the GPU check found.
+With **local Whisper**, English chunks Whisper is unsure about are re-checked by
+local Parakeet when its model is installed, with no upload or consent. Those
+transcript lines show `local-parakeet` and the Whisper score in their provenance.
+If local Parakeet isn't installed, the consent checkbox turns on a hosted re-check
+instead of full upload: only those unsure chunks go to hosted Parakeet (key
+required) and show `nvidia-parakeet-tdt-v3`.
 
 Enter a key only in the **Privacy / models** password box. **Use entered key**
 clears the field and uses memory-only storage by default. Explicitly checking
@@ -263,13 +266,24 @@ Short turns, overlap, crowded windows, and character voices can remain uncertain
 The model's local-window limits do not impose a three-person maximum on an entire
 session, and labels are not verified identities.
 
+Local Parakeet's model is NVIDIA **Parakeet TDT 0.6B v3** (CC BY 4.0), as
+sherpa-onnx's int8 ONNX export: a 487,170,055-byte archive that unpacks to about
+640 MB. The app downloads it on first start, verifies the archive and each file's
+SHA256, and uses it for every Parakeet session. It runs on the CPU with 2–4 threads,
+about 14–20× real time on a desktop CPU, using ~1 GB of RAM. If the download fails,
+**Install / repair Parakeet model…** on **Privacy & models** retries it, and blocked
+audio is transcribed afterward. **NVIDIA GPU check** on the same page shows whether
+this PC has a GPU NVIDIA's Parakeet container supports. On Windows that container
+supports only the less accurate CTC model, so the CPU model stays in use unless you
+opt in (see [provider setup](providers.md)).
+
 Local Whisper's default model is **large-v3-turbo** (1,624,555,275 bytes,
 MIT). It's close to large-v3 accuracy at several times the speed. The app
-downloads it automatically on first start, verifies its SHA256, and selects it;
-progress appears under **Start recording**. Local Whisper jobs queued while it
-downloads wait and then run automatically. If the download fails, **Install
-recommended model (large-v3-turbo)…** on **Privacy & models** retries it, and
-blocked audio is transcribed once a model is installed. If
+downloads it the first time you record or import with Local Whisper, verifies its
+SHA256, and selects it; progress appears under **Start recording**. Local Whisper
+jobs queued while it downloads wait and then run automatically. If the download
+fails, **Install recommended model (large-v3-turbo)…** on **Privacy & models**
+retries it, and blocked audio is transcribed once a model is installed. If
 `ggml-large-v3-turbo.bin` is already in the app's `whisper` model folder, it is
 selected at startup without downloading. You can also pick any existing
 compatible model file.

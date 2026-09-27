@@ -12,7 +12,7 @@ leaves the original recording on disk.
 | --- | --- |
 | Recording | Visible Start/Stop, selected WASAPI endpoint, separate optional mic, native-format rotated WAVs, explicit gaps/overflow/disk errors |
 | Long imports | FFprobe audio-stream selection, managed original copy, continuous FFmpeg normalization, resumable durable work |
-| Recognition | Local Whisper large-v3-turbo by default (auto-downloaded); three optional NVIDIA Riva routes; low-confidence Whisper chunks re-checked by Parakeet on the local NVIDIA GPU when available (NVIDIA NIM in Docker), otherwise hosted Parakeet for sessions with upload consent; source-language ASR, no translation or automatic fallback on errors |
+| Recognition | Local Parakeet TDT v3 by default (CPU, auto-downloaded, 25 European languages); optional local Whisper large-v3-turbo for any language, whose unsure chunks are re-checked by local Parakeet; three optional NVIDIA Riva routes; source-language ASR, no translation or automatic fallback on errors |
 | Speakers | Local segmentation plus clean-turn embeddings and persistent IDs; editable names; overlap/short-turn uncertainty |
 | Transcript | SQLite FTS, bounded pages, speaker filtering, corrections separate from source text, timestamp seek and playback |
 | Exchange | Text, JSON, SRT, WebVTT; local voice-tag VTT import; configured delegated Teams transcript retrieval |
@@ -104,10 +104,13 @@ Download the release ZIP, extract it, run `AudioTranscriber.App.exe`, and click
   as a separate track when one exists. Echo reduction is on, so no headset is needed:
   speaker audio the mic picks up is removed before transcription instead of being
   transcribed twice.
-- Transcription: local Whisper **large-v3-turbo** in English, on the GPU via Vulkan
-  when available. The model (about 1.51 GiB) and the small speaker-labeling models
-  (33.49 MB) download and verify automatically on first start; you can record
-  meanwhile and queued audio is transcribed as soon as they are ready.
+- Transcription: local **Parakeet TDT v3** on the CPU, in English (it also detects
+  24 other European languages). The model (465 MiB) and the small speaker-labeling
+  models (33.49 MB) download and verify automatically on first start; you can record
+  meanwhile and queued audio is transcribed as soon as they are ready. In testing it
+  made about a third fewer word errors than Whisper large-v3-turbo and ran 14–20×
+  real time with a fraction of Whisper's CPU use. Local Whisper remains available
+  for other languages; its model downloads the first time you use it.
 - If the Microsoft Visual C++ runtime is missing, its official installer runs on
   startup (approve the Windows prompt).
 - No cloud upload, key, or consent is needed. Provider, language, and microphone

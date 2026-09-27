@@ -98,6 +98,7 @@ public sealed class MainViewModel : ObservableObject
         InstallModelsCommand = new AsyncCommand(InstallModelsAsync, () => !Busy && !closing && !controller.ModelSetupRunning);
         ChooseWhisperModelCommand = new RelayCommand(ChooseWhisperModel, () => !Busy && !closing);
         InstallWhisperModelCommand = new AsyncCommand(InstallWhisperModelAsync, () => !Busy && !closing && !controller.ModelSetupRunning);
+        InstallParakeetModelCommand = new AsyncCommand(InstallParakeetModelAsync, () => !Busy && !closing && !controller.ModelSetupRunning);
         InstallVcRuntimeCommand = new AsyncCommand(InstallVcRuntimeAsync, () => !Busy && !closing && !vcInstalling && !prerequisites.VcRuntimeReady);
         RecheckPrerequisitesCommand = new RelayCommand(() => RefreshPrerequisites(announce: true), () => !closing);
         if (controller.WhisperModelPath is { } currentModel) { localModel = DescribeModel(currentModel); shownWhisperPath = currentModel; }
@@ -274,6 +275,9 @@ public sealed class MainViewModel : ObservableObject
     public string ModelStatus { get => modelStatus; private set => Set(ref modelStatus, value); }
     public string LocalGpuStatus { get => localGpuStatus; private set => Set(ref localGpuStatus, value); }
     private string localGpuStatus = "Checking for a usable NVIDIA GPU after the default models are ready…";
+    public string ParakeetStatus { get => parakeetStatus; private set => Set(ref parakeetStatus, value); }
+    private string parakeetStatus = "";
+    private bool shownParakeetReady;
     public string PrerequisiteStatus => prerequisites.Summary;
     public bool PrerequisitesReady => prerequisites.AllReady;
     public bool VcRuntimeMissing => !prerequisites.VcRuntimeReady;
@@ -306,7 +310,7 @@ public sealed class MainViewModel : ObservableObject
         }
     }
     public string ProviderHelp => SelectedProvider is { } p
-        ? $"{(p.IsCloud ? "NVIDIA-hosted. Upload requires this session's consent AND a key." : "Local. English chunks Whisper is unsure about are re-checked by Parakeet: on this PC's NVIDIA GPU when it's running (no upload), otherwise hosted Parakeet only if you allow NVIDIA uploads below.")} {p.TimingDescription}"
+        ? $"{(p.IsCloud ? "NVIDIA-hosted. Upload requires this session's consent AND a key." : p.Id == "local-parakeet" ? "Runs on this PC (CPU; no key, no upload). Most accurate local option; supports 25 European languages, detected automatically." : "Runs on this PC; any language. English chunks Whisper is unsure about are re-checked by local Parakeet when it's installed, otherwise by hosted Parakeet only if you allow NVIDIA uploads below.")} {p.TimingDescription}"
         : "Choose a transcription provider.";
     private bool HasNewSessionDetails => !string.IsNullOrWhiteSpace(SessionName) && !string.IsNullOrWhiteSpace(Language) && SelectedProvider is not null;
 
@@ -402,6 +406,7 @@ public sealed class MainViewModel : ObservableObject
     public ICommand InstallModelsCommand { get; }
     public ICommand ChooseWhisperModelCommand { get; }
     public ICommand InstallWhisperModelCommand { get; }
+    public ICommand InstallParakeetModelCommand { get; }
     public ICommand InstallVcRuntimeCommand { get; }
     public ICommand RecheckPrerequisitesCommand { get; }
     public ICommand DiarizeCommand { get; }
@@ -686,7 +691,8 @@ public sealed class MainViewModel : ObservableObject
 
     private sealed record LiveFileSettings(string Path, bool Enabled);
 
-    private sealed record RecordingPreferences(bool? MicrophoneEnabled, string? ProviderId, string? Language, bool? ReduceEcho = null);
+    private sealed record RecordingPreferences(bool? MicrophoneEnabled, string? ProviderId, string? Language, bool? ReduceEcho = null,
+        int? Version = null);
 
     private string RecordingPreferencesPath => Path.Combine(controller.Store.RootDirectory, "recording-defaults.json");
 
@@ -697,7 +703,10 @@ public sealed class MainViewModel : ObservableObject
             if (!File.Exists(RecordingPreferencesPath)) return;
             var saved = System.Text.Json.JsonSerializer.Deserialize<RecordingPreferences>(File.ReadAllText(RecordingPreferencesPath));
             if (saved is null) return;
-            if (Providers.FirstOrDefault(x => x.Id == saved.ProviderId) is { } provider) selectedProvider = provider;
+            // Whisper was the only local choice before version 2; move those saved defaults to Parakeet once.
+            var migrated = saved.Version is null && saved.ProviderId == "local-whisper" &&
+                AudioTranscriber.Diarization.SherpaParakeetProvider.SupportsLanguage(string.IsNullOrWhiteSpace(saved.Language) ? "en" : saved.Language);
+            if (!migrated && Providers.FirstOrDefault(x => x.Id == saved.ProviderId) is { } provider) selectedProvider = provider;
             if (!string.IsNullOrWhiteSpace(saved.Language)) language = saved.Language;
             savedMicrophoneEnabled = saved.MicrophoneEnabled;
             reduceEcho = saved.ReduceEcho ?? true;
@@ -710,7 +719,7 @@ public sealed class MainViewModel : ObservableObject
         try
         {
             File.WriteAllText(RecordingPreferencesPath, System.Text.Json.JsonSerializer.Serialize(
-                new RecordingPreferences(MicrophoneEnabled, SelectedProvider?.Id, Language.Trim(), ReduceEcho)));
+                new RecordingPreferences(MicrophoneEnabled, SelectedProvider?.Id, Language.Trim(), ReduceEcho, Version: 2)));
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
     }
@@ -738,6 +747,11 @@ public sealed class MainViewModel : ObservableObject
     {
         SetupStatus = controller.SetupStatus ?? "";
         if (controller.LocalGpuStatus is { } gpu) LocalGpuStatus = gpu;
+        if (controller.ParakeetModelReady != shownParakeetReady || ParakeetStatus.Length == 0)
+        {
+            shownParakeetReady = controller.ParakeetModelReady;
+            ParakeetStatus = ParakeetReadyText;
+        }
         if (controller.WhisperModelPath is { } path && path != shownWhisperPath)
         {
             shownWhisperPath = path;
@@ -1044,6 +1058,17 @@ public sealed class MainViewModel : ObservableObject
             SetStatus("Whisper large-v3-turbo installed and selected for local transcription.");
         });
     }
+
+    private Task InstallParakeetModelAsync() => RunAsync("Downloading the Parakeet transcription model…", async token =>
+    {
+        await controller.InstallParakeetModelAsync(new Progress<string>(message => ParakeetStatus = message), token);
+        ParakeetStatus = ParakeetReadyText;
+        SetStatus("Parakeet TDT v3 is installed. Parakeet sessions transcribe on this PC.");
+    });
+
+    private string ParakeetReadyText => controller.ParakeetModelReady
+        ? "Parakeet TDT v3 is installed (about 640 MB on disk, ~1 GB RAM while running)."
+        : "The Parakeet model is not installed yet. It downloads automatically at startup (465 MiB); use the button to retry.";
 
     public void SaveKey(string key) => Guard(() =>
     {

@@ -13,9 +13,10 @@ Recording, retaining originals, importing files, playback, editing, and local
 speaker analysis do not require NVIDIA credentials. A missing local model must
 not cause a recording to be sent to a cloud service. On first start the desktop
 app downloads the default local models from their pinned public sources
-(Whisper large-v3-turbo, about 1.51 GiB, MIT; speaker models, about 33.49 MB,
-MIT / CC BY 4.0), verifies their SHA256, and stores them locally. No audio is
-sent while doing so.
+(Parakeet TDT v3, 465 MiB, CC BY 4.0; speaker models, about 33.49 MB, MIT /
+CC BY 4.0), verifies their SHA256, and stores them locally. Whisper large-v3-turbo
+(about 1.51 GiB, MIT) is downloaded the same way the first time a Local Whisper
+session needs it. No audio is sent while doing so.
 
 Release builds check `api.github.com` for a newer AudioTranscriber release
 (shortly after startup and every six hours) and download it from GitHub. That
@@ -38,19 +39,25 @@ There is no automatic paid-provider fallback. Catalog request rates are not a
 guarantee of trial balance or endpoint availability. Authentication or quota
 errors need attention rather than silent rerouting.
 
-For a **local Whisper** session, granting NVIDIA upload consent enables one
-thing only: chunks that Whisper is unsure about (lowest segment confidence below
-0.85) are re-sent to hosted Parakeet TDT v3, and its text replaces Whisper's for
-that chunk. Confident chunks never leave the PC. It needs an NVIDIA key and an
-English session; without consent, nothing is uploaded. A hosted error keeps the
-local text; an authentication, permission, or quota error stops the fallback until
-the key is set again.
+Local Parakeet sessions, the default, never upload audio. For a **local Whisper**
+session, chunks Whisper is unsure about (lowest segment confidence below 0.85) are
+re-checked by local Parakeet when its model is installed, which also uploads
+nothing. Only if local Parakeet isn't available does NVIDIA upload consent enable
+a hosted re-check. Then those chunks are sent to hosted Parakeet TDT v3, and its
+text replaces Whisper's for that chunk. Confident chunks never leave the PC. It
+needs an NVIDIA key and an English session; without consent, nothing is uploaded.
+A hosted error keeps the local text; an authentication, permission, or quota error
+stops the hosted fallback until the key is set again.
 
-When Parakeet runs on this PC's NVIDIA GPU (see `docs\providers.md`), those unsure
-chunks go to the local container on 127.0.0.1 instead, so no audio is uploaded and
-no consent is needed. The NVIDIA key is then used only to download NVIDIA's
-container. Docker stores it in its credential store and in the container's
-configuration.
+If you opt in to Parakeet on this PC's NVIDIA GPU (`"LocalGpuParakeet": true`; see
+`docs\providers.md`), English Parakeet work goes to the local container on
+127.0.0.1, so no audio is uploaded and no consent is needed. The NVIDIA key is then
+used only to download NVIDIA's container. Docker stores it in its credential store
+and in the container's configuration.
+
+No paid or LLM transcription service is used. Six OpenRouter audio models were
+evaluated on public clips only (see `docs\providers.md`) and did not improve
+accuracy enough to justify uploading audio.
 
 ## Secrets
 

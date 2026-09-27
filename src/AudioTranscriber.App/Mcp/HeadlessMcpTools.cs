@@ -29,7 +29,7 @@ public sealed class HeadlessMcpTools
 
     public const string Instructions =
         "Headless AudioTranscriber: the real recording/transcription engine without a window. " +
-        "Typical flow: status -> list_devices -> install_whisper_model (tiny/base for quick tests) and install_diarization_models -> " +
+        "Typical flow: status -> list_devices -> install_parakeet_model and install_diarization_models -> " +
         "import_audio or start_recording + play_audio + stop_recording -> wait_for_jobs -> get_transcript. " +
         "Use notifications to see background errors (for example diarization worker failures). Nothing is uploaded unless cloud_consent is true.";
 
@@ -39,8 +39,15 @@ public sealed class HeadlessMcpTools
             _ => McpToolResult.Json(Status())),
         McpTool.Create("list_devices", "List available Windows output (loopback) and microphone endpoints. The first entry is the Windows default.",
             _ => McpToolResult.Json(new { outputs = controller.GetOutputDevices(), microphones = controller.GetMicrophoneDevices() })),
-        McpTool.Create("list_providers", "List transcription providers (local-whisper is local; others are NVIDIA cloud).",
+        McpTool.Create("list_providers", "List transcription providers (local-parakeet and local-whisper run on this PC; others are NVIDIA cloud).",
             _ => McpToolResult.Json(controller.Providers)),
+        McpTool.Create("install_parakeet_model", "Download (465 MiB, SHA-256 verified) the default local Parakeet TDT v3 model.",
+            async (_, token) =>
+            {
+                var progress = new LastValue();
+                await controller.InstallParakeetModelAsync(progress, token);
+                return McpToolResult.Json(new { ready = controller.ParakeetModelReady, last = progress.Value });
+            }),
         McpTool.Create("install_whisper_model", "Download (SHA-256 verified) and select a local Whisper model. Use tiny or base for fast tests.",
             async (args, token) =>
             {
@@ -71,16 +78,16 @@ public sealed class HeadlessMcpTools
                     ?? throw new InvalidOperationException("No microphone endpoint.");
                 peakOutput = peakMicrophone = 0;
                 var session = await controller.StartRecordingAsync(args.String("name") ?? $"MCP recording {DateTime.Now:HH:mm:ss}",
-                    output, microphone, args.String("provider_id") ?? "local-whisper", args.String("language") ?? "en",
+                    output, microphone, args.String("provider_id") ?? "local-parakeet", args.String("language") ?? "en",
                     args.Bool("cloud_consent", false), args.Bool("reduce_echo", true), token);
                 return McpToolResult.Json(Describe(session));
             },
             ("name", "string", "Session name", false),
             ("output_device_id", "string", "Output endpoint id from list_devices (default: Windows default output)", false),
             ("microphone_device_id", "string", "Microphone id, or 'default'; omit to skip the microphone track", false),
-            ("provider_id", "string", "Provider id (default local-whisper)", false),
+            ("provider_id", "string", "Provider id (default local-parakeet; local-whisper for other languages)", false),
             ("language", "string", "Source language (default en)", false),
-            ("cloud_consent", "boolean", "Allow NVIDIA upload for this session (default false). With local-whisper it only enables the hosted Parakeet fallback for low-confidence chunks.", false),
+            ("cloud_consent", "boolean", "Allow NVIDIA upload for this session (default false). With local-whisper it only enables the hosted Parakeet fallback for low-confidence chunks when local Parakeet is not installed.", false),
             ("reduce_echo", "boolean", "Remove speaker audio from the microphone track before transcription (default true)", false)),
         McpTool.Create("stop_recording", "Stop the active recording and seal original audio. Transcription continues in the background.",
             async (_, token) =>
@@ -112,15 +119,15 @@ public sealed class HeadlessMcpTools
                     stream = probe.Streams.FirstOrDefault()?.Index ?? throw new InvalidOperationException("No audio stream in file.");
                 }
                 var session = await controller.ImportAudioAsync(args.String("name") ?? Path.GetFileNameWithoutExtension(path), path, stream,
-                    args.String("provider_id") ?? "local-whisper", args.String("language") ?? "en", args.Bool("cloud_consent", false), token);
+                    args.String("provider_id") ?? "local-parakeet", args.String("language") ?? "en", args.Bool("cloud_consent", false), token);
                 return McpToolResult.Json(Describe(session));
             },
             ("path", "string", "Local audio or video file", true),
             ("name", "string", "Session name (default: file name)", false),
             ("stream_index", "integer", "Audio stream index (default: first audio stream)", false),
-            ("provider_id", "string", "Provider id (default local-whisper)", false),
+            ("provider_id", "string", "Provider id (default local-parakeet; local-whisper for other languages)", false),
             ("language", "string", "Source language (default en)", false),
-            ("cloud_consent", "boolean", "Allow NVIDIA upload for this session (default false). With local-whisper it only enables the hosted Parakeet fallback for low-confidence chunks.", false)),
+            ("cloud_consent", "boolean", "Allow NVIDIA upload for this session (default false). With local-whisper it only enables the hosted Parakeet fallback for low-confidence chunks when local Parakeet is not installed.", false)),
         McpTool.Create("list_sessions", "List saved sessions, newest first.",
             args => McpToolResult.Json(controller.Store.GetSessions(args.Int("limit", 20)).Select(Describe)),
             ("limit", "integer", "Maximum sessions (default 20)", false)),
@@ -249,7 +256,7 @@ public sealed class HeadlessMcpTools
             workerExecutable = File.Exists(Path.Combine(AppContext.BaseDirectory, "AudioTranscriber.Worker.dll"))
                 ? Path.Combine(AppContext.BaseDirectory, "AudioTranscriber.Worker.exe") : "development worker (dotnet host)",
             controller.IsRecording, controller.RecordingSessionId,
-            controller.DiarizationModelsReady, controller.WhisperModelPath, controller.HasNvidiaKey, localGpu = controller.LocalGpuStatus,
+            controller.DiarizationModelsReady, controller.ParakeetModelReady, controller.WhisperModelPath, controller.HasNvidiaKey, localGpu = controller.LocalGpuStatus,
             prerequisites.FFmpeg, prerequisites.FFprobe, prerequisites.VcRuntimeReady,
             recentErrors = notifications.Where(item => item.IsError).TakeLast(5)
         };
