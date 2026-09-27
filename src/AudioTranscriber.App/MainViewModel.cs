@@ -99,6 +99,12 @@ public sealed class MainViewModel : ObservableObject
         ChooseWhisperModelCommand = new RelayCommand(ChooseWhisperModel, () => !Busy && !closing);
         InstallWhisperModelCommand = new AsyncCommand(InstallWhisperModelAsync, () => !Busy && !closing && !controller.ModelSetupRunning);
         InstallParakeetModelCommand = new AsyncCommand(InstallParakeetModelAsync, () => !Busy && !closing && !controller.ModelSetupRunning);
+        UseGpuCommand = new RelayCommand(() => AskGpu(null), () => !closing && controller.GpuParakeetEnabled != true);
+        UseCpuCommand = new RelayCommand(() => Guard(() =>
+        {
+            controller.SetGpuParakeet(false);
+            SetStatus("Parakeet uses the CPU. You can switch back to the GPU in Privacy / models.");
+        }), () => !closing && controller.GpuParakeetEnabled == true);
         InstallVcRuntimeCommand = new AsyncCommand(InstallVcRuntimeAsync, () => !Busy && !closing && !vcInstalling && !prerequisites.VcRuntimeReady);
         RecheckPrerequisitesCommand = new RelayCommand(() => RefreshPrerequisites(announce: true), () => !closing);
         if (controller.WhisperModelPath is { } currentModel) { localModel = DescribeModel(currentModel); shownWhisperPath = currentModel; }
@@ -277,7 +283,7 @@ public sealed class MainViewModel : ObservableObject
     private string localGpuStatus = "Checking for a usable NVIDIA GPU after the default models are ready…";
     public string ParakeetStatus { get => parakeetStatus; private set => Set(ref parakeetStatus, value); }
     private string parakeetStatus = "";
-    private bool shownParakeetReady;
+    private bool shownParakeetReady, gpuOfferAsked;
     public string PrerequisiteStatus => prerequisites.Summary;
     public bool PrerequisitesReady => prerequisites.AllReady;
     public bool VcRuntimeMissing => !prerequisites.VcRuntimeReady;
@@ -407,6 +413,8 @@ public sealed class MainViewModel : ObservableObject
     public ICommand ChooseWhisperModelCommand { get; }
     public ICommand InstallWhisperModelCommand { get; }
     public ICommand InstallParakeetModelCommand { get; }
+    public ICommand UseGpuCommand { get; }
+    public ICommand UseCpuCommand { get; }
     public ICommand InstallVcRuntimeCommand { get; }
     public ICommand RecheckPrerequisitesCommand { get; }
     public ICommand DiarizeCommand { get; }
@@ -747,6 +755,12 @@ public sealed class MainViewModel : ObservableObject
     {
         SetupStatus = controller.SetupStatus ?? "";
         if (controller.LocalGpuStatus is { } gpu) LocalGpuStatus = gpu;
+        if (controller.GpuOffer is { } offer && !gpuOfferAsked && !closing)
+        {
+            // Asked once; the answer is saved, and Privacy / models can change it later.
+            gpuOfferAsked = true;
+            dispatcher.BeginInvoke(() => AskGpu(offer));
+        }
         if (controller.ParakeetModelReady != shownParakeetReady || ParakeetStatus.Length == 0)
         {
             shownParakeetReady = controller.ParakeetModelReady;
@@ -1069,6 +1083,28 @@ public sealed class MainViewModel : ObservableObject
     private string ParakeetReadyText => controller.ParakeetModelReady
         ? "Parakeet TDT v3 is installed (about 640 MB on disk, ~1 GB RAM while running)."
         : "The Parakeet model is not installed yet. It downloads automatically at startup (465 MiB); use the button to retry.";
+
+    /// <summary>The one-time GPU question: large NVIDIA download plus license terms. "No" keeps Parakeet on the CPU.</summary>
+    private void AskGpu(string? gpu) => Guard(() =>
+    {
+        if (closing) return;
+        var download = AudioTranscriber.Diarization.ParakeetGpuPackage.DownloadBytes / 1e9;
+        var disk = AudioTranscriber.Diarization.ParakeetGpuPackage.InstalledBytes / 1e9;
+        var yes = dialogs.Confirm("Run Parakeet on your NVIDIA GPU?",
+            $"{(gpu is null ? "If this PC has a supported NVIDIA GPU, " : $"This PC has an NVIDIA {gpu}. ")}Parakeet can run on it instead of the CPU: " +
+            "several times faster on long imports and with almost no CPU load. Accuracy is the same.\n\n" +
+            $"This needs a one-time download of about {download:0.0} GB ({disk:0.0} GB on disk): NVIDIA's CUDA runtime, cuBLAS and cuDNN, " +
+            "the CUDA build of ONNX Runtime (from sherpa-onnx), and the full-precision Parakeet TDT v3 model. Every file is SHA256-verified " +
+            "and kept in the app's model folder; nothing is installed system-wide and no admin rights are needed. Audio never leaves this PC.\n\n" +
+            "By choosing Yes you accept the license terms of these components:\n" +
+            AudioTranscriber.Diarization.ParakeetGpuPackage.LicenseNotice + "\n" +
+            "Choose No to keep using the CPU (fast already). You can change this later in Privacy / models.");
+        controller.SetGpuParakeet(yes);
+        LocalGpuStatus = controller.LocalGpuStatus ?? LocalGpuStatus;
+        SetStatus(yes ? "Downloading the GPU runtime for Parakeet in the background; transcription keeps using the CPU until it's ready."
+            : "Parakeet keeps using the CPU. You can switch to the GPU later in Privacy / models.");
+        CommandManager.InvalidateRequerySuggested();
+    });
 
     public void SaveKey(string key) => Guard(() =>
     {

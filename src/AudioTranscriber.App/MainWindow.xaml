@@ -600,7 +600,7 @@
                                                 <Button Content="Clear key" Click="ClearKeyClick" />
                                             </WrapPanel>
                                             <CheckBox Content="Remember key with Windows current-user DPAPI (off by default)" IsChecked="{Binding RememberKey}" />
-                                            <TextBlock Text="Memory-only by default. The password field is cleared after use. No keys in configuration, logs, command-line arguments, transcripts, or exports. Graph authentication is separate. If you opt in to GPU Parakeet, Docker keeps the key to download and run NVIDIA's container." Style="{StaticResource Help}" />
+                                            <TextBlock Text="Memory-only by default. The password field is cleared after use. No keys in configuration, logs, command-line arguments, transcripts, or exports. Graph authentication is separate. Local Parakeet, on the CPU or GPU, never uses the key." Style="{StaticResource Help}" />
                                         </StackPanel>
                                     </Border>
                                     <Border Style="{StaticResource Card}">
@@ -617,9 +617,13 @@
                                     </Border>
                                     <Border Style="{StaticResource Card}">
                                         <StackPanel>
-                                            <ContentControl Style="{StaticResource SectionHeader}" Content="NVIDIA GPU check" />
-                                            <TextBlock Style="{StaticResource Help}" Text="At startup the app looks for an NVIDIA GPU that NVIDIA's Parakeet container supports (RTX 30-series or newer, 8 GB+). On Windows that container runs through Docker Desktop (WSL 2), where NVIDIA supports only Parakeet CTC, which tested less accurate than Parakeet TDT on the CPU, so the CPU model stays in use. To move English Parakeet work to the GPU anyway (less CPU load), set &quot;LocalGpuParakeet&quot;: true in preferences.json, run Docker Desktop, and set an NVIDIA key; the ~9 GB container then downloads once, runs on 127.0.0.1 only, and stops when the app closes." />
+                                            <ContentControl Style="{StaticResource SectionHeader}" Content="Parakeet on the NVIDIA GPU" />
+                                            <TextBlock Style="{StaticResource Help}" Text="At startup the app looks for an NVIDIA GPU that can run Parakeet with CUDA 12 (GTX 10-series or newer, 4 GB+, driver 527.41+). The first time it finds one it asks once whether to download the GPU runtime (about 4.4 GB: NVIDIA's CUDA runtime, cuBLAS and cuDNN, ONNX Runtime's CUDA build, and the full-precision Parakeet model), which needs accepting NVIDIA's license terms. Then Parakeet runs on the GPU in a separate worker process: much faster on long imports, with almost no CPU load and the same accuracy. If anything goes wrong it falls back to the CPU model. No Docker, admin rights, or system install." />
                                             <TextBlock Text="{Binding LocalGpuStatus}" TextWrapping="Wrap" FontWeight="SemiBold" />
+                                            <WrapPanel>
+                                                <Button Content="Use the GPU for Parakeet…" Command="{Binding UseGpuCommand}" />
+                                                <Button Content="Use the CPU only" Command="{Binding UseCpuCommand}" />
+                                            </WrapPanel>
                                         </StackPanel>
                                     </Border>
                                 </StackPanel>

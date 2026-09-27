@@ -111,6 +111,9 @@ Download the release ZIP, extract it, run `AudioTranscriber.App.exe`, and click
   made about a third fewer word errors than Whisper large-v3-turbo and ran 14–20×
   real time with a fraction of Whisper's CPU use. Local Whisper remains available
   for other languages; its model downloads the first time you use it.
+- On a PC with an NVIDIA GPU (GTX 10-series or newer, 4 GB+), the app asks once
+  whether to download NVIDIA's CUDA runtime (about 4.4 GB, NVIDIA licence terms) so
+  Parakeet runs on the GPU instead. If you decline, it stays on the CPU.
 - If the Microsoft Visual C++ runtime is missing, its official installer runs on
   startup (approve the Windows prompt).
 - No cloud upload, key, or consent is needed. Provider, language, and microphone

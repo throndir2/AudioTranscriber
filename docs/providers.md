@@ -272,7 +272,9 @@ English clips as below: 7.4 minutes, first clip excluded as warm-up.
 
 So Parakeet is far lighter on the CPU than Whisper on the CPU, about 15–28× less CPU
 per second of audio. It is about as light as Whisper offloaded to a GPU, while being
-10–15× faster and making about a third fewer word errors.
+10–15× faster and making about a third fewer word errors. On PCs with a suitable
+NVIDIA GPU, the same model can also
+[run on the GPU](#parakeet-on-an-nvidia-gpu-cuda-asked-once) after a one-time consent.
 
 ## Low-confidence fallback for Local Whisper
 
@@ -280,10 +282,9 @@ When a Local Whisper chunk's lowest segment `Confidence` is below the threshold
 (default **0.85**), the same core-only PCM window is re-recognized by Parakeet,
 trying these in order:
 
-1. The opted-in GPU container (below), when it is running and the session is English.
-2. Local CPU Parakeet, when its model is installed and the language is supported. No
-   upload and no consent needed.
-3. Hosted `nvidia-parakeet-tdt-v3`. This needs **all** of: the session's NVIDIA upload
+1. Local Parakeet, when its model is installed (or the [GPU worker](#parakeet-on-an-nvidia-gpu-cuda-asked-once)
+   is running) and the language is supported. No upload and no consent needed.
+2. Hosted `nvidia-parakeet-tdt-v3`. This needs **all** of: the session's NVIDIA upload
    consent, an NVIDIA key, an `en`/`en-GB` session, and cloud work not blocked.
 
 A non-partial Parakeet result, including an empty one, replaces Whisper's text for
@@ -344,43 +345,75 @@ fallback is built. The hard clips are overlapping, far-field, disfluent meeting
 speech that every model struggles with. The free NVIDIA-hosted Nemotron 3 Nano Omni
 scored 11.4% on the same 12 clips.
 
-## Parakeet on a local NVIDIA GPU (NVIDIA speech NIM, opt-in)
+## Parakeet on an NVIDIA GPU (CUDA, asked once)
 
-After the default models are ready, the desktop app runs `nvidia-smi` to find the
-largest NVIDIA GPU with **compute capability 8.0+** (RTX 30-series or newer) and at
-least ~7.5 GB. It reports what it found in Privacy / models (and MCP
-`status.localGpu`), but **does not use the GPU by default**. On Windows, NVIDIA's
-speech container runs through Docker Desktop's WSL 2 backend, and NVIDIA's support
-matrix marks only Parakeet CTC 0.6B and 1.1B as WSL 2-supported. TDT is marked
-unsupported. CTC 1.1B (7.76% WER through NVIDIA's hosted route) and CTC 0.6B
-(8.99%) are both less accurate than TDT on the CPU (6.85%), and the CPU route is
-already 14–20× real time. The NIM licence also covers only research, development,
-and testing for Developer Program members; production use needs NVIDIA AI Enterprise.
-Docker Desktop's own licence is free only for personal use and small businesses.
+After the default models are ready, the desktop app runs `nvidia-smi` and picks the
+largest NVIDIA GPU that can run CUDA 12:
+- compute capability **6.0+** (GTX 10-series or newer)
+- **4 GB+** of GPU memory
+- NVIDIA driver **527.41+**
 
-To trade that accuracy for lower CPU load, set `"LocalGpuParakeet": true` in
-`preferences.json`, run Docker Desktop, and set an NVIDIA key. The app then:
-1. Signs in to `nvcr.io`; the key goes over stdin into Docker's credential store.
-2. Pulls `nvcr.io/nim/nvidia/parakeet-1-1b-ctc-en-us` once, **8.8 GB compressed**.
-3. Creates the container `audiotranscriber-parakeet` with the offline profile
-   `mode=ofl,vad=default,diarizer=disabled` (5.83 GB GPU memory). It is published on
-   `127.0.0.1:59051` (gRPC) and `127.0.0.1:59000` (health) only.
+The first time it finds one, it asks **once**, with the download size and licence
+terms. The answer is saved as `"UseGpuParakeet"` in `preferences.json`, and Privacy /
+models can change it at any time. MCP clients use `set_gpu_parakeet`. If you decline,
+or the PC has no suitable GPU, Parakeet stays on the CPU.
 
-NIM then downloads and optimizes the model, which can take up to 30 minutes. While it
-runs, English `local-parakeet` jobs and the Whisper fallback use the GPU; other
-languages stay on the CPU. The container stops when the app closes and is reused next
-time. `NGC_API_KEY` is passed from the app's environment rather than the command
-line, but Docker keeps it in the container configuration (`docker inspect`). Requests
-use plaintext gRPC to 127.0.0.1 with no credentials. A GPU failure keeps the Whisper
-text in fallback mode. The app does not install Docker Desktop itself.
+On **Yes**, `ParakeetGpuPackage` downloads and SHA256-verifies these pinned
+components into `models\parakeet-gpu`. No Docker, admin rights, or system install is
+involved; only the NVIDIA display driver must be present.
 
-Verified 2026-09-26 on a PC without a usable NVIDIA GPU:
-- The probe declined.
-- A fake local Riva server on 127.0.0.1:59051 received the controller's request with
-  no credentials.
-- `nvcr.io` accepted the key.
+| Component | Download | Kept on disk |
+|---|---:|---|
+| sherpa-onnx 1.13.8 CUDA build (ONNX Runtime 1.28.2) | 595 MB | `sherpa-onnx-c-api.dll`, `onnxruntime*.dll` (518 MB) |
+| NVIDIA CUDA runtime 12.9.79 | 3.5 MB | `cudart64_12.dll` |
+| NVIDIA cuBLAS 12.9.1.4 | 550 MB | `cublas64_12.dll`, `cublasLt64_12.dll` (771 MB) |
+| NVIDIA cuDNN 9.21.1 (CUDA 12) | 677 MB | 9 `cudnn*64_9.dll` (1.05 GB) |
+| Parakeet TDT 0.6B v3, full precision (sherpa-onnx export, HF revision `1a468a35`) | 2.55 GB | `encoder.onnx` + `encoder.weights`, `decoder.onnx`, `joiner.onnx`, `tokens.txt` |
+| **Total** | **4.37 GB** | **4.8 GB** |
 
-The real container itself was not run.
+Each archive's SHA256 matches NVIDIA's redistrib manifests, GitHub's release digest,
+or Hugging Face's LFS object ID. Each extracted file also has its own pinned size and
+SHA256. Only the listed entries are extracted, and archives are deleted afterwards.
+The download needs about 5.5 GB of free disk.
+
+The GPU model is full precision because the CPU int8 export uses quantized operators
+(`DynamicQuantizeLinear`, `ConvInteger`, `MatMulInteger` on uint8, and
+`DynamicQuantizeLSTM`) that ONNX Runtime runs only on the CPU. On the 48 test clips
+the fp32 model scored 7.01% WER against the int8 model's 6.85%, the same within noise.
+So the GPU brings speed and low CPU use, not accuracy.
+
+The GPU model runs in a long-lived `AudioTranscriber.Worker --parakeet-server`
+process, which exchanges JSON lines over stdin/stdout. The worker:
+- Binds the sherpa P/Invokes to the CUDA build's `sherpa-onnx-c-api.dll` and
+  `onnxruntime.dll`.
+- Adds the runtime folder to the DLL search path, so cuDNN can find its
+  sub-libraries.
+- Selects the GPU with `CUDA_DEVICE_ORDER=PCI_BUS_ID` and `CUDA_VISIBLE_DEVICES`.
+- Decodes a second of silence before reporting ready, so a CUDA, cuDNN, or driver
+  problem shows up at startup.
+
+A native failure ends only the worker process. The app then logs the reason and
+switches `local-parakeet` back to the CPU int8 model until the next start. Results
+carry the `parakeet-runtime:cuda` or `parakeet-runtime:cpu` diagnostic and the model
+name in their provenance. Licences: CUDA Toolkit EULA, cuDNN Software License
+Agreement, ONNX Runtime (MIT), sherpa-onnx (Apache-2.0), Parakeet (CC BY 4.0). A
+`NOTICE.txt` in the folder lists them.
+
+Verified 2026-09-27 on a PC whose only usable GPU is an Intel iGPU:
+- The installer downloaded and verified all 4.37 GB from the live URLs.
+- The GPU check declined correctly.
+- The CUDA build started in the worker with ONNX Runtime's CPU provider: 11.6× real
+  time with the fp32 model.
+- The controller routed Parakeet jobs through the worker.
+- Killing the worker fell back to the CPU model.
+- With the CUDA provider, the worker failed at startup in 0.5 s with a CUDA exception
+  and no crash.
+
+**Actual CUDA inference has not been run**: it needs an NVIDIA GPU, which this PC lacks.
+
+An earlier release offered NVIDIA's speech NIM container through Docker Desktop. It
+was removed. On Windows that container runs through WSL 2, where NVIDIA supports only
+Parakeet CTC (7.8–9.0% WER), and its licence covers development and testing only.
 
 ## Protocol/dependency provenance
 

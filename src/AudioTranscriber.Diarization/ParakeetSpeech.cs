@@ -96,17 +96,23 @@ public sealed class SherpaParakeetProvider : ITranscriptionProvider
     private readonly string modelDirectory;
     private readonly int threads;
     private readonly SemaphoreSlim gate = new(1, 1);
+    private readonly Func<ParakeetGpuWorker?>? gpu;
+    private readonly Action<string>? gpuFailed;
     private OfflineRecognizer? recognizer;
     private bool disposed;
 
-    public ProviderDescriptor Descriptor { get; } = new(ProviderId, "Parakeet TDT v3 (local CPU)", ParakeetModels.ArchiveName,
+    public ProviderDescriptor Descriptor { get; } = new(ProviderId, "Parakeet TDT v3 (local)", ParakeetModels.ArchiveName,
         false, TimingGranularity.Word, 30, DefaultLanguage: "en");
 
-    public SherpaParakeetProvider(string modelsParent, int? threads = null)
+    /// <param name="gpu">Returns the running GPU worker, if any; its failures fall back to the CPU model.</param>
+    public SherpaParakeetProvider(string modelsParent, int? threads = null, Func<ParakeetGpuWorker?>? gpu = null,
+        Action<string>? gpuFailed = null)
     {
         modelDirectory = ParakeetModels.ModelDirectory(Path.GetFullPath(modelsParent));
         // ONNX Runtime's worker threads spin: 4 threads is ~1.4x faster than 2 but uses ~2x the CPU (measured).
         this.threads = threads ?? Math.Clamp(Environment.ProcessorCount / 4, 2, 4);
+        this.gpu = gpu;
+        this.gpuFailed = gpuFailed;
     }
 
     public static bool SupportsLanguage(string language) =>
@@ -121,6 +127,18 @@ public sealed class SherpaParakeetProvider : ITranscriptionProvider
         if (!SupportsLanguage(request.Language))
             throw Failure(ProviderErrorCode.UnsupportedLanguage,
                 "Parakeet supports 25 European languages. Choose Local Whisper for this session's language.");
+        if (gpu?.Invoke() is { } worker)
+        {
+            try
+            {
+                var json = await worker.DecodeAsync(Path.GetFullPath(request.AudioPath), request.SampleCount, cancellationToken);
+                return Parse(json, request.SampleCount, ParakeetGpuPackage.ModelName, "cuda");
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception error) when (error is InvalidOperationException or IOException or TimeoutException or
+                JsonException or InvalidDataException or KeyNotFoundException or OperationCanceledException)
+            { gpuFailed?.Invoke(error.Message); }
+        }
         if (!File.Exists(Path.Combine(modelDirectory, "encoder.int8.onnx")))
             throw Failure(ProviderErrorCode.ModelUnavailable, "The Parakeet model is not installed yet; it downloads automatically.");
         byte[] pcm;
@@ -131,7 +149,11 @@ public sealed class SherpaParakeetProvider : ITranscriptionProvider
         try
         {
             var samples = Pcm16Audio.ToFloatSamples(pcm);
-            var json = await Task.Run(() => Decode(samples), cancellationToken);
+            var json = await Task.Run(() =>
+            {
+                recognizer ??= CreateRecognizer(modelDirectory, ".int8", threads, "cpu");
+                return DecodeToJson(recognizer, samples);
+            }, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             return Parse(json, request.SampleCount);
         }
@@ -141,9 +163,8 @@ public sealed class SherpaParakeetProvider : ITranscriptionProvider
         finally { gate.Release(); }
     }
 
-    private string Decode(float[] samples)
+    internal static string DecodeToJson(OfflineRecognizer recognizer, float[] samples)
     {
-        recognizer ??= CreateRecognizer();
         using var stream = recognizer.CreateStream();
         stream.AcceptWaveform(16000, samples);
         recognizer.Decode(stream);
@@ -153,24 +174,27 @@ public sealed class SherpaParakeetProvider : ITranscriptionProvider
         finally { NativeMethods.SherpaOnnxDestroyOfflineStreamResultJson(pointer); }
     }
 
-    private OfflineRecognizer CreateRecognizer()
+    /// <param name="suffix">".int8" for the CPU export, "" for the full-precision GPU export.</param>
+    internal static OfflineRecognizer CreateRecognizer(string modelDirectory, string suffix, int threads, string provider)
     {
         var config = new OfflineRecognizerConfig();
         config.FeatConfig.SampleRate = 16000;
         config.FeatConfig.FeatureDim = 80;
-        config.ModelConfig.Transducer.Encoder = Path.Combine(modelDirectory, "encoder.int8.onnx");
-        config.ModelConfig.Transducer.Decoder = Path.Combine(modelDirectory, "decoder.int8.onnx");
-        config.ModelConfig.Transducer.Joiner = Path.Combine(modelDirectory, "joiner.int8.onnx");
+        config.ModelConfig.Transducer.Encoder = Path.Combine(modelDirectory, $"encoder{suffix}.onnx");
+        config.ModelConfig.Transducer.Decoder = Path.Combine(modelDirectory, $"decoder{suffix}.onnx");
+        config.ModelConfig.Transducer.Joiner = Path.Combine(modelDirectory, $"joiner{suffix}.onnx");
         config.ModelConfig.Tokens = Path.Combine(modelDirectory, "tokens.txt");
         config.ModelConfig.ModelType = "nemo_transducer";
         config.ModelConfig.NumThreads = threads;
-        config.ModelConfig.Provider = "cpu";
+        config.ModelConfig.Provider = provider;
         config.ModelConfig.Debug = 0;
         config.DecodingMethod = "greedy_search";
         return new OfflineRecognizer(config);
     }
 
-    internal TranscriptionResult Parse(string json, long sampleCount)
+    internal TranscriptionResult Parse(string json, long sampleCount) => Parse(json, sampleCount, ParakeetModels.ArchiveName, "cpu");
+
+    internal TranscriptionResult Parse(string json, long sampleCount, string model, string runtime)
     {
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
@@ -223,8 +247,8 @@ public sealed class SherpaParakeetProvider : ITranscriptionProvider
             Text = text, Tokens = tokens, Timestamps = starts, Durations = durations, TokenProbabilities = tokenProbabilities
                 .Select(value => Math.Round(value, 4)), Confidence = confidence, Language = root.TryGetProperty("lang", out var lang) ? lang.GetString() : null
         });
-        return new(ProviderId, "sherpa-onnx:" + ParakeetModels.ArchiveName,
-            segments.IsEmpty ? TranscriptionStatus.Empty : TranscriptionStatus.Succeeded, segments, raw, ["parakeet-runtime:cpu"]);
+        return new(ProviderId, "sherpa-onnx:" + model,
+            segments.IsEmpty ? TranscriptionStatus.Empty : TranscriptionStatus.Succeeded, segments, raw, ["parakeet-runtime:" + runtime]);
     }
 
     private static float[] Floats(JsonElement root, string name) =>

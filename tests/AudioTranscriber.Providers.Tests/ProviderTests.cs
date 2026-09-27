@@ -202,45 +202,18 @@ public sealed class ProviderTests : IDisposable
     }
 
     [Fact]
-    public void GpuCheckPicksASupportedNvidiaGpuAndAFittingParakeetProfile()
+    public void GpuCheckPicksTheLargestNvidiaGpuThatCanRunCuda12()
     {
         var gpus = GpuProbe.Parse("0, NVIDIA GeForce RTX 2070 SUPER, 8192, 7.5, 581.57\r\n1, NVIDIA GeForce RTX 4090, 24564, 8.9, 581.57\nbad line\n");
         Assert.Equal(2, gpus.Count);
-        var choice = LocalNimCatalog.Select(gpus);
-        Assert.Equal((gpus[1], LocalNimCatalog.ParakeetCtc), choice);
-        Assert.Equal(LocalNimCatalog.ParakeetCtc, LocalNimCatalog.Select(GpuProbe.Parse("0, NVIDIA GeForce RTX 4060, 8188, 8.9, 581.57"))?.Profile);
-        Assert.Null(LocalNimCatalog.Select([gpus[0]]));
-        Assert.Null(LocalNimCatalog.Select(GpuProbe.Parse("0, NVIDIA GeForce RTX 3050, 6144, 8.6, 581.57")));
-        Assert.Null(LocalNimCatalog.Select([]));
-    }
-
-    [Fact]
-    public void LocalGpuContainerIsLoopbackOnlyAndNeverGetsTheKeyOnTheCommandLine()
-    {
-        var arguments = LocalNimHost.RunArguments(LocalNimCatalog.ParakeetCtc, 1);
-        Assert.Contains("NGC_API_KEY", arguments);
-        Assert.DoesNotContain(arguments, argument => argument.StartsWith("NGC_API_KEY=", StringComparison.Ordinal));
-        Assert.Contains($"127.0.0.1:{LocalNimHost.GrpcPort}:50051", arguments);
-        Assert.Contains($"127.0.0.1:{LocalNimHost.HttpPort}:9000", arguments);
-        Assert.Contains("device=1", arguments);
-        Assert.Equal("nvcr.io/nim/nvidia/parakeet-1-1b-ctc-en-us:latest", arguments[^1]);
-    }
-
-    [Fact]
-    public async Task LocalGpuParakeetSendsNoCredentialsAndReturnsWordTiming()
-    {
-        var request = await RequestAsync(16000);
-        var fake = new FakeTransport { Response = Response("hello there", 1, (100, 300, "hello", 0), (400, 700, "there", 0)) };
-        await using var provider = new LocalRivaProvider(LocalNimCatalog.ParakeetCtc, fake);
-        Assert.False(provider.Descriptor.IsCloud);
-        var result = await provider.TranscribeAsync(request);
-        Assert.Empty(fake.Headers!);
-        Assert.Equal("en-US", fake.Request!.Config.LanguageCode);
-        Assert.True(fake.Request.Config.EnableWordTimeOffsets);
-        Assert.Equal(TimingGranularity.Word, result.Segments[0].Timing);
-        Assert.Equal(["hello", "there"], result.Segments[0].Words.Select(word => word.Text));
-        var error = await Assert.ThrowsAsync<TranscriptionProviderException>(() => provider.TranscribeAsync(request with { Language = "fr" }));
-        Assert.Equal(ProviderErrorCode.UnsupportedLanguage, error.Error.Code);
+        Assert.Equal(gpus[1], GpuProbe.SelectCudaGpu(gpus));
+        Assert.Equal(gpus[0], GpuProbe.SelectCudaGpu([gpus[0]]));
+        Assert.NotNull(GpuProbe.SelectCudaGpu(GpuProbe.Parse("0, NVIDIA GeForce GTX 1060 6GB, 6144, 6.1, 560.94")));
+        Assert.Null(GpuProbe.SelectCudaGpu(GpuProbe.Parse("0, NVIDIA GeForce GTX 970, 4096, 5.2, 560.94")));
+        Assert.Null(GpuProbe.SelectCudaGpu(GpuProbe.Parse("0, NVIDIA GeForce GTX 1050, 2048, 6.1, 560.94")));
+        Assert.Null(GpuProbe.SelectCudaGpu(GpuProbe.Parse("0, NVIDIA GeForce RTX 3060, 12288, 8.6, 516.94")));
+        Assert.Null(GpuProbe.SelectCudaGpu([]));
+        Assert.Contains("No NVIDIA GPU", GpuProbe.DescribeUnsupported([]));
     }
 
     [Fact]

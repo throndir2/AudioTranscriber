@@ -34,6 +34,10 @@ public interface IAppController : IAsyncDisposable
     Task InstallParakeetModelAsync(IProgress<string>? progress = null, CancellationToken cancellationToken = default);
     // What the local NVIDIA GPU check found, and whether Parakeet is running on it.
     string? LocalGpuStatus { get; }
+    // Set when this PC's NVIDIA GPU can run Parakeet and the user hasn't decided yet (a one-time, large download).
+    string? GpuOffer { get; }
+    bool? GpuParakeetEnabled { get; }
+    void SetGpuParakeet(bool enabled);
     bool ModelSetupRunning { get; }
     Task EnsureDefaultModelsAsync();
     void RetryBlockedLocalWork();

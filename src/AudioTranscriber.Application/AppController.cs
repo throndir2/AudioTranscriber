@@ -21,11 +21,10 @@ public sealed class AppController : IAppController
     private const string FallbackProviderId = "nvidia-parakeet-tdt-v3";
     private const double DefaultFallbackBelowConfidence = 0.85;
     private volatile string? fallbackSuspended;
-    // Parakeet on this PC's NVIDIA GPU (NVIDIA speech NIM in Docker), when the machine can run it.
-    private volatile LocalRivaProvider? localGpu;
-    private volatile LocalNimHost? nimHost;
+    // Parakeet on this PC's NVIDIA GPU (CUDA build in a worker process), once the user accepts the one-time download.
+    private ParakeetGpuWorker? parakeetGpu;
     private Task? localGpuStart;
-    private volatile string? localGpuStatus, localGpuSetupStatus;
+    private volatile string? localGpuStatus, localGpuSetupStatus, gpuOffer;
     private Task? whisperSetup;
     private volatile string? whisperSetupStatus;
     private volatile bool whisperSetupFailed;
@@ -151,7 +150,6 @@ public sealed class AppController : IAppController
         credentials.SetMemoryOnly(key);
         HasNvidiaKey = true;
         fallbackSuspended = null;
-        if (localGpu is null && modelSetup is not null) StartLocalGpu();
         if (remember)
             Task.Run(() => credentials.SaveForCurrentUserAsync(credentialPath, true)).GetAwaiter().GetResult();
         else if (File.Exists(credentialPath)) File.Delete(credentialPath);
@@ -292,14 +290,32 @@ public sealed class AppController : IAppController
     {
         lock (setupGate)
         {
-            if (localGpuStart is { IsCompleted: false } || localGpu is not null) return;
+            if (localGpuStart is { IsCompleted: false } || parakeetGpu is not null) return;
             localGpuStart = Task.Run(() => StartLocalGpuAsync(shutdown.Token));
         }
     }
 
+    /// <summary>A pending one-time question: this PC can run Parakeet on its NVIDIA GPU after a large download.</summary>
+    public string? GpuOffer => gpuOffer;
+    public bool? GpuParakeetEnabled => settings.UseGpuParakeet;
+
+    /// <summary>Records the user's answer to the GPU offer (or a later change in Privacy / models).</summary>
+    public void SetGpuParakeet(bool enabled)
+    {
+        UpdateSettings(current => current with { UseGpuParakeet = enabled });
+        gpuOffer = null;
+        if (enabled) { StartLocalGpu(); return; }
+        if (parakeetGpu is { } running)
+        {
+            parakeetGpu = null;
+            _ = running.DisposeAsync().AsTask();
+        }
+        localGpuStatus = "Parakeet uses the CPU (you chose not to use the GPU; change it here any time).";
+    }
+
     /// <summary>
-    /// Checks this PC for an NVIDIA GPU that NVIDIA's Parakeet container can use. The container runs only when the user opts in
-    /// ("LocalGpuParakeet": true): on Windows it supports only Parakeet CTC, which tested less accurate than CPU Parakeet TDT.
+    /// Checks this PC for an NVIDIA GPU that can run Parakeet with CUDA 12. After a one-time consent (large NVIDIA download),
+    /// it installs the pinned GPU runtime, starts the GPU worker, and Parakeet decodes there; any failure keeps the CPU model.
     /// </summary>
     private async Task StartLocalGpuAsync(CancellationToken token)
     {
@@ -307,53 +323,57 @@ public sealed class AppController : IAppController
         try
         {
             var gpus = await GpuProbe.QueryNvidiaGpusAsync(token);
-            if (LocalNimCatalog.Select(gpus) is not { } choice)
+            if (GpuProbe.SelectCudaGpu(gpus) is not { } gpu)
             {
-                localGpuStatus = gpus.Count == 0
-                    ? "No NVIDIA GPU was found. Parakeet runs on the CPU, which is fast and the most accurate local option."
-                    : string.Join(", ", gpus.Select(gpu => $"{gpu.Name} ({gpu.MemoryMiB / 1024.0:0.#} GB, compute {gpu.ComputeCapability:0.0})")) +
-                      " can't run NVIDIA's Parakeet container (it needs an RTX 30-series or newer with 8 GB). Parakeet runs on the CPU.";
+                localGpuStatus = GpuProbe.DescribeUnsupported(gpus) + " Parakeet runs on the CPU.";
                 return;
             }
-            var (gpu, profile) = choice;
-            if (!settings.LocalGpuParakeet)
+            var parent = Path.GetDirectoryName(modelDirectory)!;
+            if (settings.UseGpuParakeet is null)
             {
-                localGpuStatus = $"{gpu.Name} can run NVIDIA's Parakeet container, but on Windows (Docker Desktop / WSL 2) NVIDIA supports only " +
-                    "the CTC model there, which tested less accurate than Parakeet TDT on the CPU (7.8% vs 6.9% word errors). CPU Parakeet is used. " +
-                    "To move Parakeet to the GPU anyway (less CPU load), set \"LocalGpuParakeet\": true in preferences.json and run Docker Desktop.";
+                gpuOffer = $"{gpu.Name} ({gpu.MemoryMiB / 1024.0:0.#} GB)";
+                localGpuStatus = $"{gpuOffer} can run Parakeet. Waiting for your choice; Parakeet uses the CPU meanwhile.";
                 return;
             }
-            var docker = LocalNimHost.FindDocker();
-            var host = docker is null ? null : new LocalNimHost(docker);
-            if (host is null || !await host.IsDockerRunningAsync(token))
+            if (settings.UseGpuParakeet == false)
             {
-                localGpuStatus = $"{gpu.Name} can run Parakeet, but Docker Desktop is {(docker is null ? "not installed" : "not running")}. " +
-                    "Start Docker Desktop (WSL 2 backend), then restart AudioTranscriber to use the GPU. CPU Parakeet is used meanwhile.";
-                Notify(localGpuStatus);
+                localGpuStatus = $"{gpu.Name} can run Parakeet, but you chose the CPU. Use the button here to switch.";
                 return;
             }
-            using var key = await credentials.GetAsync(token);
-            if (key is null)
+            if (!ParakeetGpuPackage.IsInstalled(parent))
             {
-                localGpuStatus = $"{gpu.Name} can run Parakeet. Enter an NVIDIA key in Privacy / models so NVIDIA's container can be downloaded; CPU Parakeet is used meanwhile.";
-                return;
+                localGpuStatus = localGpuSetupStatus = "Downloading the GPU runtime for Parakeet…";
+                await ParakeetGpuPackage.InstallAsync(parent, new InlineProgress<string>(message =>
+                    localGpuStatus = localGpuSetupStatus = message + " Transcription keeps working on the CPU meanwhile."), token);
             }
-            localGpuStatus = localGpuSetupStatus = $"Starting {profile.DisplayName} on {gpu.Name}…";
-            nimHost = host;
-            await host.StartAsync(profile, gpu, key, new InlineProgress<string>(message =>
-                localGpuStatus = localGpuSetupStatus = message + " Transcription keeps working on the CPU meanwhile."), token);
-            localGpu = new LocalRivaProvider(profile);
-            localGpuStatus = $"{profile.DisplayName} is running on {gpu.Name}: English Parakeet work uses the GPU, with no upload.";
+            localGpuStatus = localGpuSetupStatus = $"Loading Parakeet onto {gpu.Name}…";
+            var (worker, host) = FindWorker();
+            var started = new ParakeetGpuWorker(worker, host, parent, gpu.Index);
+            try { await started.StartAsync(TimeSpan.FromMinutes(5), token); }
+            catch { await started.DisposeAsync(); throw; }
+            if (settings.UseGpuParakeet != true) { await started.DisposeAsync(); return; }
+            parakeetGpu = started;
+            localGpuStatus = $"Parakeet is running on {gpu.Name} (loaded in {started.LoadMilliseconds / 1000.0:0.0} s). No audio leaves this PC.";
+            Store.ReleaseProviderJobs(SherpaParakeetProvider.ProviderId);
+            wake.Release();
             Notify(localGpuStatus);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
-        catch (Exception error) when (error is InvalidOperationException or TimeoutException or IOException or
-            HttpRequestException or System.ComponentModel.Win32Exception)
+        catch (Exception error) when (error is InvalidOperationException or TimeoutException or IOException or InvalidDataException or
+            HttpRequestException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or ArgumentException)
         {
-            localGpuStatus = "Parakeet could not start on the GPU (" + error.Message + "). CPU Parakeet is used instead.";
+            localGpuStatus = "Parakeet could not start on the GPU (" + error.Message + "). The CPU model is used instead.";
             Notify(localGpuStatus, true);
         }
         finally { localGpuSetupStatus = null; }
+    }
+
+    private void OnGpuFailed(string reason)
+    {
+        if (Interlocked.Exchange(ref parakeetGpu, null) is not { } failed) return;
+        _ = failed.DisposeAsync().AsTask();
+        localGpuStatus = "Parakeet stopped working on the GPU (" + reason + "). The CPU model is used until the app restarts.";
+        Notify(localGpuStatus, true);
     }
 
     private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
@@ -1246,9 +1266,8 @@ public sealed class AppController : IAppController
                 if (WhisperModelPath is not null) Store.ReleaseProviderJobs("local-whisper");
                 return;
             }
-            // Opted-in GPU Parakeet (English only) takes over from the CPU model when it is running.
-            var useGpu = job.ProviderId == SherpaParakeetProvider.ProviderId && localGpu is not null && LocalRivaProvider.SupportsLanguage(job.Language);
-            if (job.ProviderId == SherpaParakeetProvider.ProviderId && providerOverride is null && !useGpu && !ParakeetModelReady)
+            // The GPU worker, when running, decodes without the CPU model.
+            if (job.ProviderId == SherpaParakeetProvider.ProviderId && providerOverride is null && parakeetGpu is null && !ParakeetModelReady)
             {
                 if (modelSetup is { IsCompleted: false })
                 {
@@ -1265,7 +1284,7 @@ public sealed class AppController : IAppController
                 Store.CompleteJob(job, [], skipped, "skipped:silence");
                 return;
             }
-            var provider = useGpu && localGpu is { } gpuProvider ? gpuProvider : CreateProvider(job.ProviderId);
+            var provider = CreateProvider(job.ProviderId);
             var allChunks = Store.GetChunks(job.TrackId);
             var index = allChunks.ToList().FindIndex(item => item.Id == chunk.Id);
             if (index < 0) throw new InvalidDataException("The queued audio chunk is not retained.");
@@ -1386,8 +1405,8 @@ public sealed class AppController : IAppController
     }
 
     /// <summary>
-    /// When local Whisper is unsure about a chunk, the same audio is re-recognized by Parakeet on this PC (the opted-in GPU
-    /// container, else the CPU model), or else by hosted Parakeet if the session explicitly allows NVIDIA uploads.
+    /// When local Whisper is unsure about a chunk, the same audio is re-recognized by local Parakeet (on the GPU when it's
+    /// running, else the CPU model), or else by hosted Parakeet if the session explicitly allows NVIDIA uploads.
     /// Any Parakeet failure keeps the local text.
     /// </summary>
     private async Task<(ITranscriptionProvider Provider, TranscriptionResult Result, double Score, double Threshold)?> RunConfidenceFallbackAsync(
@@ -1397,8 +1416,7 @@ public sealed class AppController : IAppController
         var threshold = settings.FallbackBelowConfidence ?? DefaultFallbackBelowConfidence;
         if (ChunkConfidence(local.Segments) is not { } score || score >= threshold) return null;
         ITranscriptionProvider target;
-        if (localGpu is { } gpu && LocalRivaProvider.SupportsLanguage(job.Language)) target = gpu;
-        else if (providerOverride is null && ParakeetModelReady && SherpaParakeetProvider.SupportsLanguage(job.Language))
+        if (providerOverride is null && (ParakeetModelReady || parakeetGpu is not null) && SherpaParakeetProvider.SupportsLanguage(job.Language))
             target = CreateProvider(SherpaParakeetProvider.ProviderId);
         else if (!HasNvidiaKey || fallbackSuspended is not null || settings.CloudBlockReason is not null ||
             !IsFallbackLanguage(job.Language) || !Store.GetSession(job.SessionId).CloudConsent) return null;
@@ -1654,7 +1672,8 @@ public sealed class AppController : IAppController
                     "No local Whisper model is installed yet. Install the recommended model from Privacy / models; this audio is transcribed automatically afterward. No cloud fallback was used."));
             return new LocalWhisperProvider(settings.WhisperModelPath);
         }
-        if (id == SherpaParakeetProvider.ProviderId) return new SherpaParakeetProvider(ParakeetModelDirectory);
+        if (id == SherpaParakeetProvider.ProviderId)
+            return new SherpaParakeetProvider(ParakeetModelDirectory, gpu: () => parakeetGpu, gpuFailed: OnGpuFailed);
         return new NvidiaRivaProvider(NvidiaModelCatalog.Get(id), credentials, new ConsentReader(Store));
     }
 
@@ -1746,8 +1765,6 @@ public sealed class AppController : IAppController
                 await Task.WhenAll(backgroundTasks.Values);
                 if (modelSetup is { } setup) await Task.WhenAny(setup, Task.Delay(TimeSpan.FromSeconds(10)));
                 if (localGpuStart is { } gpuStart) await Task.WhenAny(gpuStart, Task.Delay(TimeSpan.FromSeconds(10)));
-                // Free the GPU memory; the stopped container keeps its downloaded, optimized model for the next start.
-                if (nimHost is { } host) await Task.WhenAny(host.StopAsync(), Task.Delay(TimeSpan.FromSeconds(20)));
             }
             finally
             {
@@ -1757,7 +1774,7 @@ public sealed class AppController : IAppController
                     var cleanup = new List<Task> { playback.DisposeAsync().AsTask(), capture.DisposeAsync().AsTask() };
                     if (timelinePlayer is not null) cleanup.Add(timelinePlayer.DisposeAsync().AsTask());
                     cleanup.AddRange(providerCache.Values.Select(provider => provider.DisposeAsync().AsTask()));
-                    if (localGpu is { } gpu) cleanup.Add(gpu.DisposeAsync().AsTask());
+                    if (Interlocked.Exchange(ref parakeetGpu, null) is { } gpu) cleanup.Add(gpu.DisposeAsync().AsTask());
                     await Task.WhenAll(cleanup);
                 }
                 finally
@@ -1772,7 +1789,7 @@ public sealed class AppController : IAppController
     }
 
     private sealed record LocalSettings(string? WhisperModelPath, string? CloudBlockReason = null, double? FallbackBelowConfidence = null,
-        bool LocalGpuParakeet = false);
+        bool? UseGpuParakeet = null);
     private sealed record MicrophoneOptions(Guid? EchoReferenceTrackId);
     private sealed record MediaCheckpoint(string SourcePath, int StreamIndex, ImportedMedia? Imported);
     private sealed class CaptureFeed

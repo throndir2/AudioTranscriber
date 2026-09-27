@@ -48,6 +48,13 @@ public sealed class HeadlessMcpTools
                 await controller.InstallParakeetModelAsync(progress, token);
                 return McpToolResult.Json(new { ready = controller.ParakeetModelReady, last = progress.Value });
             }),
+        McpTool.Create("set_gpu_parakeet", "Answer the one-time GPU question: enabled=true downloads the ~4.4 GB NVIDIA CUDA runtime " +
+            "(accepting NVIDIA's CUDA/cuDNN license terms) and runs Parakeet on the NVIDIA GPU; false keeps the CPU. See status.localGpu.",
+            args =>
+            {
+                controller.SetGpuParakeet(args.Bool("enabled", false));
+                return McpToolResult.Json(new { enabled = controller.GpuParakeetEnabled, status = controller.LocalGpuStatus });
+            }, ("enabled", "boolean", "true to use the GPU (large download, NVIDIA license terms), false for CPU only", true)),
         McpTool.Create("install_whisper_model", "Download (SHA-256 verified) and select a local Whisper model. Use tiny or base for fast tests.",
             async (args, token) =>
             {
@@ -256,7 +263,7 @@ public sealed class HeadlessMcpTools
             workerExecutable = File.Exists(Path.Combine(AppContext.BaseDirectory, "AudioTranscriber.Worker.dll"))
                 ? Path.Combine(AppContext.BaseDirectory, "AudioTranscriber.Worker.exe") : "development worker (dotnet host)",
             controller.IsRecording, controller.RecordingSessionId,
-            controller.DiarizationModelsReady, controller.ParakeetModelReady, controller.WhisperModelPath, controller.HasNvidiaKey, localGpu = controller.LocalGpuStatus,
+            controller.DiarizationModelsReady, controller.ParakeetModelReady, controller.WhisperModelPath, controller.HasNvidiaKey, localGpu = controller.LocalGpuStatus, gpuOffer = controller.GpuOffer,
             prerequisites.FFmpeg, prerequisites.FFprobe, prerequisites.VcRuntimeReady,
             recentErrors = notifications.Where(item => item.IsError).TakeLast(5)
         };
