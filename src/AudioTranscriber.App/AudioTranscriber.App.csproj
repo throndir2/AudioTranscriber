@@ -11,10 +11,12 @@
     <NuGetLockFilePath Condition="$([MSBuild]::IsOSPlatform('Linux'))">packages.linux.lock.json</NuGetLockFilePath>
     <AssemblyName>AudioTranscriber.App</AssemblyName>
     <RootNamespace>AudioTranscriber.App</RootNamespace>
-    <!-- Regenerate with scripts\New-AppIcon.ps1. WPF windows fall back to this assembly icon. -->
+    <!-- Regenerate with scripts\New-AppIcon.ps1. Embedded in the exe for Explorer/shortcuts. -->
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Also a WPF resource so every window sets it explicitly; the exe fallback shows the .NET icon under dotnet.exe. -->
+    <Resource Include="Assets\AppIcon.ico" />
     <ProjectReference Include="..\AudioTranscriber.Application\AudioTranscriber.Application.csproj" />
     <!-- Native GPU runtime ships via build/ targets, which do not flow transitively. -->
     <PackageReference Include="Whisper.net.Runtime.Vulkan" Version="1.9.1" />
