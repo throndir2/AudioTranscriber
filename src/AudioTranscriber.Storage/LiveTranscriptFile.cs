@@ -16,9 +16,9 @@ public static class LiveTranscriptFile
         var text = new StringBuilder();
         text.AppendLine(session.Name).Append("Source language: ").AppendLine(session.Language).AppendLine();
         rowCount = 0;
-        foreach (var row in store.EnumerateTranscript(sessionId))
+        foreach (var line in TranscriptLine.Group(store.EnumerateTranscript(sessionId)))
         {
-            text.AppendLine(TranscriptExporter.TextLine(row));
+            text.AppendLine(TranscriptExporter.TextLine(line));
             rowCount++;
         }
         return text.ToString();

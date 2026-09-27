@@ -394,7 +394,7 @@
                                 <TextBlock Text="{Binding PageSummary}" FontSize="12" TextTrimming="CharacterEllipsis" Foreground="{StaticResource Muted}" ToolTip="{Binding PageSummary}" />
                             </DockPanel>
                             <DataGrid x:Name="TranscriptGrid" Grid.Row="2" ItemsSource="{Binding Transcript}" SelectedItem="{Binding SelectedRow}"
-                                      SelectionMode="Extended" RowHeight="30" ColumnHeaderHeight="32"
+                                      SelectionMode="Extended" RowHeight="NaN" MinRowHeight="30" ColumnHeaderHeight="32"
                                       MouseDoubleClick="TranscriptDoubleClick" SelectionChanged="TranscriptSelectionChanged"
                                       PreviewMouseRightButtonDown="TranscriptRightButtonDown" ContextMenuOpening="TranscriptContextMenuOpening"
                                       AutomationProperties.Name="Paged transcript"
@@ -406,7 +406,14 @@
                                     <DataGridTextColumn Header="Time" Binding="{Binding Timestamp}" Width="80" />
                                     <DataGridTextColumn Header="Track" Binding="{Binding TrackName}" Width="90" />
                                     <DataGridTextColumn Header="Speaker" Binding="{Binding Speaker}" Width="120" />
-                                    <DataGridTextColumn Header="Transcript" Binding="{Binding Text}" Width="*" MinWidth="160" />
+                                    <DataGridTextColumn Header="Transcript" Binding="{Binding Text}" Width="*" MinWidth="160">
+                                        <DataGridTextColumn.ElementStyle>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="TextWrapping" Value="Wrap" />
+                                                <Setter Property="Margin" Value="0,5" />
+                                            </Style>
+                                        </DataGridTextColumn.ElementStyle>
+                                    </DataGridTextColumn>
                                     <DataGridTextColumn Header="Timing" Binding="{Binding Timing}" Width="80" />
                                     <DataGridTextColumn Header="Attribution" Binding="{Binding Attribution}" Width="120" />
                                 </DataGrid.Columns>

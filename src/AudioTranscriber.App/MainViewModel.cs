@@ -136,7 +136,7 @@ public sealed class MainViewModel : ObservableObject
         NextPageCommand = new RelayCommand(NextPage, () => hasNext && !closing);
         PreviousPageCommand = new RelayCommand(() => { pageIndex--; scrollToTop = true; Guard(LoadPage); }, () => pageIndex > 0 && !closing);
         SaveCorrectionCommand = new RelayCommand(SaveCorrection, () => SelectedRow is not null && !closing);
-        RestoreRawCommand = new RelayCommand(RestoreRaw, () => SelectedRow?.Row.Correction is not null && !closing);
+        RestoreRawCommand = new RelayCommand(RestoreRaw, () => SelectedRow?.HasCorrection == true && !closing);
         RenameSpeakerCommand = new AsyncCommand(() => RenameSpeakerAsync(ManagedSpeaker, SpeakerName),
             () => SelectedSession is not null && ManagedSpeaker is not null && !string.IsNullOrWhiteSpace(SpeakerName) && !closing);
         SetLineSpeakerCommand = new RelayCommand(SetLineSpeaker, () => SelectedRows.Count > 0 && !closing);
@@ -398,9 +398,10 @@ public sealed class MainViewModel : ObservableObject
         if (reloadingTranscript) return;
         SelectedRows = rows.OrderBy(row => row.Row.StartTicks).ThenBy(row => row.Row.Id, StringComparer.Ordinal).ToArray();
     }
-    public string RawText => SelectedRow?.Row.RawText ?? "";
+    public string RawText => SelectedRow?.RawText ?? "";
     public string RowDetails => SelectedRow is { } item
-        ? $"{item.TrackName}  ·  {item.Timestamp} – {TranscriptPresentation.Duration(item.Row.EndTicks)}  ·  {item.Timing}  ·  {item.Attribution}\nSource: {item.Provenance}"
+        ? $"{item.TrackName}  ·  {item.Timestamp} – {TranscriptPresentation.Duration(item.EndTicks)}  ·  {item.Timing}  ·  {item.Attribution}" +
+          (item.Rows.Count > 1 ? $"  ·  {item.Rows.Count} same-speaker segments merged" : "") + $"\nSource: {item.Provenance}"
         : "Select a row to inspect raw recognition, correct text, or play its own audio track.";
 
     public ICommand RefreshDevicesCommand { get; }
@@ -1156,21 +1157,33 @@ public sealed class MainViewModel : ObservableObject
     private void LoadPage()
     {
         var rowId = SelectedRow?.Row.Id;
-        var selectedIds = SelectedRows.Select(row => row.Row.Id).ToHashSet();
+        var selectedIds = SelectedRows.SelectMany(item => item.Rows).Select(row => row.Id).ToHashSet();
         var rows = SelectedSession is { } session
             ? controller.Store.GetTranscriptPage(session.Id, appliedSearch, appliedSpeaker, cursors[pageIndex], TranscriptPresentation.PageSize, appliedSeek)
             : [];
+        // Merge same-speaker rows only in the full transcript; a search or speaker filter hides rows in between.
+        var merge = string.IsNullOrEmpty(appliedSearch) && appliedSpeaker is null;
+        var lines = merge ? TranscriptLine.Group(rows).ToList() : rows.Select(row => new TranscriptLine(row)).ToList();
+        if (merge && lines.Count > 0 && rows.Count == TranscriptPresentation.PageSize && SelectedSession is { } paged)
+        {
+            // Finish the last line on this page so a long passage is not split across pages.
+            while (controller.Store.GetTranscriptPage(paged.Id, appliedSearch, appliedSpeaker,
+                       new TranscriptCursor(lines[^1].Last.StartTicks, lines[^1].Last.Id), 1, appliedSeek) is [var next] &&
+                   lines[^1].CanAppend(next))
+                lines[^1].Append(next);
+        }
         reloadingTranscript = true;
-        try { Replace(Transcript, rows.Select(x => new TranscriptItem(x, Tracks.FirstOrDefault(t => t.Id == x.TrackId)?.Name ?? x.TrackId.ToString()))); }
+        try { Replace(Transcript, lines.Select(x => new TranscriptItem(x, Tracks.FirstOrDefault(t => t.Id == x.First.TrackId)?.Name ?? x.First.TrackId.ToString()))); }
         finally { reloadingTranscript = false; }
-        SelectedRow = Transcript.FirstOrDefault(x => x.Row.Id == rowId);
-        SelectedRows = Transcript.Where(item => selectedIds.Contains(item.Row.Id)).ToArray();
+        SelectedRow = rowId is null ? null : Transcript.FirstOrDefault(x => x.Contains(rowId));
+        SelectedRows = Transcript.Where(item => item.Rows.Any(row => selectedIds.Contains(row.Id))).ToArray();
         var reset = scrollToTop;
         scrollToTop = false;
         TranscriptReloaded?.Invoke(reset);
-        hasNext = SelectedSession is { } selected && rows.Count == TranscriptPresentation.PageSize &&
+        var lastRow = lines.Count > 0 ? lines[^1].Last : null;
+        hasNext = SelectedSession is { } selected && rows.Count == TranscriptPresentation.PageSize && lastRow is not null &&
             controller.Store.GetTranscriptPage(selected.Id, appliedSearch, appliedSpeaker,
-                new TranscriptCursor(rows[^1].StartTicks, rows[^1].Id), 1, appliedSeek).Count != 0;
+                new TranscriptCursor(lastRow.StartTicks, lastRow.Id), 1, appliedSeek).Count != 0;
         Changed(nameof(PageSummary));
         CommandManager.InvalidateRequerySuggested();
     }
@@ -1178,7 +1191,7 @@ public sealed class MainViewModel : ObservableObject
     private void NextPage() => Guard(() =>
     {
         if (Transcript.Count == 0) return;
-        var last = Transcript[^1].Row;
+        var last = Transcript[^1].Line.Last;
         var cursor = new TranscriptCursor(last.StartTicks, last.Id);
         if (cursors.Count == pageIndex + 1) cursors.Add(cursor); else cursors[pageIndex + 1] = cursor;
         pageIndex++;
@@ -1188,16 +1201,16 @@ public sealed class MainViewModel : ObservableObject
 
     private void SaveCorrection() => Guard(() =>
     {
-        if (SelectedRow is not { } row) return;
-        controller.Store.CorrectSegment(row.Row.Id, Correction);
+        if (SelectedRow is not { } item) return;
+        foreach (var (id, text) in item.Line.Corrections(Correction)) controller.Store.CorrectSegment(id, text);
         LoadPage();
         SetStatus("Correction saved. Raw recognition and provenance are unchanged.");
     });
 
     private void RestoreRaw() => Guard(() =>
     {
-        if (SelectedRow is not { } row) return;
-        controller.Store.CorrectSegment(row.Row.Id, null);
+        if (SelectedRow is not { } item) return;
+        foreach (var row in item.Rows.Where(row => row.Correction is not null)) controller.Store.CorrectSegment(row.Id, null);
         LoadPage();
         SetStatus("Correction removed; raw recognition is shown again.");
     });
@@ -1246,7 +1259,7 @@ public sealed class MainViewModel : ObservableObject
         StoredSpeaker? speaker = null;
         if (newName is not null) speaker = controller.GetOrCreateSpeaker(session.Id, newName);
         else if (speakerId is not null) speaker = Speakers.FirstOrDefault(x => x.Id == speakerId);
-        controller.AssignSpeaker(session.Id, rows.Select(row => row.Row.Id).ToArray(), speaker?.Id);
+        controller.AssignSpeaker(session.Id, rows.SelectMany(item => item.Rows).Select(row => row.Id).ToArray(), speaker?.Id);
         RefreshSessionDetails();
         LoadPage();
         LineSpeaker = SelectedRow?.Speaker ?? LineSpeaker;

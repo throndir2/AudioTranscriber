@@ -13,15 +13,31 @@ public sealed record ActivityEntry(DateTime Time, ActivityKind Kind, string Text
     public override string ToString() => $"{TimeText}  {Text}";
 }
 
-public sealed record TranscriptItem(TranscriptRow Row, string TrackName)
+// One displayed transcript line: consecutive rows from the same speaker are shown merged (see TranscriptLine).
+public sealed class TranscriptItem(TranscriptLine line, string trackName)
 {
+    public TranscriptItem(TranscriptRow row, string trackName) : this(new TranscriptLine(row), trackName) { }
+
+    public TranscriptLine Line { get; } = line;
+    public string TrackName { get; } = trackName;
+    public TranscriptRow Row => Line.First;
+    public IReadOnlyList<TranscriptRow> Rows => Line.Rows;
+    public long EndTicks => Line.EndTicks;
     public string Timestamp => Row.Timestamp;
     public string Speaker => Row.SpeakerName;
-    public string Text => Row.Text;
-    public string Timing => Row.TimingGranularity;
-    public string Attribution => Row.ManualSpeaker ? "Set by you" : Row.Uncertain ? "Uncertain / overlap" : "Automatic";
-    public string Provenance => Row.Provenance;
-    public override string ToString() => $"{Timestamp} {Speaker}: {Text.Trim()}";
+    public string Text => Line.Text;
+    public string RawText => Line.RawText;
+    public bool HasCorrection => Rows.Any(row => row.Correction is not null);
+    public bool Contains(string rowId) => Rows.Any(row => row.Id == rowId);
+    public string Timing => Distinct(row => row.TimingGranularity);
+    public string Attribution => Rows.All(row => row.ManualSpeaker) ? "Set by you"
+        : Rows.Any(row => row.ManualSpeaker) ? "Partly set by you"
+        : Row.Uncertain ? "Uncertain / overlap" : "Automatic";
+    public string Provenance => Distinct(row => row.Provenance);
+    public override string ToString() => $"{Timestamp} {Speaker}: {Text}";
+
+    private string Distinct(Func<TranscriptRow, string> value) =>
+        string.Join(" + ", Rows.Select(value).Distinct(StringComparer.Ordinal));
 }
 
 public static class TranscriptPresentation

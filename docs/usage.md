@@ -146,6 +146,17 @@ cursors rather than materializing the full transcript. Refresh library also
 refreshes the current transcript page. Unsaved text in the correction box and a
 typed speaker name survive live refreshes of the same line.
 
+Recognition splits long speech at sentence ends, short pauses and chunk edges. When
+consecutive rows on the same track belong to the same known speaker and are at most
+~2 seconds apart, the grid shows them merged as one wrapped line (up to ~600
+characters), so a long passage reads as one line instead of many fragments. The
+TXT export and the live file use the same merged lines; JSON, SRT and WebVTT keep
+the individual rows. Merging is display-only: the stored rows keep their own timing,
+so it follows speaker changes automatically. Unknown/uncertain rows are never
+merged, and merging is off while a search or speaker filter is applied. Setting a
+speaker on a merged line labels all of its rows; editing its text changes only the
+rows your edit touches.
+
 Click a line to edit it in **Selected line** below the grid (drag the splitter to
 resize). The left box is your correction; click **Save text**. The right box is
 the preserved raw recognition, and **Restore raw** drops your correction. Hover the
