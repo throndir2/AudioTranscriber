@@ -43,7 +43,30 @@ public sealed class PresentationTests
         Assert.Equal("chunk", item.Timing);
         Assert.Equal("Uncertain / overlap", item.Attribution);
         Assert.Equal("NVIDIA / coarse", item.Provenance);
-        Assert.Equal(200, TranscriptPresentation.PageSize);
+    }
+
+    [Fact]
+    public void TranscriptUpdateKeepsUnchangedLinesAndReplacesTheTail()
+    {
+        var session = Guid.NewGuid();
+        var track = Guid.NewGuid();
+        TranscriptRow Row(int index, string text) => new($"r{index}", session, track, index * 50_000_000L,
+            index * 50_000_000L + 10_000_000, text, null, null, "Unknown", "segment", "local", false);
+        var transcript = new TranscriptCollection();
+        transcript.Update(Enumerable.Range(0, 500).Select(i => new TranscriptItem(Row(i, $"line {i}"), "Output")).ToList());
+        Assert.Equal(500, transcript.Count);
+        var kept = transcript[0];
+        var changes = 0;
+        transcript.CollectionChanged += (_, _) => changes++;
+        var next = Enumerable.Range(0, 499).Select(i => new TranscriptItem(Row(i, $"line {i}"), "Output"))
+            .Append(new TranscriptItem(Row(499, "line 499 corrected"), "Output"))
+            .Append(new TranscriptItem(Row(500, "line 500"), "Output")).ToList();
+        transcript.Update(next);
+        Assert.Equal(501, transcript.Count);
+        Assert.Same(kept, transcript[0]);
+        Assert.Equal("line 499 corrected", transcript[499].Text);
+        Assert.Equal("line 500", transcript[^1].Text);
+        Assert.Equal(3, changes);
     }
 
     [Fact]

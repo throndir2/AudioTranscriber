@@ -145,12 +145,14 @@ percentage. Cancel operation is separate from recording Stop.
 
 ## Transcript, corrections, speakers, and playback
 
-Select a session, then open **Transcript**. The virtualized DataGrid loads at most
-200 rows per keyset page. Search uses effective text (including saved corrections)
-and can be combined with a speaker filter and timestamp jump. Timestamps accept
-seconds, `mm:ss`, or `hh:mm:ss`; hours can exceed 23. Previous/Next retain keyset
-cursors rather than materializing the full transcript. Refresh library also
-refreshes the current transcript page. Unsaved text in the correction box and a
+Select a session, then open **Transcript**. The virtualized DataGrid shows the whole
+transcript, with no pages. While a session is recording, new lines appear at the
+bottom and the grid keeps scrolling to the newest line as long as you are scrolled to
+the end; scroll up to read and it stays put. Search uses effective text (including
+saved corrections) and can be combined with a speaker filter; the grid then shows
+every matching line. **Find / jump** with a timestamp scrolls that time to the top.
+Timestamps accept seconds, `mm:ss`, or `hh:mm:ss`; hours can exceed 23. Refresh
+library also refreshes the transcript. Unsaved text in the correction box and a
 typed speaker name survive live refreshes of the same line.
 
 Recognition splits long speech at sentence ends, short pauses and chunk edges. When

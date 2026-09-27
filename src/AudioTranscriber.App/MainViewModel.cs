@@ -36,10 +36,7 @@ public sealed class MainViewModel : ObservableObject
     private bool reloadingTranscript, scrollToTop;
     private IReadOnlyList<TranscriptItem> selectedRows = [];
     private string? appliedSpeaker;
-    private long? appliedSeek;
-    private readonly List<TranscriptCursor?> cursors = [null];
-    private int pageIndex;
-    private bool hasNext;
+    private long? pendingSeek;
     private TranscriptItem? selectedRow;
     private StoredSpeaker? managedSpeaker;
     private StoredTrack? selectedTrack;
@@ -124,7 +121,7 @@ public sealed class MainViewModel : ObservableObject
             Changed(nameof(KeyStatus));
             SetStatus("NVIDIA key cleared from memory and remembered storage.");
         }));
-        RefreshCommand = new RelayCommand(() => Guard(() => { RefreshLibrary(); LoadPage(); }), () => !closing);
+        RefreshCommand = new RelayCommand(() => Guard(() => { RefreshLibrary(); LoadTranscript(); }), () => !closing);
         DeleteSessionCommand = new AsyncCommand(() => SelectedSession is { } s ? DeleteSessionAsync(s) : Task.CompletedTask,
             () => SelectedSession is { } s && CanDeleteSession(s));
         DeleteSessionsCommand = new AsyncCommand(DeleteSessionsInteractiveAsync, () => Sessions.Count > 0 && !Busy && !closing);
@@ -136,8 +133,6 @@ public sealed class MainViewModel : ObservableObject
             SpeakerFilter = SpeakerFilters.FirstOrDefault();
             ApplySearch();
         }, () => SelectedSession is not null && !closing);
-        NextPageCommand = new RelayCommand(NextPage, () => hasNext && !closing);
-        PreviousPageCommand = new RelayCommand(() => { pageIndex--; scrollToTop = true; Guard(LoadPage); }, () => pageIndex > 0 && !closing);
         SaveCorrectionCommand = new RelayCommand(SaveCorrection, () => SelectedRow is not null && !closing);
         RestoreRawCommand = new RelayCommand(RestoreRaw, () => SelectedRow?.HasCorrection == true && !closing);
         RenameSpeakerCommand = new AsyncCommand(() => RenameSpeakerAsync(ManagedSpeaker, SpeakerName),
@@ -261,7 +256,7 @@ public sealed class MainViewModel : ObservableObject
     public ObservableCollection<StoredSpeaker> Speakers { get; } = [];
     public ObservableCollection<SpeakerChoice> SpeakerFilters { get; } = [];
     public ObservableCollection<string> SpeakerNames { get; } = [];
-    public ObservableCollection<TranscriptItem> Transcript { get; } = [];
+    public TranscriptCollection Transcript { get; } = [];
     public ObservableCollection<StoredJob> Jobs { get; } = [];
     public IReadOnlyList<ProviderOption> Providers { get; }
     public string DataRoot => controller.Store.RootDirectory;
@@ -342,9 +337,9 @@ public sealed class MainViewModel : ObservableObject
             Seek = "";
             appliedSearch = "";
             appliedSpeaker = null;
-            appliedSeek = null;
-            ResetPaging();
-            Guard(() => { RefreshSessionDetails(); LoadPage(); });
+            pendingSeek = null;
+            scrollToTop = true;
+            Guard(() => { RefreshSessionDetails(); LoadTranscript(); });
         }
     }
     public string Search { get => search; set => Set(ref search, value); }
@@ -356,7 +351,7 @@ public sealed class MainViewModel : ObservableObject
     public string PlaybackTimestamp { get => playbackTimestamp; set => Set(ref playbackTimestamp, value); }
     public string Correction { get => correction; set => Set(ref correction, value); }
     public string SpeakerName { get => speakerName; set => Set(ref speakerName, value); }
-    public string PageSummary => $"Page {pageIndex + 1} · {Transcript.Count} lines · click a line to edit it, right-click to set its speaker";
+    public string TranscriptSummary => $"{Transcript.Count:N0} lines · click a line to edit it, right-click to set its speaker";
     public StoredSpeaker? ManagedSpeaker
     {
         get => managedSpeaker;
@@ -392,8 +387,10 @@ public sealed class MainViewModel : ObservableObject
         }
     }
     public string SelectionSummary => SelectedRows.Count > 1 ? $"Speaker ({SelectedRows.Count} lines)" : "Speaker";
-    // Raised after a page reload; true when the user moved to a new page or search and the grid should start at the top.
-    public event Action<bool>? TranscriptReloaded;
+    // Raised around a transcript reload. Reloaded passes true when a new session, search or jump replaced the view
+    // (the grid should start over) and, for a timestamp jump, the line to bring to the top.
+    public event Action? TranscriptReloading;
+    public event Action<bool, TranscriptItem?>? TranscriptReloaded;
     // Set by the view while it re-adds a multi-line selection, so the edited line stays the same.
     public bool RestoringSelection { get; set; }
     public void UpdateSelection(IEnumerable<TranscriptItem> rows)
@@ -433,8 +430,6 @@ public sealed class MainViewModel : ObservableObject
     public ICommand DeleteSessionsCommand { get; }
     public ICommand SearchCommand { get; }
     public ICommand ClearSearchCommand { get; }
-    public ICommand NextPageCommand { get; }
-    public ICommand PreviousPageCommand { get; }
     public ICommand SaveCorrectionCommand { get; }
     public ICommand RestoreRawCommand { get; }
     public ICommand RenameSpeakerCommand { get; }
@@ -943,7 +938,7 @@ public sealed class MainViewModel : ObservableObject
         var progress = controller.Store.GetProgress(session.Id);
         QueueSummary = $"{progress.Pending} queued / retrying   ·   {progress.Running} running   ·   {progress.Succeeded} complete   ·   {progress.Failed} failed / blocked   ·   {progress.Paused} paused / canceled";
         var dirty = SelectedRow is not null && Correction != SelectedRow.Text;
-        if (previousSucceeded >= 0 && progress.Succeeded != previousSucceeded && !dirty) LoadPage();
+        if (previousSucceeded >= 0 && progress.Succeeded != previousSucceeded && !dirty) LoadTranscript();
         previousSucceeded = progress.Succeeded;
     }
 
@@ -1179,7 +1174,7 @@ public sealed class MainViewModel : ObservableObject
             if (liveSessionId is { } live && ids.Contains(live)) StopLiveFile();
             await controller.DeleteSessionsAsync(ids, token);
             RefreshLibrary();
-            LoadPage();
+            LoadTranscript();
         });
 
     private void ApplySearch() => Guard(() =>
@@ -1193,63 +1188,43 @@ public sealed class MainViewModel : ObservableObject
         }
         appliedSearch = Search.Trim();
         appliedSpeaker = SpeakerFilter?.Id;
-        appliedSeek = ticks;
-        ResetPaging();
-        LoadPage();
+        pendingSeek = ticks;
+        scrollToTop = true;
+        LoadTranscript();
     });
 
-    private void ResetPaging() { cursors.Clear(); cursors.Add(null); pageIndex = 0; scrollToTop = true; }
-
-    private void LoadPage()
+    // Loads the whole transcript (or the whole search/speaker filter result); the grid virtualizes its rows.
+    private void LoadTranscript()
     {
         var rowId = SelectedRow?.Row.Id;
         var selectedIds = SelectedRows.SelectMany(item => item.Rows).Select(row => row.Id).ToHashSet();
         var rows = SelectedSession is { } session
-            ? controller.Store.GetTranscriptPage(session.Id, appliedSearch, appliedSpeaker, cursors[pageIndex], TranscriptPresentation.PageSize, appliedSeek)
+            ? controller.Store.EnumerateTranscript(session.Id, appliedSearch, appliedSpeaker)
             : [];
         // Merge same-speaker rows only in the full transcript; a search or speaker filter hides rows in between.
         var merge = string.IsNullOrEmpty(appliedSearch) && appliedSpeaker is null;
-        var lines = merge ? TranscriptLine.Group(rows).ToList() : rows.Select(row => new TranscriptLine(row)).ToList();
-        if (merge && lines.Count > 0 && rows.Count == TranscriptPresentation.PageSize && SelectedSession is { } paged)
-        {
-            // Finish the last line on this page so a long passage is not split across pages.
-            while (controller.Store.GetTranscriptPage(paged.Id, appliedSearch, appliedSpeaker,
-                       new TranscriptCursor(lines[^1].Last.StartTicks, lines[^1].Last.Id), 1, appliedSeek) is [var next] &&
-                   lines[^1].CanAppend(next))
-                lines[^1].Append(next);
-        }
+        var lines = merge ? TranscriptLine.Group(rows) : rows.Select(row => new TranscriptLine(row));
+        var items = lines.Select(x => new TranscriptItem(x, Tracks.FirstOrDefault(t => t.Id == x.First.TrackId)?.Name ?? x.First.TrackId.ToString())).ToList();
+        TranscriptReloading?.Invoke();
         reloadingTranscript = true;
-        try { Replace(Transcript, lines.Select(x => new TranscriptItem(x, Tracks.FirstOrDefault(t => t.Id == x.First.TrackId)?.Name ?? x.First.TrackId.ToString()))); }
+        try { Transcript.Update(items); }
         finally { reloadingTranscript = false; }
         SelectedRow = rowId is null ? null : Transcript.FirstOrDefault(x => x.Contains(rowId));
         SelectedRows = Transcript.Where(item => item.Rows.Any(row => selectedIds.Contains(row.Id))).ToArray();
         var reset = scrollToTop;
         scrollToTop = false;
-        TranscriptReloaded?.Invoke(reset);
-        var lastRow = lines.Count > 0 ? lines[^1].Last : null;
-        hasNext = SelectedSession is { } selected && rows.Count == TranscriptPresentation.PageSize && lastRow is not null &&
-            controller.Store.GetTranscriptPage(selected.Id, appliedSearch, appliedSpeaker,
-                new TranscriptCursor(lastRow.StartTicks, lastRow.Id), 1, appliedSeek).Count != 0;
-        Changed(nameof(PageSummary));
+        var target = pendingSeek is { } seekTicks ? Transcript.FirstOrDefault(item => item.EndTicks >= seekTicks) : null;
+        pendingSeek = null;
+        TranscriptReloaded?.Invoke(reset, target);
+        Changed(nameof(TranscriptSummary));
         CommandManager.InvalidateRequerySuggested();
     }
-
-    private void NextPage() => Guard(() =>
-    {
-        if (Transcript.Count == 0) return;
-        var last = Transcript[^1].Line.Last;
-        var cursor = new TranscriptCursor(last.StartTicks, last.Id);
-        if (cursors.Count == pageIndex + 1) cursors.Add(cursor); else cursors[pageIndex + 1] = cursor;
-        pageIndex++;
-        scrollToTop = true;
-        LoadPage();
-    });
 
     private void SaveCorrection() => Guard(() =>
     {
         if (SelectedRow is not { } item) return;
         foreach (var (id, text) in item.Line.Corrections(Correction)) controller.Store.CorrectSegment(id, text);
-        LoadPage();
+        LoadTranscript();
         SetStatus("Correction saved. Raw recognition and provenance are unchanged.");
     });
 
@@ -1257,7 +1232,7 @@ public sealed class MainViewModel : ObservableObject
     {
         if (SelectedRow is not { } item) return;
         foreach (var row in item.Rows.Where(row => row.Correction is not null)) controller.Store.CorrectSegment(row.Id, null);
-        LoadPage();
+        LoadTranscript();
         SetStatus("Correction removed; raw recognition is shown again.");
     });
 
@@ -1279,7 +1254,7 @@ public sealed class MainViewModel : ObservableObject
             var kept = await controller.RenameSpeakerAsync(session.Id, speaker.Id, name);
             RefreshSessionDetails();
             ManagedSpeaker = Speakers.FirstOrDefault(x => x.Id == kept);
-            LoadPage();
+            LoadTranscript();
             SetStatus(existing is null
                 ? $"Renamed to \"{name}\" throughout this session."
                 : $"Merged \"{speaker.Name}\" into \"{existing.Name}\". Their voices now count as one speaker.");
@@ -1307,7 +1282,7 @@ public sealed class MainViewModel : ObservableObject
         else if (speakerId is not null) speaker = Speakers.FirstOrDefault(x => x.Id == speakerId);
         controller.AssignSpeaker(session.Id, rows.SelectMany(item => item.Rows).Select(row => row.Id).ToArray(), speaker?.Id);
         RefreshSessionDetails();
-        LoadPage();
+        LoadTranscript();
         LineSpeaker = SelectedRow?.Speaker ?? LineSpeaker;
         var lines = rows.Count == 1 ? "1 line" : $"{rows.Count} lines";
         SetStatus(speaker is null
@@ -1375,7 +1350,7 @@ public sealed class MainViewModel : ObservableObject
         {
             await action(session.Id, token);
             RefreshLibrary();
-            if (SelectedSession?.Id == session.Id) LoadPage();
+            if (SelectedSession?.Id == session.Id) LoadTranscript();
         });
     }
 

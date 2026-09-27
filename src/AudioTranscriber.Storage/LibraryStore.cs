@@ -430,14 +430,14 @@ public sealed class LibraryStore
         return Read(sql, ReadTranscript, values.ToArray());
     }
 
-    public IEnumerable<TranscriptRow> EnumerateTranscript(Guid sessionId)
+    public IEnumerable<TranscriptRow> EnumerateTranscript(Guid sessionId, string? search = null, string? speakerId = null)
     {
         TranscriptCursor? cursor = null;
         while (true)
         {
-            var page = GetTranscriptPage(sessionId, after: cursor, limit: 500);
+            var page = GetTranscriptPage(sessionId, search, speakerId, cursor, 1000);
             foreach (var row in page) yield return row;
-            if (page.Count < 500) yield break;
+            if (page.Count < 1000) yield break;
             var last = page[^1];
             cursor = new(last.StartTicks, last.Id);
         }
