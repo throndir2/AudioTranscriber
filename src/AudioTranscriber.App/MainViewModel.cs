@@ -257,8 +257,8 @@ public sealed class MainViewModel : ObservableObject
     public string DataRoot => controller.Store.RootDirectory;
     public bool IsRecording => controller.IsRecording;
     public bool Stopping { get => stopping; private set { Set(ref stopping, value); Changed(nameof(CaptureState)); } }
-    public string CaptureState => Stopping ? "STOPPING · sealing original audio tails" :
-        IsRecording ? "● RECORDING · audio is being saved" : "NOT RECORDING";
+    public string CaptureState => Stopping ? "STOPPING · sealing audio" :
+        IsRecording ? "RECORDING" : "NOT RECORDING";
     public string RecordingSession => controller.RecordingSessionId is { } id
         ? Sessions.FirstOrDefault(x => x.Id == id)?.Name ?? id.ToString() : "";
     public bool Busy { get => busy; private set { Set(ref busy, value); CommandManager.InvalidateRequerySuggested(); } }

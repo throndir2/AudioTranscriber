@@ -21,6 +21,8 @@ public partial class MainWindow : Window
         this.viewModel = viewModel;
         DataContext = viewModel;
         Closing += OnClosing;
+        StateChanged += (_, _) => ApplyWindowState();
+        ApplyWindowState();
         viewModel.TranscriptReloaded += RestoreTranscriptSelection;
         viewModel.ActivityLog.CollectionChanged += (_, e) =>
         {
@@ -31,6 +33,30 @@ public partial class MainWindow : Window
                     if (viewModel.ActivityLog.Count > 0) ActivityList.ScrollIntoView(viewModel.ActivityLog[^1]);
                 }, System.Windows.Threading.DispatcherPriority.Background);
         };
+    }
+
+    private void MinimizeClick(object sender, RoutedEventArgs e) => SystemCommands.MinimizeWindow(this);
+
+    private void MaximizeClick(object sender, RoutedEventArgs e)
+    {
+        if (WindowState == WindowState.Maximized) SystemCommands.RestoreWindow(this);
+        else SystemCommands.MaximizeWindow(this);
+    }
+
+    private void CloseClick(object sender, RoutedEventArgs e) => Close();
+
+    // A maximized custom-chrome window overhangs the screen by its resize frame; inset the content to match.
+    private void ApplyWindowState()
+    {
+        var maximized = WindowState == WindowState.Maximized;
+        var frame = SystemParameters.WindowResizeBorderThickness;
+        var pad = WindowTheme.PaddedBorder(this);
+        RootGrid.Margin = maximized
+            ? new Thickness(frame.Left + pad, frame.Top + pad, frame.Right + pad, frame.Bottom + pad)
+            : new Thickness(0);
+        MaximizeButton.Content = maximized ? "\uE923" : "\uE922";
+        MaximizeButton.ToolTip = maximized ? "Restore down" : "Maximize";
+        System.Windows.Automation.AutomationProperties.SetName(MaximizeButton, maximized ? "Restore down" : "Maximize");
     }
 
     private void SaveKeyClick(object sender, RoutedEventArgs e)
