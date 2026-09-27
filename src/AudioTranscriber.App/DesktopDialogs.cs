@@ -128,7 +128,7 @@ public sealed class DesktopDialogs(Func<Window> owner)
         };
         panel.Children.Add(unattributed);
         var validation = Help("");
-        validation.Foreground = Brushes.Firebrick;
+        validation.Foreground = (Brush)System.Windows.Application.Current.FindResource("ErrorText");
         panel.Children.Add(validation);
         panel.Children.Add(Buttons(window, "Sign in and fetch", () =>
         {
@@ -193,13 +193,13 @@ public sealed class DesktopDialogs(Func<Window> owner)
     {
         Title = title, Owner = owner(), Width = width, SizeToContent = SizeToContent.Height,
         WindowStartupLocation = WindowStartupLocation.CenterOwner, ResizeMode = ResizeMode.NoResize,
-        ShowInTaskbar = false, Background = Brushes.White
+        ShowInTaskbar = false, Style = (Style)System.Windows.Application.Current.FindResource(typeof(Window))
     };
 
     private static TextBlock Help(string text) => new()
     {
         Text = text, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 12),
-        Foreground = new SolidColorBrush(Color.FromRgb(70, 90, 109))
+        Foreground = (Brush)System.Windows.Application.Current.FindResource("Muted")
     };
 
     private static TextBox Field(Panel panel, string label)

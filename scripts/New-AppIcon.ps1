@@ -32,12 +32,12 @@ function New-Linear([double]$x1, [double]$y1, [double]$x2, [double]$y2, [object[
     $g.Freeze(); $g
 }
 
-$tileBrush = New-Linear 0 0 1 1 @(@(0.0, '#0D1E31', 255), @(0.5, '#123E5C', 255), @(1.0, '#0CA893', 255))
+$tileBrush = New-Linear 0 0 1 1 @(@(0.0, '#120A08', 255), @(0.5, '#3E1510', 255), @(1.0, '#9A2E1B', 255))
 $shineBrush = New-Linear 0 0 0 1 @(@(0.0, '#FFFFFF', 30), @(0.45, '#FFFFFF', 0))
-$glowBrush = [Windows.Media.RadialGradientBrush]::new((New-Color '#3CF0D4' 90), (New-Color '#3CF0D4' 0))
+$glowBrush = [Windows.Media.RadialGradientBrush]::new((New-Color '#F2B24A' 80), (New-Color '#F2B24A' 0))
 $glowBrush.Freeze()
-$barBrush = New-Linear 0 0 0 1 @(@(0.0, '#A6FFF0', 255), @(1.0, '#27D2BC', 255))
-$lineBrush = New-Brush '#FFFFFF'
+$barBrush = New-Linear 0 0 0 1 @(@(0.0, '#FFE39A', 255), @(1.0, '#C9962F', 255))
+$lineBrush = New-Brush '#F6EAD2'
 $rimPen = [Windows.Media.Pen]::new((New-Brush '#FFFFFF' 36), 1); $rimPen.Freeze()
 
 function Add-Pill($dc, $brush, [double]$x, [double]$y, [double]$w, [double]$h, [double]$r) {
@@ -92,7 +92,7 @@ function Get-Frame([int]$size) {
         $bg.Pop(); $fg.Pop()
         if ($size -ge 48) {
             $shadow = [Windows.Media.Effects.DropShadowEffect]::new()
-            $shadow.Color = New-Color '#04101C'; $shadow.Direction = 270; $shadow.Opacity = 0.45
+            $shadow.Color = New-Color '#120604'; $shadow.Direction = 270; $shadow.Opacity = 0.45
             $shadow.ShadowDepth = 5 * $k; $shadow.BlurRadius = 16 * $k
             $fore.Effect = $shadow
         }

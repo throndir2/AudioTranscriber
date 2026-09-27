@@ -11,6 +11,18 @@ are ready. Recording and audio import do not require a NVIDIA key. Existing
 consented jobs may be resumed by the application controller; revoke consent or
 pause jobs when you do not want further processing.
 
+## Layout
+
+The window uses a dark, candlelit theme and a single custom title bar instead of
+the Windows caption plus a banner. The title bar shows the selected session and
+its status, the recording indicator (a pulsing red **RECORDING** pill with the
+recording's session name), a **Record** quick-start button (or **Stop recording**
+while capturing), **Restart to update** when an update is staged, and the window
+buttons. Drag the title bar to move the window; double-click it to maximize. The
+session list is on the left (drag its edge to resize), and the tabs fill the rest.
+**Record / import** puts the start/stop/import actions and settings on the left
+and the **Live activity** log, sized to the window, on the right.
+
 ## Prerequisites
 
 Release ZIPs bundle FFmpeg/FFprobe (an unmodified LGPL shared build) in the
@@ -42,7 +54,7 @@ hours, downloads `AudioTranscriber-<tag>-win-x64.zip` into
 `%LOCALAPPDATA%\AudioTranscriber.Updates`, and verifies it against both GitHub's
 asset SHA-256 digest and the published `.sha256` file before unpacking.
 
-Nothing is replaced while the app runs. **Restart to update** (top bar, or
+Nothing is replaced while the app runs. **Restart to update** (title bar, or
 Privacy / models → Updates) closes the app through the normal safe shutdown, then
 a helper waits for it to exit, copies the new files over the application folder,
 and reopens it with the same arguments. Otherwise the update installs the next
@@ -104,7 +116,7 @@ provider accuracy, or live Graph access.
    unchanged. With headphones it has nothing to remove and leaves the mic as-is.
    During recording, a mic chunk waits until the matching speaker audio is
    ready (up to about 90 seconds while nothing is playing).
-4. Click **Start recording**. The global header displays recording state and the
+4. Click **Start recording** (or **Record** in the title bar from any tab). The title bar displays recording state and the
    recording's session name, even if a different session is selected. Its red
    **Stop recording** control remains available across tabs. Meter activity is
    drawn from the controller during recording only; idle meters do not open a

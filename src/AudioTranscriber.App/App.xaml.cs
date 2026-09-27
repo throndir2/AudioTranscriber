@@ -33,6 +33,7 @@ public partial class App : System.Windows.Application
                 return;
             }
             startupArguments = e.Args;
+            WindowTheme.Register();
             if (options.Smoke && new LibraryStore(options.DataRoot).GetSessions(1).Count != 0)
                 throw new ArgumentException("Smoke mode requires an isolated library with no sessions, so existing queued audio can never upload.");
             controller = new AppController(options.DataRoot);
