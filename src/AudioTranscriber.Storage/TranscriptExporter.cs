@@ -50,21 +50,24 @@ public static class TranscriptExporter
                     if (extension == ".txt")
                         await writer.WriteLineAsync($"{session.Name}\nSource language: {session.Language}\n");
                     var index = 0;
-                    foreach (var row in store.EnumerateTranscript(sessionId))
+                    if (extension == ".txt")
+                    {
+                        foreach (var line in TranscriptLine.Group(store.EnumerateTranscript(sessionId)))
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            await writer.WriteLineAsync(TextLine(line));
+                        }
+                    }
+                    else foreach (var row in store.EnumerateTranscript(sessionId))
                     {
                         cancellationToken.ThrowIfCancellationRequested();
-                        if (extension == ".txt")
-                            await writer.WriteLineAsync(TextLine(row));
-                        else
-                        {
-                            if (extension == ".srt") await writer.WriteLineAsync((++index).ToString(CultureInfo.InvariantCulture));
-                            var separator = extension == ".srt" ? ',' : '.';
-                            await writer.WriteLineAsync($"{Time(row.StartTicks, separator)} --> {Time(row.EndTicks, separator)}");
-                            await writer.WriteLineAsync(extension == ".vtt"
-                                ? $"<v {WebUtility.HtmlEncode(row.SpeakerName)}>{WebUtility.HtmlEncode(row.Text)}</v>"
-                                : $"{row.SpeakerName}: {row.Text}");
-                            await writer.WriteLineAsync();
-                        }
+                        if (extension == ".srt") await writer.WriteLineAsync((++index).ToString(CultureInfo.InvariantCulture));
+                        var separator = extension == ".srt" ? ',' : '.';
+                        await writer.WriteLineAsync($"{Time(row.StartTicks, separator)} --> {Time(row.EndTicks, separator)}");
+                        await writer.WriteLineAsync(extension == ".vtt"
+                            ? $"<v {WebUtility.HtmlEncode(row.SpeakerName)}>{WebUtility.HtmlEncode(row.Text)}</v>"
+                            : $"{row.SpeakerName}: {row.Text}");
+                        await writer.WriteLineAsync();
                     }
                     await writer.FlushAsync(cancellationToken);
                 }
@@ -89,8 +92,8 @@ public static class TranscriptExporter
         }
     }
 
-    internal static string TextLine(TranscriptRow row) =>
-        $"[{Time(row.StartTicks, '.')} - {Time(row.EndTicks, '.')}] {row.SpeakerName}: {row.Text}";
+    internal static string TextLine(TranscriptLine line) =>
+        $"[{Time(line.StartTicks, '.')} - {Time(line.EndTicks, '.')}] {line.First.SpeakerName}: {line.Text}";
 
     private static string Time(long ticks, char separator)
     {

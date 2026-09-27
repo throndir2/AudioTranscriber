@@ -87,12 +87,12 @@ public partial class MainWindow : Window
     // Page reloads rebuild the rows; put a multi-line selection back.
     private void RestoreTranscriptSelection(bool scrollToTop)
     {
-        var ids = viewModel.SelectedRows.Select(row => row.Row.Id).ToHashSet();
+        var ids = viewModel.SelectedRows.SelectMany(item => item.Rows).Select(row => row.Id).ToHashSet();
         viewModel.RestoringSelection = true;
         try
         {
             foreach (var item in viewModel.Transcript)
-                if (ids.Contains(item.Row.Id) && !TranscriptGrid.SelectedItems.Contains(item)) TranscriptGrid.SelectedItems.Add(item);
+                if (item.Rows.Any(row => ids.Contains(row.Id)) && !TranscriptGrid.SelectedItems.Contains(item)) TranscriptGrid.SelectedItems.Add(item);
         }
         finally { viewModel.RestoringSelection = false; }
         viewModel.UpdateSelection(TranscriptGrid.SelectedItems.OfType<TranscriptItem>());
