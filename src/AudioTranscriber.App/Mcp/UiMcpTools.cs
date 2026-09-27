@@ -64,7 +64,7 @@ public sealed class UiMcpTools(string defaultDataRoot, bool dataRootSpecified)
             [.. TargetParameters(), ("option", "string", "Entry text (case-insensitive substring)", true)]),
         McpTool.Create("read_text", "Read the name/value text of an element and its descendants.",
             args => McpToolResult.Text(ReadText(Resolve(args))), TargetParameters()),
-        McpTool.Create("read_grid", "Read rows of a data grid (for example name='Paged transcript' or 'Selected session latest transcription jobs').",
+        McpTool.Create("read_grid", "Read rows of a data grid (for example name='Transcript lines' or 'Selected session latest transcription jobs').",
             args => McpToolResult.Json(ReadGrid(Resolve(args), args.Int("max_rows", 100))), [.. TargetParameters(), ("max_rows", "integer", "Row limit (default 100)", false)]),
         McpTool.Create("wait_for", "Wait until an element whose name or value contains text appears (or disappears with gone=true).",
             async (args, token) => McpToolResult.Text(await WaitForAsync(args.RequireString("text"), args.Bool("gone", false),

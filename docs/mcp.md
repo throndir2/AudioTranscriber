@@ -54,7 +54,7 @@ a speaker-worker error, appear in `wait_for_jobs.jobErrors` and `notifications`.
 click name="Privacy / models" control_type=TabItem
 click name="Install small diarization models" control_type=Button   → click name=Yes
 click name="Start recording" control_type=Button → play_audio path=… → click name="Stop recording"
-read_grid name="Paged transcript"
+read_grid name="Transcript lines"
 click name="Happy to be here" control_type=DataItem right=true → click name="Type a speaker name…" → set_text name="Speaker name" text=Zira → click name="Set speaker"
 read_text name="Live activity log"                                   → recent job progress, transcript lines, live file writes
 ```

@@ -9,7 +9,7 @@ namespace AudioTranscriber.App;
 public partial class MainWindow : Window
 {
     private readonly MainViewModel viewModel;
-    private bool closed, closing;
+    private bool closed, closing, followTranscriptEnd = true;
     public bool SmokeMode { get; init; }
 
     public MainWindow(MainViewModel viewModel)
@@ -23,6 +23,7 @@ public partial class MainWindow : Window
         Closing += OnClosing;
         StateChanged += (_, _) => ApplyWindowState();
         ApplyWindowState();
+        viewModel.TranscriptReloading += () => followTranscriptEnd = TranscriptAtEnd();
         viewModel.TranscriptReloaded += RestoreTranscriptSelection;
         viewModel.ActivityLog.CollectionChanged += (_, e) =>
         {
@@ -84,8 +85,10 @@ public partial class MainWindow : Window
     private void TranscriptSelectionChanged(object sender, SelectionChangedEventArgs e) =>
         viewModel.UpdateSelection(TranscriptGrid.SelectedItems.OfType<TranscriptItem>());
 
-    // Page reloads rebuild the rows; put a multi-line selection back.
-    private void RestoreTranscriptSelection(bool scrollToTop)
+    // Reloads can rebuild the rows; put a multi-line selection back, then scroll: a jump brings its line to the top,
+    // a new session or search starts at the top (or the newest line while recording), and a live refresh keeps
+    // following the newest line only if the grid was already scrolled to the end.
+    private void RestoreTranscriptSelection(bool reset, TranscriptItem? target)
     {
         var ids = viewModel.SelectedRows.SelectMany(item => item.Rows).Select(row => row.Id).ToHashSet();
         viewModel.RestoringSelection = true;
@@ -96,11 +99,45 @@ public partial class MainWindow : Window
         }
         finally { viewModel.RestoringSelection = false; }
         viewModel.UpdateSelection(TranscriptGrid.SelectedItems.OfType<TranscriptItem>());
-        if (scrollToTop && viewModel.Transcript.Count > 0)
-            Dispatcher.BeginInvoke(() =>
+        var toEnd = reset
+            ? viewModel.SelectedSession is { } session && viewModel.IsRecordingSession(session.Id)
+            : followTranscriptEnd;
+        if (!reset && !toEnd) return;
+        Dispatcher.BeginInvoke(() =>
+        {
+            var items = viewModel.Transcript;
+            if (items.Count == 0) return;
+            var viewer = TranscriptScrollViewer();
+            if (target is not null && items.IndexOf(target) is var index and >= 0)
             {
-                if (viewModel.Transcript.Count > 0) TranscriptGrid.ScrollIntoView(viewModel.Transcript[0]);
-            }, System.Windows.Threading.DispatcherPriority.Background);
+                // The grid scrolls by item, so an offset of N puts line N at the top.
+                if (viewer is not null) viewer.ScrollToVerticalOffset(index);
+                else TranscriptGrid.ScrollIntoView(target);
+            }
+            else if (toEnd)
+            {
+                if (viewer is not null) viewer.ScrollToEnd();
+                else TranscriptGrid.ScrollIntoView(items[^1]);
+            }
+            else if (viewer is not null) viewer.ScrollToTop();
+            else TranscriptGrid.ScrollIntoView(items[0]);
+        }, System.Windows.Threading.DispatcherPriority.Background);
+    }
+
+    private bool TranscriptAtEnd() =>
+        TranscriptScrollViewer() is not { } viewer || viewer.VerticalOffset >= viewer.ScrollableHeight - 1;
+
+    private ScrollViewer? TranscriptScrollViewer()
+    {
+        if (TranscriptGrid.Template?.FindName("DG_ScrollViewer", TranscriptGrid) is ScrollViewer named) return named;
+        var queue = new Queue<DependencyObject>([TranscriptGrid]);
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+            if (current is ScrollViewer viewer) return viewer;
+            for (var i = 0; i < VisualTreeHelper.GetChildrenCount(current); i++) queue.Enqueue(VisualTreeHelper.GetChild(current, i));
+        }
+        return null;
     }
 
     // Right-clicking a line outside the selection selects just that line, like Explorer.

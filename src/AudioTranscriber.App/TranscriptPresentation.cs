@@ -1,3 +1,6 @@
+using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Globalization;
 using AudioTranscriber.Storage;
 
@@ -40,10 +43,36 @@ public sealed class TranscriptItem(TranscriptLine line, string trackName)
         string.Join(" + ", Rows.Select(value).Distinct(StringComparer.Ordinal));
 }
 
+// The whole transcript as displayed lines. A live refresh keeps the unchanged lines and only touches the changed tail,
+// so the grid keeps its scroll position and selection; large changes are applied as one reset.
+public sealed class TranscriptCollection : ObservableCollection<TranscriptItem>
+{
+    private const int IncrementalLimit = 64;
+
+    public void Update(IReadOnlyList<TranscriptItem> items)
+    {
+        var same = 0;
+        while (same < Count && same < items.Count && Same(this[same], items[same])) same++;
+        if (Count - same + items.Count - same <= IncrementalLimit)
+        {
+            while (Count > same) RemoveAt(Count - 1);
+            for (var index = same; index < items.Count; index++) Add(items[index]);
+            return;
+        }
+        CheckReentrancy();
+        while (Items.Count > same) Items.RemoveAt(Items.Count - 1);
+        for (var index = same; index < items.Count; index++) Items.Add(items[index]);
+        OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
+        OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
+        OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+    }
+
+    private static bool Same(TranscriptItem current, TranscriptItem next) =>
+        current.TrackName == next.TrackName && current.Rows.SequenceEqual(next.Rows);
+}
+
 public static class TranscriptPresentation
 {
-    public const int PageSize = 200;
-
     public static bool TryTimestamp(string text, out long ticks)
     {
         ticks = 0;
