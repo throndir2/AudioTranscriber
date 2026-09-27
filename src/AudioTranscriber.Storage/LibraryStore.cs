@@ -87,6 +87,38 @@ public sealed class LibraryStore
     public IReadOnlyList<StoredSession> GetSessions(int limit = 200) =>
         Read("SELECT * FROM sessions ORDER BY created DESC LIMIT $limit", ReadSession, ("$limit", Math.Clamp(limit, 1, 2000)));
 
+    /// <summary>Removes a session and every row that belongs to it. Returns its folder, or null if it did not exist.</summary>
+    public string? DeleteSession(Guid sessionId)
+    {
+        lock (gate)
+        {
+            using var connection = Open();
+            using var transaction = connection.BeginTransaction();
+            string? directory;
+            using (var find = Command(connection, "SELECT directory FROM sessions WHERE id=$session", ("$session", sessionId)))
+                directory = find.ExecuteScalar() as string;
+            if (directory is null) return null;
+            const string jobs = "SELECT id FROM jobs WHERE session_id=$session";
+            const string tracks = "SELECT id FROM tracks WHERE session_id=$session";
+            foreach (var sql in new[]
+                     {
+                         $"DELETE FROM job_attempts WHERE job_id IN ({jobs})",
+                         $"DELETE FROM results WHERE job_id IN ({jobs})",
+                         "DELETE FROM segments WHERE session_id=$session",
+                         $"DELETE FROM turns WHERE track_id IN ({tracks})",
+                         "DELETE FROM speakers WHERE session_id=$session",
+                         "DELETE FROM jobs WHERE session_id=$session",
+                         "DELETE FROM normalized_chunks WHERE session_id=$session",
+                         $"DELETE FROM archive_chunks WHERE track_id IN ({tracks})",
+                         "DELETE FROM tracks WHERE session_id=$session",
+                         "DELETE FROM sessions WHERE id=$session"
+                     })
+                Execute(connection, sql, ("$session", sessionId));
+            transaction.Commit();
+            return directory;
+        }
+    }
+
     public void SetSessionState(Guid sessionId, string state, string? error = null) =>
         Write("UPDATE sessions SET state=$state,error=$error WHERE id=$id", ("$state", state), ("$error", error), ("$id", sessionId));
 

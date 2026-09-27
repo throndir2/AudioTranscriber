@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using AudioTranscriber.Application;
 using AudioTranscriber.Integrations;
+using AudioTranscriber.Storage;
 using Microsoft.Win32;
 
 namespace AudioTranscriber.App;
@@ -74,6 +75,115 @@ public sealed class DesktopDialogs(Func<Window> owner)
     public bool Confirm(string title, string message) =>
         MessageBox.Show(owner(), message, title, MessageBoxButton.YesNo, MessageBoxImage.Question,
             MessageBoxResult.No) == MessageBoxResult.Yes;
+
+    /// <summary>Lets the user check sessions to delete, with quick picks by age. Returns null when canceled.</summary>
+    public IReadOnlyList<Guid>? ChooseSessionsToDelete(IReadOnlyList<StoredSession> sessions, Guid? recordingSessionId)
+    {
+        var window = Dialog("Delete sessions", 680);
+        var rows = sessions.Select(session => new SessionDeletionRow(session, session.Id != recordingSessionId)).ToArray();
+        var panel = new DockPanel { Margin = new Thickness(22) };
+
+        var intro = Help("Check the sessions to delete. Each one's transcript, speakers, jobs and retained original audio are removed from this PC; " +
+            "this cannot be undone. Exported transcripts and the live transcript file are not touched." +
+            (recordingSessionId is null ? "" : " The session being recorded can't be deleted until you stop it."));
+        DockPanel.SetDock(intro, Dock.Top);
+        panel.Children.Add(intro);
+
+        var quick = new WrapPanel { Margin = new Thickness(0, 0, 0, 10) };
+        DockPanel.SetDock(quick, Dock.Top);
+        var ages = new (string Label, int Days)[] { ("1 week", 7), ("30 days", 30), ("90 days", 90), ("6 months", 182), ("1 year", 365) };
+        var age = new ComboBox { ItemsSource = ages.Select(x => x.Label).ToArray(), SelectedIndex = 1, Width = 120, Margin = new Thickness(8, 0, 8, 0) };
+        System.Windows.Automation.AutomationProperties.SetName(age, "Age for quick selection");
+        var checkOlder = new Button { Content = "Check older", ToolTip = "Check every session created before this age (leaves other checks as they are)" };
+        var checkAll = new Button { Content = "Check all", Margin = new Thickness(8, 0, 0, 0) };
+        var checkNone = new Button { Content = "Uncheck all", Margin = new Thickness(8, 0, 0, 0) };
+        quick.Children.Add(new TextBlock { Text = "Sessions older than", VerticalAlignment = VerticalAlignment.Center });
+        quick.Children.Add(age);
+        quick.Children.Add(checkOlder);
+        quick.Children.Add(checkAll);
+        quick.Children.Add(checkNone);
+        panel.Children.Add(quick);
+
+        var summary = new TextBlock { VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap };
+        var cancel = new Button { Content = "Cancel", IsCancel = true, IsDefault = true };
+        var delete = new Button { Content = "Delete checked…", Style = (Style)System.Windows.Application.Current.FindResource("StopButton"), Margin = new Thickness(8, 0, 0, 0) };
+        var footer = new DockPanel { Margin = new Thickness(0, 12, 0, 0) };
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal };
+        buttons.Children.Add(cancel);
+        buttons.Children.Add(delete);
+        DockPanel.SetDock(buttons, Dock.Right);
+        footer.Children.Add(buttons);
+        footer.Children.Add(summary);
+        DockPanel.SetDock(footer, Dock.Bottom);
+        panel.Children.Add(footer);
+
+        var list = new ListBox
+        {
+            ItemsSource = rows, Height = 380, HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            ItemTemplate = (DataTemplate)System.Windows.Markup.XamlReader.Parse("""
+                <DataTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
+                    <CheckBox IsChecked="{Binding IsChecked}" IsEnabled="{Binding CanDelete}" Margin="0" HorizontalAlignment="Stretch">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Right" Text="{Binding Size}" Margin="12,0,0,0" FontSize="12" Foreground="{DynamicResource Muted}" />
+                            <StackPanel>
+                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{Binding Details}" FontSize="12" Foreground="{DynamicResource Dim}" Margin="0,2,0,0" />
+                            </StackPanel>
+                        </DockPanel>
+                    </CheckBox>
+                </DataTemplate>
+                """)
+        };
+        System.Windows.Automation.AutomationProperties.SetName(list, "Sessions to delete");
+        panel.Children.Add(list);
+        window.Content = panel;
+
+        void UpdateSummary()
+        {
+            var chosen = rows.Where(row => row.IsChecked).ToArray();
+            var bytes = chosen.Sum(row => row.Bytes ?? 0);
+            var pending = chosen.Any(row => row.Bytes is null);
+            summary.Text = chosen.Length == 0 ? $"{rows.Length:N0} sessions · none checked"
+                : $"{chosen.Length:N0} of {rows.Length:N0} checked · {SessionDeletionRow.FormatBytes(bytes)}{(pending ? "+ (still measuring)" : "")} to free";
+            delete.IsEnabled = chosen.Length > 0;
+        }
+        foreach (var row in rows) row.PropertyChanged += (_, _) => UpdateSummary();
+        checkOlder.Click += (_, _) =>
+        {
+            var cutoff = DateTimeOffset.UtcNow.AddDays(-ages[Math.Max(age.SelectedIndex, 0)].Days);
+            foreach (var row in rows) if (row.CanDelete && row.Session.CreatedUtc < cutoff) row.IsChecked = true;
+        };
+        checkAll.Click += (_, _) => { foreach (var row in rows) if (row.CanDelete) row.IsChecked = true; };
+        checkNone.Click += (_, _) => { foreach (var row in rows) row.IsChecked = false; };
+        delete.Click += (_, _) =>
+        {
+            var chosen = rows.Where(row => row.IsChecked).ToArray();
+            if (chosen.Length == 0) return;
+            var bytes = chosen.Sum(row => row.Bytes ?? 0);
+            var what = chosen.Length == 1 ? $"\"{chosen[0].Name}\"" : $"{chosen.Length:N0} sessions";
+            if (MessageBox.Show(window, $"Permanently delete {what} ({SessionDeletionRow.FormatBytes(bytes)} on disk)?\n\nThis cannot be undone.",
+                    "Delete sessions?", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes)
+                window.DialogResult = true;
+        };
+        UpdateSummary();
+
+        // Folder sizes can take a while for long recordings; measure in the background and fill them in.
+        var measuring = new CancellationTokenSource();
+        var token = measuring.Token;
+        var dispatcher = window.Dispatcher;
+        _ = Task.Run(() =>
+        {
+            foreach (var row in rows)
+            {
+                if (token.IsCancellationRequested) return;
+                var bytes = SessionDeletionRow.Measure(row.Session.Directory);
+                dispatcher.BeginInvoke(() => { if (!token.IsCancellationRequested) row.Bytes = bytes; });
+            }
+        }, token);
+        var accepted = window.ShowDialog() == true;
+        measuring.Cancel();
+        return accepted ? rows.Where(row => row.IsChecked).Select(row => row.Session.Id).ToArray() : null;
+    }
 
     /// <summary>Asks for a speaker name; existing names are offered but any text is accepted.</summary>
     public string? PromptSpeakerName(string title, string message, string initial, IEnumerable<string> suggestions, string affirmative)
@@ -221,4 +331,41 @@ public sealed class DesktopDialogs(Func<Window> owner)
         panel.Children.Add(accept);
         return panel;
     }
+}
+
+public sealed class SessionDeletionRow(StoredSession session, bool canDelete) : ObservableObject
+{
+    private bool isChecked;
+    private long? bytes;
+    public StoredSession Session { get; } = session;
+    public bool CanDelete { get; } = canDelete;
+    public string Name => Session.Name;
+    public string Details => $"{Session.CreatedUtc.ToLocalTime():MMM d, yyyy · HH:mm} · {TranscriptPresentation.Duration(Session.DurationTicks)} · {Session.State}" +
+        (CanDelete ? "" : " · recording now");
+    public bool IsChecked { get => isChecked; set => Set(ref isChecked, value && CanDelete); }
+    public long? Bytes
+    {
+        get => bytes;
+        set { if (Set(ref bytes, value)) Changed(nameof(Size)); }
+    }
+    public string Size => Bytes is { } value ? FormatBytes(value) : "…";
+    public override string ToString() => Name;
+
+    public static long Measure(string directory)
+    {
+        try
+        {
+            return Directory.Exists(directory)
+                ? new DirectoryInfo(directory).EnumerateFiles("*", SearchOption.AllDirectories).Sum(file => file.Length) : 0;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return 0; }
+    }
+
+    public static string FormatBytes(long value) => value switch
+    {
+        >= 1L << 30 => $"{value / (double)(1L << 30):0.0} GB",
+        >= 1L << 20 => $"{value / (double)(1L << 20):0.0} MB",
+        >= 1L << 10 => $"{value / 1024d:0} KB",
+        _ => $"{value} bytes"
+    };
 }

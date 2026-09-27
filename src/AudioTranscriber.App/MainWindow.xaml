@@ -153,13 +153,24 @@
                                 <AccessText Text="_Refresh" FontSize="12.5" />
                             </StackPanel>
                         </Button>
+                        <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Command="{Binding DeleteSessionsCommand}" Margin="6,0,0,0"
+                                ToolTip="Delete sessions… (pick old sessions to remove with their audio)" AutomationProperties.Name="Delete sessions">
+                            <TextBlock Style="{StaticResource Glyph}" Text="&#xE74D;" FontSize="12" />
+                        </Button>
                         <ContentControl Style="{StaticResource SectionHeader}" Content="Your sessions" Margin="0" />
                     </DockPanel>
-                    <TextBlock DockPanel.Dock="Top" Text="Saved locally · newest 2,000 sessions" Style="{StaticResource Caption}" Margin="14,2,14,8" />
-                    <ListBox ItemsSource="{Binding Sessions}" SelectedItem="{Binding SelectedSession}"
+                    <TextBlock DockPanel.Dock="Top" Text="Saved locally · right-click a session to delete it" Style="{StaticResource Caption}" Margin="14,2,14,8" TextTrimming="CharacterEllipsis"
+                               ToolTip="Shows the newest 2,000 sessions. Right-click one (or press Delete) to delete it; the trash button removes several old ones at once." />
+                    <ListBox x:Name="SessionList" ItemsSource="{Binding Sessions}" SelectedItem="{Binding SelectedSession}"
                              BorderThickness="0" Margin="6,0,6,6" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
-                             AutomationProperties.Name="Saved sessions">
+                             PreviewMouseRightButtonDown="SessionListRightButtonDown" ContextMenuOpening="SessionListContextMenuOpening"
+                             KeyDown="SessionListKeyDown"
+                             AutomationProperties.Name="Saved sessions"
+                             AutomationProperties.HelpText="Right-click a session, or press Delete, to delete it. The trash button deletes several old sessions at once.">
+                        <ListBox.ContextMenu>
+                            <ContextMenu AutomationProperties.Name="Session actions" />
+                        </ListBox.ContextMenu>
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <StackPanel>

@@ -125,6 +125,9 @@ public sealed class MainViewModel : ObservableObject
             SetStatus("NVIDIA key cleared from memory and remembered storage.");
         }));
         RefreshCommand = new RelayCommand(() => Guard(() => { RefreshLibrary(); LoadPage(); }), () => !closing);
+        DeleteSessionCommand = new AsyncCommand(() => SelectedSession is { } s ? DeleteSessionAsync(s) : Task.CompletedTask,
+            () => SelectedSession is { } s && CanDeleteSession(s));
+        DeleteSessionsCommand = new AsyncCommand(DeleteSessionsInteractiveAsync, () => Sessions.Count > 0 && !Busy && !closing);
         SearchCommand = new RelayCommand(ApplySearch, () => SelectedSession is not null && !closing);
         ClearSearchCommand = new RelayCommand(() =>
         {
@@ -426,6 +429,8 @@ public sealed class MainViewModel : ObservableObject
     public ICommand RevokeConsentCommand { get; }
     public ICommand ClearKeyCommand { get; }
     public ICommand RefreshCommand { get; }
+    public ICommand DeleteSessionCommand { get; }
+    public ICommand DeleteSessionsCommand { get; }
     public ICommand SearchCommand { get; }
     public ICommand ClearSearchCommand { get; }
     public ICommand NextPageCommand { get; }
@@ -1135,6 +1140,47 @@ public sealed class MainViewModel : ObservableObject
         RefreshLibrary();
         SetStatus(message);
     });
+
+    public bool IsRecordingSession(Guid sessionId) => controller.RecordingSessionId == sessionId;
+    public bool CanDeleteSession(StoredSession session) => !Busy && !closing && !IsRecordingSession(session.Id);
+
+    public Task DeleteSessionAsync(StoredSession session)
+    {
+        if (IsRecordingSession(session.Id))
+        {
+            SetStatus("Stop the recording before deleting its session.", true);
+            return Task.CompletedTask;
+        }
+        if (!CanDeleteSession(session)) return Task.CompletedTask;
+        if (!dialogs.Confirm("Delete session?",
+                $"Permanently delete \"{session.Name}\" ({session.CreatedUtc.ToLocalTime():MMM d, yyyy · HH:mm}, {TranscriptPresentation.Duration(session.DurationTicks)})?\n\n" +
+                "Its transcript, speakers, jobs and retained original audio are removed from this PC. This cannot be undone.\n" +
+                "Exported transcripts and the live transcript file are not touched."))
+            return Task.CompletedTask;
+        return DeleteAsync([session.Id]);
+    }
+
+    private Task DeleteSessionsInteractiveAsync()
+    {
+        var ids = dialogs.ChooseSessionsToDelete(Sessions.ToArray(), controller.RecordingSessionId);
+        return ids is { Count: > 0 } ? DeleteAsync(ids) : Task.CompletedTask;
+    }
+
+    private Task DeleteAsync(IReadOnlyCollection<Guid> ids) =>
+        RunAsync(ids.Count == 1 ? "Deleting the session…" : $"Deleting {ids.Count:N0} sessions…", async token =>
+        {
+            // Move off a doomed selection first so nothing keeps reading it; prefer the next session down, like Explorer.
+            if (SelectedSession is { } current && ids.Contains(current.Id))
+            {
+                var index = Sessions.IndexOf(current);
+                SelectedSession = Sessions.Skip(index + 1).Concat(Sessions.Take(Math.Max(index, 0)).Reverse())
+                    .FirstOrDefault(session => !ids.Contains(session.Id));
+            }
+            if (liveSessionId is { } live && ids.Contains(live)) StopLiveFile();
+            await controller.DeleteSessionsAsync(ids, token);
+            RefreshLibrary();
+            LoadPage();
+        });
 
     private void ApplySearch() => Guard(() =>
     {
