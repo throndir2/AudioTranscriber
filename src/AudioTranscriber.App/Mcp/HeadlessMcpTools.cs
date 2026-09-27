@@ -80,7 +80,7 @@ public sealed class HeadlessMcpTools
             ("microphone_device_id", "string", "Microphone id, or 'default'; omit to skip the microphone track", false),
             ("provider_id", "string", "Provider id (default local-whisper)", false),
             ("language", "string", "Source language (default en)", false),
-            ("cloud_consent", "boolean", "Allow NVIDIA upload for this session (default false)", false),
+            ("cloud_consent", "boolean", "Allow NVIDIA upload for this session (default false). With local-whisper it only enables the hosted Parakeet fallback for low-confidence chunks.", false),
             ("reduce_echo", "boolean", "Remove speaker audio from the microphone track before transcription (default true)", false)),
         McpTool.Create("stop_recording", "Stop the active recording and seal original audio. Transcription continues in the background.",
             async (_, token) =>
@@ -120,7 +120,7 @@ public sealed class HeadlessMcpTools
             ("stream_index", "integer", "Audio stream index (default: first audio stream)", false),
             ("provider_id", "string", "Provider id (default local-whisper)", false),
             ("language", "string", "Source language (default en)", false),
-            ("cloud_consent", "boolean", "Allow NVIDIA upload for this session (default false)", false)),
+            ("cloud_consent", "boolean", "Allow NVIDIA upload for this session (default false). With local-whisper it only enables the hosted Parakeet fallback for low-confidence chunks.", false)),
         McpTool.Create("list_sessions", "List saved sessions, newest first.",
             args => McpToolResult.Json(controller.Store.GetSessions(args.Int("limit", 20)).Select(Describe)),
             ("limit", "integer", "Maximum sessions (default 20)", false)),

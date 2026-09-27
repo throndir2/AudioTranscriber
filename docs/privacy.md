@@ -38,6 +38,14 @@ There is no automatic paid-provider fallback. Catalog request rates are not a
 guarantee of trial balance or endpoint availability. Authentication or quota
 errors need attention rather than silent rerouting.
 
+For a **local Whisper** session, granting NVIDIA upload consent enables one
+thing only: chunks that Whisper is unsure about (lowest segment confidence below
+0.85) are re-sent to hosted Parakeet TDT v3, and its text replaces Whisper's for
+that chunk. Confident chunks never leave the PC. It needs an NVIDIA key and an
+English session; without consent, nothing is uploaded. A hosted error keeps the
+local text; an authentication, permission, or quota error stops the fallback until
+the key is set again.
+
 ## Secrets
 
 Use memory-only keys unless you explicitly choose Windows-protected persistence.

@@ -201,6 +201,23 @@ public sealed class ProviderTests : IDisposable
         Assert.Empty(Directory.GetFiles(directory));
     }
 
+    [Fact]
+    public void LocalWhisperConfidenceAveragesOnlyTextTokens()
+    {
+        var tokens = new[]
+        {
+            new Whisper.net.WhisperToken { Text = "[_BEG_]", Probability = 0.01f },
+            new Whisper.net.WhisperToken { Text = " hello", Probability = 0.9f },
+            new Whisper.net.WhisperToken { Text = " there", Probability = 0.5f },
+            new Whisper.net.WhisperToken { Text = "[_TT_150]", Probability = 0.02f },
+        };
+        var (mean, lowest, count) = LocalWhisperProvider.SegmentConfidence(tokens);
+        Assert.Equal(0.7, mean!.Value, 3);
+        Assert.Equal(0.5, lowest!.Value, 3);
+        Assert.Equal(2, count);
+        Assert.Equal((null, null, 0), LocalWhisperProvider.SegmentConfidence([new Whisper.net.WhisperToken { Text = "[_EOT_]", Probability = 1 }]));
+    }
+
     private TranscriptionRequest Request() => new(sessionId, trackId, Guid.NewGuid(), Path.Combine(directory, "audio.pcm"), 1, "en", 0);
     private async Task<TranscriptionRequest> RequestAsync(int samples)
     {

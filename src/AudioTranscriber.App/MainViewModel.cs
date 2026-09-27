@@ -304,7 +304,7 @@ public sealed class MainViewModel : ObservableObject
         }
     }
     public string ProviderHelp => SelectedProvider is { } p
-        ? $"{(p.IsCloud ? "NVIDIA-hosted. Upload requires this session's consent AND a key." : "Local-only. No automatic cloud fallback.")} {p.TimingDescription}"
+        ? $"{(p.IsCloud ? "NVIDIA-hosted. Upload requires this session's consent AND a key." : "Local. If you allow NVIDIA uploads below (and a key is set), only chunks Whisper is unsure about are re-sent to hosted Parakeet; English sessions only.")} {p.TimingDescription}"
         : "Choose a transcription provider.";
     private bool HasNewSessionDetails => !string.IsNullOrWhiteSpace(SessionName) && !string.IsNullOrWhiteSpace(Language) && SelectedProvider is not null;
 
@@ -921,7 +921,7 @@ public sealed class MainViewModel : ObservableObject
         var name = TakeSessionName();
         var locale = Language.Trim();
         var microphoneId = MicrophoneEnabled ? MicrophoneDevice?.Id : null;
-        var consent = provider.IsCloud && NewCloudConsent;
+        var consent = NewCloudConsent;
         var reduceEcho = ReduceEcho;
         SaveRecordingPreferences();
         await RunAsync("Starting the explicitly selected audio devices…", async token =>
@@ -961,7 +961,7 @@ public sealed class MainViewModel : ObservableObject
         if (path is null || SelectedProvider is not { } provider) return;
         var name = TakeSessionName();
         var locale = Language.Trim();
-        var consent = provider.IsCloud && NewCloudConsent;
+        var consent = NewCloudConsent;
         SaveRecordingPreferences();
         await RunAsync("Probing the selected media file…", async token =>
         {

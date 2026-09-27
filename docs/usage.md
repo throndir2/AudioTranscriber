@@ -222,6 +222,11 @@ audio, with no personal or confidential data. Consent is never inherited from th
 new-session checkbox by the next session. **Revoke cloud consent** stops future
 uploads; already submitted audio cannot be recalled.
 
+With **local Whisper**, the same consent checkbox turns on the low-confidence
+fallback instead of full upload: only chunks Whisper is unsure about are sent to
+hosted Parakeet (English sessions, key required). Those transcript lines show
+`nvidia-parakeet-tdt-v3` and the Whisper score in their provenance.
+
 Enter a key only in the **Privacy / models** password box. **Use entered key**
 clears the field and uses memory-only storage by default. Explicitly checking
 Remember uses the controller's Windows current-user DPAPI store. **Clear key**
