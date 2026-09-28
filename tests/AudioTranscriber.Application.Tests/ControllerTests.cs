@@ -280,6 +280,54 @@ public sealed class ControllerTests
     }
 
     [Fact]
+    public async Task FillBridgesAnUnclearLineBetweenTheSameSpeakerSoThePassageJoins()
+    {
+        await using var fixture = new Fixture();
+        fixture.Provider.SegmentMilliseconds = 1500;
+        fixture.Provider.Release.TrySetResult();
+        var session = await fixture.App.StartRecordingAsync("Synthetic bridge", "synthetic-output", null, "local-whisper", "en", false);
+        float[] Voice(double amplitude) => Enumerable.Range(0, 32000).Select(i => (float)(amplitude * Math.Sin(2 * Math.PI * 300 * i / 16000.0))).ToArray();
+        foreach (var amplitude in new[] { 0.5, 0.2, 0.5, 0.05 }) fixture.Capture.EmitAudio(fixture.Capture.TrackId, Voice(amplitude));
+        await fixture.App.StopRecordingAsync();
+        await UntilAsync(() => fixture.App.Store.GetProgress(session.Id) is { Pending: 0, Running: 0, Succeeded: > 0 }, 30);
+        var rows = fixture.App.Store.GetTranscriptPage(session.Id);
+        Assert.True(rows.Count >= 4);
+        fixture.App.AssignSpeaker(session.Id, [rows[0].Id], fixture.App.GetOrCreateSpeaker(session.Id, "Alice").Id);
+        fixture.App.AssignSpeaker(session.Id, [rows[3].Id], fixture.App.GetOrCreateSpeaker(session.Id, "Bob").Id);
+
+        await fixture.App.FillSpeakersFromLabelsAsync(session.Id);
+
+        var filled = fixture.App.Store.GetTranscriptPage(session.Id);
+        Assert.Equal(["Alice", "Alice", "Alice", "Bob"], filled.Take(4).Select(row => row.SpeakerName));
+        var lines = TranscriptLine.Group(filled).ToList();
+        Assert.Equal([rows[0].Id, rows[1].Id, rows[2].Id], lines[0].Rows.Select(row => row.Id));
+    }
+
+    [Fact]
+    public async Task NamingTheMicrophoneLabelsItsExistingAndLaterLines()
+    {
+        await using var fixture = new Fixture();
+        fixture.Provider.Release.TrySetResult();
+        var session = await fixture.App.StartRecordingAsync("Synthetic mic name", "synthetic-output", "synthetic-mic", "local-whisper", "en", false, reduceEcho: false);
+        float[] Voice() => Enumerable.Range(0, 32000).Select(i => (float)(0.3 * Math.Sin(2 * Math.PI * 300 * i / 16000.0))).ToArray();
+        var mic = fixture.Capture.MicrophoneTrackId;
+        fixture.Capture.EmitAudio(mic, Voice());
+        await UntilAsync(() => fixture.App.Store.GetTranscriptPage(session.Id).Any(row => row.TrackId == mic));
+        Assert.Equal(LibraryStore.MicrophoneDefaultName, fixture.App.Store.GetTranscriptPage(session.Id).First(row => row.TrackId == mic).SpeakerName);
+
+        Assert.Equal(1, fixture.App.SetMicrophoneSpeaker(session.Id, "Mozar"));
+        fixture.Capture.EmitAudio(mic, Voice());
+        await fixture.App.StopRecordingAsync();
+        await UntilAsync(() => fixture.App.Store.GetTranscriptPage(session.Id).Count(row => row.TrackId == mic) >= 2);
+
+        var micRows = fixture.App.Store.GetTranscriptPage(session.Id).Where(row => row.TrackId == mic).ToArray();
+        Assert.All(micRows, row => Assert.True(row.SpeakerName == "Mozar" && row.ManualSpeaker));
+        Assert.All(fixture.App.Store.GetTranscriptPage(session.Id).Where(row => row.TrackId != mic), row => Assert.NotEqual("Mozar", row.SpeakerName));
+        Assert.Equal(fixture.App.Store.GetSpeakers(session.Id).Single(speaker => speaker.Name == "Mozar").Id,
+            fixture.App.Store.GetSession(session.Id).MicrophoneSpeakerId);
+    }
+
+    [Fact]
     public async Task MicrophoneWaitsForSpeakerAudioAndHasItsEchoRemoved()
     {
         await using var fixture = new Fixture();
@@ -514,7 +562,10 @@ public sealed class ControllerTests
                 for (var i = 0; i < clip.SampleCount; i++)
                     sum += Math.Pow(BitConverter.ToInt16(bytes, (int)(clip.StartSample + i) * 2) / 32768.0, 2);
                 var vector = new float[256];
-                vector[Math.Sqrt(sum / clip.SampleCount) > 0.1 ? 0 : 1] = 1;
+                var rms = Math.Sqrt(sum / clip.SampleCount);
+                // A middling level stands for a line whose voice is unclear.
+                if (rms is > 0.1 and < 0.2) return null;
+                vector[rms > 0.1 ? 0 : 1] = 1;
                 return (float[]?)vector;
             }).ToArray();
         }

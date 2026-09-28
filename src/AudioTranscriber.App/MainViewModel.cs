@@ -115,6 +115,7 @@ public sealed class MainViewModel : ObservableObject
             try { await controller.FillSpeakersFromLabelsAsync(id, new Progress<string>(message => SetStatus(message)), token); }
             catch (InvalidOperationException error) { SetStatus(error.Message, true); }
         }), () => CanWorkWithSession() && controller.DiarizationModelsReady);
+        NameMicrophoneLinesCommand = new AsyncCommand(NameMicrophoneLinesAsync, CanWorkWithSession);
         PauseCommand = new RelayCommand(() => SessionAction(controller.PauseTranscription,
             "Transcription paused; recording, if active, continues."), () => SelectedSession is not null && !closing);
         ResumeCommand = new RelayCommand(() => SessionAction(controller.ResumeTranscription,
@@ -307,6 +308,13 @@ public sealed class MainViewModel : ObservableObject
     public bool SelectedCloudConsent { get => selectedCloudConsent; set => Set(ref selectedCloudConsent, value); }
     public bool MicrophoneEnabled { get => microphoneEnabled; set => Set(ref microphoneEnabled, value); }
     public bool ReduceEcho { get => reduceEcho; set => Set(ref reduceEcho, value); }
+    // Remembered name for microphone lines of new recordings; empty keeps "Me (mic)".
+    public string MicrophoneName
+    {
+        get => microphoneName;
+        set { if (Set(ref microphoneName, value ?? "")) SaveRecordingPreferences(); }
+    }
+    private string microphoneName = "";
     public DeviceChoice? OutputDevice { get => outputDevice; set => Set(ref outputDevice, value); }
     public DeviceChoice? MicrophoneDevice { get => microphoneDevice; set => Set(ref microphoneDevice, value); }
     public double OutputLevel { get => outputLevel; private set => Set(ref outputLevel, value); }
@@ -435,6 +443,7 @@ public sealed class MainViewModel : ObservableObject
     public ICommand RecheckPrerequisitesCommand { get; }
     public ICommand DiarizeCommand { get; }
     public ICommand FillSpeakersCommand { get; }
+    public ICommand NameMicrophoneLinesCommand { get; }
     public ICommand PauseCommand { get; }
     public ICommand ResumeCommand { get; }
     public ICommand CancelJobsCommand { get; }
@@ -717,7 +726,7 @@ public sealed class MainViewModel : ObservableObject
     private sealed record LiveFileSettings(string Path, bool Enabled);
 
     private sealed record RecordingPreferences(bool? MicrophoneEnabled, string? ProviderId, string? Language, bool? ReduceEcho = null,
-        int? Version = null);
+        int? Version = null, string? MicrophoneName = null);
 
     private string RecordingPreferencesPath => Path.Combine(controller.Store.RootDirectory, "recording-defaults.json");
 
@@ -735,6 +744,7 @@ public sealed class MainViewModel : ObservableObject
             if (!string.IsNullOrWhiteSpace(saved.Language)) language = saved.Language;
             savedMicrophoneEnabled = saved.MicrophoneEnabled;
             reduceEcho = saved.ReduceEcho ?? true;
+            microphoneName = saved.MicrophoneName?.Trim() ?? "";
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Text.Json.JsonException) { }
     }
@@ -744,7 +754,8 @@ public sealed class MainViewModel : ObservableObject
         try
         {
             File.WriteAllText(RecordingPreferencesPath, System.Text.Json.JsonSerializer.Serialize(
-                new RecordingPreferences(MicrophoneEnabled, SelectedProvider?.Id, Language.Trim(), ReduceEcho, Version: 2)));
+                new RecordingPreferences(MicrophoneEnabled, SelectedProvider?.Id, Language.Trim(), ReduceEcho, Version: 2,
+                    MicrophoneName: MicrophoneName.Trim())));
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
     }
@@ -976,6 +987,7 @@ public sealed class MainViewModel : ObservableObject
         {
             NewCloudConsent = false;
             var session = await controller.StartRecordingAsync(name, output.Id, microphoneId, provider.Id, locale, consent, reduceEcho, token);
+            ApplyMicrophoneName(session, microphoneId);
             if (sessionNameIsDefault) ResetSessionName();
             if (LiveFileEnabled) StartLiveFile(session.Id);
             RefreshLibrary();
@@ -1006,10 +1018,42 @@ public sealed class MainViewModel : ObservableObject
             StoredSession session;
             try { session = await controller.ContinueRecordingAsync(target.Id, output.Id, microphoneId, reduceEcho, token); }
             catch (InvalidOperationException error) { SetStatus(error.Message, true); return; }
+            ApplyMicrophoneName(session, microphoneId);
             if (LiveFileEnabled && liveSessionId != session.Id) StartLiveFile(session.Id);
             RefreshLibrary();
             SelectedSession = Sessions.FirstOrDefault(x => x.Id == session.Id) ?? session;
             SetStatus($"Recording continues in \"{session.Name}\"; new audio and text follow what it already had.");
+        });
+    }
+
+    // A continued session keeps the microphone name it already has.
+    private void ApplyMicrophoneName(StoredSession session, string? microphoneId)
+    {
+        if (microphoneId is null || MicrophoneName.Trim().Length == 0 || session.MicrophoneSpeakerId is not null) return;
+        try { controller.SetMicrophoneSpeaker(session.Id, MicrophoneName.Trim()); }
+        catch (Exception error) when (error is InvalidOperationException or ArgumentException) { SetStatus(error.Message, true); }
+    }
+
+    public Task NameMicrophoneLinesAsync()
+    {
+        if (SelectedSession is not { } session) return Task.CompletedTask;
+        if (!controller.Store.GetTracks(session.Id).Any(track => track.Kind == "Microphone"))
+        {
+            SetStatus("This session has no microphone track, so there are no microphone lines to name.", true);
+            return Task.CompletedTask;
+        }
+        var current = session.MicrophoneSpeakerId is { } id ? Speakers.FirstOrDefault(x => x.Id == id)?.Name : null;
+        var name = dialogs.PromptSpeakerName("Name all microphone lines",
+            "Every line on this session's microphone track gets this speaker, and so does every microphone line transcribed later " +
+            "(including when you continue this recording). Pick an existing name or type a new one." +
+            (MicrophoneName.Trim().Length == 0 ? " New recordings will use it too; change that under Record / import." : ""),
+            current ?? (MicrophoneName.Trim().Length > 0 ? MicrophoneName.Trim() : ""), SpeakerNames.Where(x => x != UnknownSpeaker), "Name microphone lines");
+        if (string.IsNullOrWhiteSpace(name)) return Task.CompletedTask;
+        return RunForSessionAsync("Naming the microphone lines…", async (sessionId, _) =>
+        {
+            var count = await Task.Run(() => controller.SetMicrophoneSpeaker(sessionId, name));
+            if (MicrophoneName.Trim().Length == 0) MicrophoneName = name.Trim();
+            SetStatus($"All {count:N0} microphone line(s) are now \"{name.Trim()}\"; new microphone lines get this name too.");
         });
     }
 

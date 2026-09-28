@@ -78,6 +78,9 @@ all in one transaction. `TranscriptRow.ManualSpeaker` exposes the manual flag.
 `ApplyVoiceFill` sets speakers found by matching each line's voice to the lines the
 user labeled; it marks those rows `voice_fill` (`TranscriptRow.VoiceFilled`) so later
 automatic assignments leave them alone, and never touches manual rows (schema version 5).
+`SetMicrophoneSpeaker` labels every microphone-track row of a session with one speaker as a
+manual choice and stores it in `sessions.mic_speaker`, so `CompleteJob` labels microphone rows
+transcribed later the same way (schema version 6).
 
 Schema version 2 adds `segments.manual_speaker`. Version 1 did not record the
 origin of speaker assignments, so migration conservatively protects **all

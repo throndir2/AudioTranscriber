@@ -36,7 +36,8 @@ public sealed class TranscriptItem(TranscriptLine line, string trackName)
     public string Attribution => Rows.All(row => row.ManualSpeaker) ? "Set by you"
         : Rows.Any(row => row.ManualSpeaker) ? "Partly set by you"
         : Rows.All(row => row.VoiceFilled) ? "Matched to your labels"
-        : Row.Uncertain ? "Uncertain / overlap" : "Automatic";
+        : Rows.All(row => row.Uncertain) ? "Uncertain / overlap"
+        : Rows.Any(row => row.Uncertain) ? "Partly uncertain" : "Automatic";
     public string Provenance => Distinct(row => row.Provenance);
     public override string ToString() => $"{Timestamp} {Speaker}: {Text}";
 

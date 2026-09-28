@@ -278,6 +278,10 @@
                                                         <CheckBox Content="Include a separate _microphone track" IsChecked="{Binding MicrophoneEnabled}" Margin="0,0,0,2" />
                                                         <ComboBox Margin="0,3,0,4" ItemsSource="{Binding MicrophoneDevices}" DisplayMemberPath="Name" SelectedItem="{Binding MicrophoneDevice}" IsEnabled="{Binding MicrophoneEnabled}" AutomationProperties.Name="Optional separate microphone device" />
                                                         <CheckBox Content="Reduce _echo from speakers (no headset needed)" IsChecked="{Binding ReduceEcho}" IsEnabled="{Binding MicrophoneEnabled}" Margin="0,4,0,8" ToolTip="Subtracts what the speakers played (the output track) from the microphone before transcription, so remote voices are not transcribed twice. The original microphone audio is kept unchanged." />
+                                                        <Label Content="Label microphone lines _as" Target="{Binding ElementName=MicrophoneNameInput}" IsEnabled="{Binding MicrophoneEnabled}" />
+                                                        <TextBox x:Name="MicrophoneNameInput" Text="{Binding MicrophoneName, UpdateSourceTrigger=LostFocus}" IsEnabled="{Binding MicrophoneEnabled}" Margin="0,3,0,8"
+                                                                 AutomationProperties.Name="Speaker name for microphone lines"
+                                                                 ToolTip="Your name, for example. Every microphone line of new recordings gets this speaker automatically. Leave empty to show 'Me (mic)'. For an existing session, right-click it → Name all microphone lines." />
                                                         <ProgressBar Value="{Binding MicrophoneLevel, Mode=OneWay}" Minimum="0" Maximum="1" Height="10" AutomationProperties.Name="Microphone capture peak level" />
                                                         <TextBlock Text="Microphone level · not included in loopback. Echo reduction removes speaker audio the mic picks up so it isn't transcribed twice." Style="{StaticResource Caption}" Margin="0,5,0,0" />
                                                     </StackPanel>
@@ -486,6 +490,10 @@
                                                     <TextBox.InputBindings><KeyBinding Key="Return" Command="{Binding RenameSpeakerCommand}" /></TextBox.InputBindings>
                                                 </TextBox>
                                                 <Button Content="Rename throughout session" Command="{Binding RenameSpeakerCommand}" />
+                                            </WrapPanel>
+                                            <TextBlock Text="The microphone track is usually one person (you). Name it once and every microphone line, including ones transcribed later, gets that speaker." TextWrapping="Wrap" Foreground="{StaticResource Muted}" Margin="0,10,0,4" />
+                                            <WrapPanel>
+                                                <Button Content="Name all microphone lines…" Command="{Binding NameMicrophoneLinesCommand}" />
                                             </WrapPanel>
                                         </StackPanel>
                                     </ScrollViewer>
