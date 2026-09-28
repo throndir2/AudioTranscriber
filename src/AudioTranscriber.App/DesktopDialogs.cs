@@ -266,6 +266,7 @@ public sealed class DesktopDialogs(Func<Window> owner)
         var panel = new StackPanel { Margin = new Thickness(22) };
         panel.Children.Add(Help(message));
         var input = new ComboBox { IsEditable = true, ItemsSource = suggestions.ToArray(), Text = initial, IsTextSearchEnabled = false };
+        EditableComboBox.SetSyncSelection(input, true);
         System.Windows.Automation.AutomationProperties.SetName(input, "Speaker name");
         panel.Children.Add(input);
         panel.Children.Add(Buttons(window, affirmative, () => !string.IsNullOrWhiteSpace(input.Text)));

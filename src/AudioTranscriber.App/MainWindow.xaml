@@ -1,6 +1,7 @@
 <Window x:Class="AudioTranscriber.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:AudioTranscriber.App"
         Title="AudioTranscriber · Local audio library" Width="1440" Height="940"
         MinWidth="1040" MinHeight="720" WindowStartupLocation="CenterScreen"
         Style="{StaticResource {x:Type Window}}">
@@ -464,7 +465,7 @@
                                             <Button DockPanel.Dock="Right" Content="Restore raw" Command="{Binding RestoreRawCommand}" ToolTip="Drop your correction and show the recognized text again" />
                                             <Button DockPanel.Dock="Right" Content="Save text" Command="{Binding SaveCorrectionCommand}" ToolTip="Save the corrected text (left box). The recognized text (right box) is kept." />
                                             <TextBlock Text="{Binding SelectionSummary}" Foreground="{StaticResource Muted}" Margin="0,0,8,0" ToolTip="{Binding RowDetails}" />
-                                            <ComboBox Width="180" IsEditable="True" IsTextSearchEnabled="False" ItemsSource="{Binding SpeakerNames}"
+                                            <ComboBox Width="180" IsEditable="True" IsTextSearchEnabled="False" local:EditableComboBox.SyncSelection="True" ItemsSource="{Binding SpeakerNames}"
                                                       Text="{Binding LineSpeaker, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Speaker for selected lines"
                                                       ToolTip="Pick a speaker or type a new name, then press Enter or Set speaker">
                                                 <ComboBox.InputBindings><KeyBinding Key="Return" Command="{Binding SetLineSpeakerCommand}" /></ComboBox.InputBindings>
