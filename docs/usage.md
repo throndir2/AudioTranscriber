@@ -199,6 +199,36 @@ lines from either voice are matched to the one speaker from then on. **Analyze
 speakers** re-checks every window of the session with the current profiles.
 Speaker names are session display labels, not verified identities.
 
+### Remembering speakers across sessions (voice library)
+
+Name someone once and later recordings name them for you. When you give a speaker
+a name (rename, or label their lines), up to three voice samples from that session
+are saved to the **voice library**. The samples are 256-number voice embeddings,
+not audio. Each new session's automatic speakers ("Speaker 1", "Speaker 2", …) are
+compared with the library as soon as speaker analysis finds them. A close, clear
+match renames the speaker. If the session already has a speaker with that name,
+the two are merged. Nothing re-reads hours of audio: matching uses the voice
+profiles that speaker analysis already stores, so it is instant.
+
+- Only names **you** give add samples; automatic matches never feed the library,
+  so one wrong match can't reinforce itself. A voice keeps the newest 15 samples
+  (at most 3 per session speaker). Naming someone in two or three sessions,
+  ideally with different mics or rooms, makes matching much more reliable.
+- Matching uses the same conservative thresholds as within a session. A speaker
+  who sounds like two remembered people, or like nobody, stays unnamed.
+- Renaming a remembered speaker to a different name moves that session's samples
+  to the new name. Renaming a speaker back to "Speaker N" keeps it unnamed for good.
+- **Speaker names → Match known voices** applies the library to an older session.
+  **Remember this session's named voices** adds a session you named before this
+  feature existed.
+- **Privacy / models → Voice library** lists remembered voices. From there you can
+  **Rename…** a voice (choosing another remembered name combines the two),
+  **Forget selected voice**, **Forget all voices…**, or turn remembering off.
+  Forgetting deletes the samples at once. Past sessions keep their speaker names
+  and their own in-session voice profiles.
+- Different mics, heavy compression, a cold, or character voices can prevent a
+  match. Those speakers simply stay "Speaker N" for you to name.
+
 Double-click a line, right-click → **Play line**, or choose **▶ Play** to play its own track from its stored
 start timestamp. **Track playback** separately chooses an original track and
 timestamp. Playback is one track at a time, not an undisclosed mix of loopback and

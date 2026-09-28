@@ -724,6 +724,55 @@ public sealed class LibraryStore
     public void SetSpeakerRegistry(Guid sessionId, string json) =>
         Write("UPDATE sessions SET registry=$registry WHERE id=$session", ("$registry", json), ("$session", sessionId));
 
+    public void SetSpeakerParticipant(Guid sessionId, string speakerId, string? participantId) =>
+        Write("UPDATE speakers SET participant_id=$participant WHERE session_id=$session AND id=$id",
+            ("$participant", participantId), ("$session", sessionId), ("$id", speakerId));
+
+    public const string VoiceLinkPrefix = "voice:";
+
+    public IReadOnlyList<StoredVoice> GetVoices() =>
+        Read("SELECT * FROM voices ORDER BY name COLLATE NOCASE", r => new StoredVoice(G(r, "id"), S(r, "name"), S(r, "model"),
+            System.Text.Json.JsonSerializer.Deserialize<StoredVoiceSample[]>(S(r, "samples")) ?? [],
+            DateTimeOffset.Parse(S(r, "created"), CultureInfo.InvariantCulture), DateTimeOffset.Parse(S(r, "updated"), CultureInfo.InvariantCulture)));
+
+    public void SaveVoice(StoredVoice voice)
+    {
+        ArgumentNullException.ThrowIfNull(voice);
+        if (string.IsNullOrWhiteSpace(voice.Name)) throw new ArgumentException("A voice name is required.");
+        Write("""
+            INSERT INTO voices(id,name,model,samples,created,updated) VALUES($id,$name,$model,$samples,$created,$updated)
+            ON CONFLICT(id) DO UPDATE SET name=excluded.name,model=excluded.model,samples=excluded.samples,updated=excluded.updated
+            """, ("$id", voice.Id), ("$name", voice.Name.Trim()), ("$model", voice.ModelId),
+            ("$samples", System.Text.Json.JsonSerializer.Serialize(voice.Samples)), ("$created", voice.CreatedUtc), ("$updated", voice.UpdatedUtc));
+    }
+
+    /// <summary>Deletes a remembered voice; session speakers keep their names but are no longer linked to it.</summary>
+    public void DeleteVoice(Guid voiceId, Guid? relinkTo = null)
+    {
+        lock (gate)
+        {
+            using var connection = Open();
+            using var transaction = connection.BeginTransaction();
+            Execute(connection, "DELETE FROM voices WHERE id=$id", ("$id", voiceId));
+            Execute(connection, "UPDATE speakers SET participant_id=$to WHERE participant_id=$from",
+                ("$from", VoiceLinkPrefix + voiceId.ToString("D")), ("$to", relinkTo is { } to ? VoiceLinkPrefix + to.ToString("D") : null));
+            transaction.Commit();
+        }
+    }
+
+    public int DeleteAllVoices()
+    {
+        lock (gate)
+        {
+            using var connection = Open();
+            using var transaction = connection.BeginTransaction();
+            var count = Execute(connection, "DELETE FROM voices");
+            Execute(connection, "UPDATE speakers SET participant_id=NULL WHERE participant_id LIKE 'voice:%'");
+            transaction.Commit();
+            return count;
+        }
+    }
+
     public void ReplaceTurns(Guid trackId, long startTicks, long endTicks, IEnumerable<StoredTurn> turns)
     {
         lock (gate)
@@ -885,5 +934,7 @@ public sealed class LibraryStore
             speaker_id TEXT,overlap INTEGER NOT NULL,uncertain INTEGER NOT NULL);
         CREATE INDEX IF NOT EXISTS turn_time ON turns(track_id,start_ticks,end_ticks);
         CREATE TABLE IF NOT EXISTS merged_folders(session_id TEXT NOT NULL REFERENCES sessions(id),directory TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS voices(
+            id TEXT PRIMARY KEY,name TEXT NOT NULL,model TEXT NOT NULL,samples TEXT NOT NULL,created TEXT NOT NULL,updated TEXT NOT NULL);
         """;
 }

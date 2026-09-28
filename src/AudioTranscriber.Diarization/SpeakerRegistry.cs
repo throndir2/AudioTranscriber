@@ -124,14 +124,14 @@ internal static class Embeddings
 
     public static double Cosine(float[] a, float[] b) => Math.Clamp(a.Zip(b, (x, y) => (double)x * y).Sum(), -1, 1);
 
-    public static List<float[]> SelectRepresentatives(IEnumerable<float[]> candidates)
+    public static List<float[]> SelectRepresentatives(IEnumerable<float[]> candidates, int maximum = SpeakerRegistry.MaximumRepresentatives)
     {
         var distinct = new List<float[]>();
         foreach (var candidate in candidates)
             if (!distinct.Any(e => Cosine(e, candidate) > 0.98)) distinct.Add(candidate.ToArray());
-        if (distinct.Count <= SpeakerRegistry.MaximumRepresentatives) return distinct;
+        if (distinct.Count <= maximum) return distinct;
         var selected = new List<float[]> { distinct[0] };
-        while (selected.Count < SpeakerRegistry.MaximumRepresentatives)
+        while (selected.Count < maximum)
             selected.Add(distinct.Where(e => !selected.Contains(e))
                 .MinBy(e => selected.Max(s => Cosine(s, e)))!);
         return selected;

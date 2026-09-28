@@ -32,6 +32,16 @@ public sealed record SegmentDraft(
     string TimingGranularity, string Provenance, bool Uncertain = false);
 
 public sealed record StoredSpeaker(string Id, Guid SessionId, string Name, string? ParticipantId, string Provenance);
+// A remembered voice shared by all sessions: a few speaker embeddings (never audio), each tagged with the
+// session speaker it came from so a later rename can withdraw exactly that contribution.
+public sealed record StoredVoiceSample(Guid SessionId, string SpeakerId, float[] Values);
+public sealed record StoredVoice(Guid Id, string Name, string ModelId, IReadOnlyList<StoredVoiceSample> Samples,
+    DateTimeOffset CreatedUtc, DateTimeOffset UpdatedUtc)
+{
+    public int SessionCount => Samples.Select(sample => sample.SessionId).Distinct().Count();
+    public string Summary =>
+        $"{Name} · {Samples.Count} voice sample{(Samples.Count == 1 ? "" : "s")} from {SessionCount} session{(SessionCount == 1 ? "" : "s")} · updated {UpdatedUtc.ToLocalTime():yyyy-MM-dd}";
+}
 public sealed record StoredTurn(Guid TrackId, long StartTicks, long EndTicks, string? SpeakerId, bool Overlap, bool Uncertain);
 // Row rewrites for merging Source into Target; metadata values are already shifted by OffsetTicks.
 public sealed record SessionMerge(

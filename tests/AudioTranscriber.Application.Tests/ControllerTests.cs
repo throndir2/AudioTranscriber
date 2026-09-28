@@ -357,6 +357,49 @@ public sealed class ControllerTests
             row.TrackId == micTrack && row.Provenance.Contains("speaker echo removed", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task NamedVoiceIsRecognizedInALaterSessionUntilForgotten()
+    {
+        await using var fixture = new Fixture();
+        fixture.Provider.Release.TrySetResult();
+        async Task<StoredSession> RecordAsync(string name)
+        {
+            var session = await fixture.App.StartRecordingAsync(name, "synthetic-output", null, "local-whisper", "en", false);
+            fixture.Capture.Emit(32000);
+            await fixture.App.StopRecordingAsync();
+            await UntilAsync(() => fixture.App.Store.GetSpeakers(session.Id).Count == 1 &&
+                fixture.App.Store.GetProgress(session.Id) is { Succeeded: 3, Pending: 0, Running: 0 });
+            return session;
+        }
+
+        var first = await RecordAsync("First synthetic session");
+        var speaker = Assert.Single(fixture.App.Store.GetSpeakers(first.Id));
+        Assert.Equal("Speaker 1", speaker.Name);
+        await fixture.App.RenameSpeakerAsync(first.Id, speaker.Id, "Alice");
+        var voice = Assert.Single(fixture.App.GetVoiceLibrary());
+        Assert.Equal("Alice", voice.Name);
+        Assert.All(voice.Samples, sample => Assert.Equal(first.Id, sample.SessionId));
+
+        var second = await RecordAsync("Second synthetic session");
+        var recognized = Assert.Single(fixture.App.Store.GetSpeakers(second.Id));
+        Assert.Equal("Alice", recognized.Name);
+        Assert.Equal("voice:" + voice.Id.ToString("D"), recognized.ParticipantId);
+        Assert.All(fixture.App.Store.GetTranscriptPage(second.Id), row => Assert.Equal("Alice", row.SpeakerName));
+        // Automatic recognition never feeds the library; only names the user gives do.
+        Assert.All(Assert.Single(fixture.App.GetVoiceLibrary()).Samples, sample => Assert.Equal(first.Id, sample.SessionId));
+
+        // Renaming a remembered voice's speaker to someone else withdraws that session's samples.
+        await fixture.App.RenameSpeakerAsync(first.Id, speaker.Id, "Bob");
+        Assert.Equal("Bob", Assert.Single(fixture.App.GetVoiceLibrary()).Name);
+
+        fixture.App.ForgetAllVoices();
+        Assert.Empty(fixture.App.GetVoiceLibrary());
+        Assert.All(fixture.App.Store.GetSpeakers(second.Id).Concat(fixture.App.Store.GetSpeakers(first.Id)),
+            item => Assert.Null(item.ParticipantId));
+        var third = await RecordAsync("Third synthetic session");
+        Assert.Equal("Speaker 1", Assert.Single(fixture.App.Store.GetSpeakers(third.Id)).Name);
+    }
+
     private static async Task UntilAsync(Func<bool> condition, int seconds = 15)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(seconds));
