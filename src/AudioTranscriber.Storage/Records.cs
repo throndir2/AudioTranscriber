@@ -3,7 +3,7 @@ namespace AudioTranscriber.Storage;
 public sealed record StoredSession(
     Guid Id, string Name, string Directory, DateTimeOffset CreatedUtc, string State,
     bool CloudConsent, string ProviderId, string Language, string? Error, long DurationTicks,
-    string ProcessingState = "Running");
+    string ProcessingState = "Running", string? MicrophoneSpeakerId = null);
 
 public sealed record StoredTrack(
     Guid Id, Guid SessionId, string Kind, string Name, string? OriginalPath,

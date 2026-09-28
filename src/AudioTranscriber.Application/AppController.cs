@@ -641,6 +641,23 @@ public sealed class AppController : IAppController
             ?? Store.CreateSpeaker(sessionId, name);
     }
 
+    public int SetMicrophoneSpeaker(Guid sessionId, string? name)
+    {
+        if (!Store.GetTracks(sessionId).Any(track => track.Kind == "Microphone"))
+            throw new InvalidOperationException("This session has no microphone track, so there are no microphone lines to name.");
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            Store.SetMicrophoneSpeaker(sessionId, null);
+            Notify("New microphone lines are no longer labeled automatically; existing lines keep their names.");
+            return 0;
+        }
+        var speaker = GetOrCreateSpeaker(sessionId, name);
+        var count = Store.SetMicrophoneSpeaker(sessionId, speaker.Id);
+        TranscriptChanged?.Invoke(sessionId);
+        Notify($"All {count:N0} microphone line(s) are now {speaker.Name.Trim()}; microphone lines transcribed later get this name too.");
+        return count;
+    }
+
     public void AssignSpeaker(Guid sessionId, IReadOnlyCollection<string> segmentIds, string? speakerId)
     {
         ArgumentNullException.ThrowIfNull(segmentIds);
@@ -717,7 +734,9 @@ public sealed class AppController : IAppController
     private const int VoiceBatchClips = 300, VoiceBatchSamples = 20 * 60 * 16000;
     // A line takes the closest labeled speaker only when it clearly sounds like them and clearly not like the next best.
     private const double VoiceMatchThreshold = 0.45, VoiceSoloThreshold = 0.55, VoiceMatchMargin = 0.05;
-    private static readonly long VoiceNeighborGapTicks = 3 * TimeSpan.TicksPerSecond;
+    // Up to this many unclear lines, all within this span, between two lines of one speaker take that speaker.
+    private const int VoiceBridgeRows = 3;
+    private static readonly long VoiceBridgeTicks = 30 * TimeSpan.TicksPerSecond;
 
     /// <summary>
     /// Uses every line the user labeled as a voice sample of that speaker, then gives each other line the labeled speaker
@@ -764,20 +783,24 @@ public sealed class AppController : IAppController
             if (!row.ManualSpeaker && examples.TryGetValue(kinds[row.TrackId], out var group) &&
                 vectors.GetValueOrDefault(row.Id) is { } vector && PickVoice(vector, group, null) is { } speaker)
                 assignments[row.Id] = speaker;
-        // Lines too short to fingerprint take the speaker of both neighbours on their track when those agree.
+        // Short unclear stretches between two lines of the same speaker on a track are that speaker too,
+        // so their lines join into one passage instead of being split by a stray label.
         foreach (var track in rows.GroupBy(row => row.TrackId))
         {
+            if (!examples.ContainsKey(kinds[track.Key])) continue;
             var ordered = track.OrderBy(row => row.StartTicks).ToArray();
             string? Known(TranscriptRow row) => row.ManualSpeaker ? row.SpeakerId : assignments.GetValueOrDefault(row.Id);
-            for (var i = 1; i < ordered.Length - 1; i++)
+            bool Resolved(TranscriptRow row) => row.ManualSpeaker || assignments.ContainsKey(row.Id);
+            for (var start = 1; start < ordered.Length - 1; start++)
             {
-                var row = ordered[i];
-                if (row.ManualSpeaker || assignments.ContainsKey(row.Id) || vectors.ContainsKey(row.Id) ||
-                    !examples.ContainsKey(kinds[row.TrackId])) continue;
-                var (before, after) = (ordered[i - 1], ordered[i + 1]);
-                if (Known(before) is { } speaker && Known(after) == speaker &&
-                    row.StartTicks - before.EndTicks <= VoiceNeighborGapTicks && after.StartTicks - row.EndTicks <= VoiceNeighborGapTicks)
-                    assignments[row.Id] = speaker;
+                if (Resolved(ordered[start])) continue;
+                var end = start;
+                while (end + 1 < ordered.Length && !Resolved(ordered[end + 1])) end++;
+                var (before, after) = (ordered[start - 1], end + 1 < ordered.Length ? ordered[end + 1] : null);
+                if (after is not null && end - start < VoiceBridgeRows && Known(before) is { } speaker && Known(after) == speaker &&
+                    after.StartTicks - before.EndTicks <= VoiceBridgeTicks)
+                    for (var index = start; index <= end; index++) assignments[ordered[index].Id] = speaker;
+                start = end;
             }
         }
 

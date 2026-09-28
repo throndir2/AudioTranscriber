@@ -67,6 +67,8 @@ public interface IAppController : IAsyncDisposable
         CancellationToken cancellationToken = default);
     // Finds a session speaker by name (case-insensitive) or creates a user-named one.
     StoredSpeaker GetOrCreateSpeaker(Guid sessionId, string name);
+    // Labels every microphone line of the session with this name, now and as new lines arrive. Empty stops labeling new lines.
+    int SetMicrophoneSpeaker(Guid sessionId, string? name);
     // Manually labels rows (null = Unknown). With speaker models installed, the rows' voice is learned in the background.
     void AssignSpeaker(Guid sessionId, IReadOnlyCollection<string> segmentIds, string? speakerId);
     // Renames a speaker; a name another speaker already has merges the two. Returns the surviving speaker ID.

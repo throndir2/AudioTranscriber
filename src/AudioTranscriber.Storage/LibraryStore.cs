@@ -5,7 +5,9 @@ namespace AudioTranscriber.Storage;
 
 public sealed class LibraryStore
 {
-    private const int CurrentSchemaVersion = 5;
+    private const int CurrentSchemaVersion = 6;
+    // Shown for microphone lines that have no speaker yet.
+    public const string MicrophoneDefaultName = "Me (mic)";
     private readonly string connectionString;
     private readonly object gate = new();
     public string RootDirectory { get; }
@@ -65,6 +67,14 @@ public sealed class LibraryStore
             Execute(connection, """
                 ALTER TABLE segments ADD COLUMN voice_fill INTEGER NOT NULL DEFAULT 0 CHECK(voice_fill IN (0,1));
                 PRAGMA user_version=5;
+                """);
+        }
+        if (schemaVersion < 6)
+        {
+            // The speaker every microphone line of the session is labeled with, including lines transcribed later.
+            Execute(connection, """
+                ALTER TABLE sessions ADD COLUMN mic_speaker TEXT;
+                PRAGMA user_version=6;
                 """);
         }
         transaction.Commit();
@@ -349,6 +359,11 @@ public sealed class LibraryStore
                 ("$id", job.Id), ("$model", actualModel), ("$raw", rawJson));
             for (var index = 0; index < rows.Count; index++)
                 InsertSegment(connection, $"{job.Id:N}-{index:D6}", job.SessionId, job.TrackId, job.Id, rows[index]);
+            Execute(connection, """
+                UPDATE segments SET speaker_id=(SELECT mic_speaker FROM sessions WHERE id=$session),uncertain=0,manual_speaker=1,voice_fill=0
+                WHERE job_id=$id AND (SELECT mic_speaker FROM sessions WHERE id=$session) IS NOT NULL
+                AND (SELECT kind FROM tracks WHERE id=$track)='Microphone'
+                """, ("$id", job.Id), ("$session", job.SessionId), ("$track", job.TrackId));
             transaction.Commit();
             return true;
         }
@@ -591,6 +606,8 @@ public sealed class LibraryStore
         {
             using var connection = Open();
             using var transaction = connection.BeginTransaction();
+            Execute(connection, "UPDATE sessions SET mic_speaker=$into WHERE id=$session AND mic_speaker=$from",
+                ("$into", intoSpeakerId), ("$from", fromSpeakerId), ("$session", sessionId));
             Execute(connection, "UPDATE segments SET speaker_id=$into WHERE session_id=$session AND speaker_id=$from",
                 ("$into", intoSpeakerId), ("$from", fromSpeakerId), ("$session", sessionId));
             Execute(connection, "UPDATE turns SET speaker_id=$into WHERE speaker_id=$from AND track_id IN (SELECT id FROM tracks WHERE session_id=$session)",
@@ -602,6 +619,27 @@ public sealed class LibraryStore
             if (registryJson is not null)
                 Execute(connection, "UPDATE sessions SET registry=$registry WHERE id=$session", ("$registry", registryJson), ("$session", sessionId));
             transaction.Commit();
+        }
+    }
+
+    /// <summary>
+    /// Labels every microphone line of the session with this speaker (as if set by the user), and lines transcribed
+    /// later too. Null stops labeling new lines and leaves existing ones as they are. Returns the lines relabeled.
+    /// </summary>
+    public int SetMicrophoneSpeaker(Guid sessionId, string? speakerId)
+    {
+        lock (gate)
+        {
+            using var connection = Open();
+            using var transaction = connection.BeginTransaction();
+            if (Execute(connection, "UPDATE sessions SET mic_speaker=$speaker WHERE id=$session", ("$speaker", speakerId), ("$session", sessionId)) != 1)
+                throw new InvalidOperationException("The session does not exist.");
+            var count = speakerId is null ? 0 : Execute(connection, """
+                UPDATE segments SET speaker_id=$speaker,uncertain=0,manual_speaker=1,voice_fill=0
+                WHERE session_id=$session AND track_id IN (SELECT id FROM tracks WHERE session_id=$session AND kind='Microphone')
+                """, ("$speaker", speakerId), ("$session", sessionId));
+            transaction.Commit();
+            return count;
         }
     }
 
@@ -643,7 +681,7 @@ public sealed class LibraryStore
         }
     }
 
-    /// <summary>Sets speakers found by matching voices to the user's labeled lines. Manual rows are never changed.</summary>
+    /// <summary>Sets speakers found by matching each line's voice to the lines the user labeled. Manual rows are never changed.</summary>
     public int ApplyVoiceFill(Guid sessionId, IReadOnlyList<(string SegmentId, string SpeakerId)> assignments)
     {
         ArgumentNullException.ThrowIfNull(assignments);
@@ -786,7 +824,7 @@ public sealed class LibraryStore
     private static StoredSession ReadSession(SqliteDataReader r) =>
         new(G(r, "id"), S(r, "name"), S(r, "directory"), DateTimeOffset.Parse(S(r, "created"), CultureInfo.InvariantCulture),
             S(r, "state"), L(r, "consent") != 0, S(r, "provider"), S(r, "language"), N(r, "error"), L(r, "duration"),
-            S(r, "processing_state"));
+            S(r, "processing_state"), N(r, "mic_speaker"));
     private static StoredAudioChunk ReadChunk(SqliteDataReader r) =>
         new(G(r, "id"), G(r, "session_id"), G(r, "track_id"), S(r, "path"), L(r, "start_sample"),
             (int)L(r, "sample_count"), L(r, "start_ticks"), S(r, "metadata"));

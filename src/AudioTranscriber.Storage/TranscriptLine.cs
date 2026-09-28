@@ -3,12 +3,13 @@ using System.Text;
 namespace AudioTranscriber.Storage;
 
 // Recognition splits one person's long utterance at sentence ends, short pauses and audio chunk edges.
-// A line joins consecutive rows from the same known speaker on the same track so it reads as one passage;
-// the stored rows stay separate so speaker analysis, labeling and corrections keep their own timing.
+// A line joins consecutive rows from the same speaker on the same track so it reads as one passage, as long as
+// nobody else spoke in between and the pause stays under a minute; the stored rows stay separate so speaker analysis,
+// labeling and corrections keep their own timing. Unknown rows never join (they may be different people).
 public sealed class TranscriptLine
 {
-    public static readonly long MaxPauseTicks = 2 * TimeSpan.TicksPerSecond;
-    public const int MaxLength = 600;
+    public static readonly long MaxPauseTicks = 60 * TimeSpan.TicksPerSecond;
+    public const int MaxLength = 1500;
 
     private readonly List<TranscriptRow> rows = [];
     private readonly List<(int Start, int Length)> spans = [];
@@ -26,9 +27,12 @@ public sealed class TranscriptLine
     public string RawText => raw.ToString();
 
     public bool CanAppend(TranscriptRow row) =>
-        row.TrackId == First.TrackId && row.SpeakerId is not null && row.SpeakerId == First.SpeakerId &&
-        !row.Uncertain && !First.Uncertain && row.StartTicks - EndTicks <= MaxPauseTicks &&
-        text.Length + row.Text.Trim().Length < MaxLength;
+        row.TrackId == First.TrackId && SameSpeaker(row, First) &&
+        row.StartTicks - EndTicks <= MaxPauseTicks && text.Length + row.Text.Trim().Length < MaxLength;
+
+    private static bool SameSpeaker(TranscriptRow a, TranscriptRow b) => a.SpeakerId is not null
+        ? a.SpeakerId == b.SpeakerId
+        : b.SpeakerId is null && a.SpeakerName == LibraryStore.MicrophoneDefaultName && b.SpeakerName == LibraryStore.MicrophoneDefaultName;
 
     public static IEnumerable<TranscriptLine> Group(IEnumerable<TranscriptRow> rows)
     {

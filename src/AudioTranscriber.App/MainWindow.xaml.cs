@@ -177,6 +177,8 @@ public partial class MainWindow : Window
         set.Items.Add(Item("Unknown / unassigned", () => viewModel.AssignSelection(null, null)));
         menu.Items.Add(set);
         menu.Items.Add(Item("Type a speaker name…", viewModel.AssignSelectionToNewSpeaker));
+        menu.Items.Add(Item("Name all microphone lines…", () => Dispatcher.BeginInvoke(() => _ = viewModel.NameMicrophoneLinesAsync()),
+            enabled: viewModel.NameMicrophoneLinesCommand.CanExecute(null)));
         if (shared is not null && viewModel.Speakers.FirstOrDefault(x => x.Id == shared) is { } current)
             menu.Items.Add(Item($"Rename \"{current.Name}\" everywhere…", () => _ = viewModel.RenameSpeakerInteractiveAsync(current.Id)));
         menu.Items.Add(new Separator());
@@ -219,6 +221,8 @@ public partial class MainWindow : Window
                 enabled: viewModel.ContinueRecordingCommand.CanExecute(null)));
             menu.Items.Add(Item("Merge with other sessions…", Later(() => viewModel.MergeSessionsCommand.Execute(null)),
                 enabled: viewModel.MergeSessionsCommand.CanExecute(null)));
+            menu.Items.Add(Item("Name all microphone lines…", Later(() => _ = viewModel.NameMicrophoneLinesAsync()),
+                enabled: viewModel.NameMicrophoneLinesCommand.CanExecute(null)));
             menu.Items.Add(new Separator());
             var header = viewModel.IsRecordingSession(session.Id)
                 ? $"Delete \"{name}\" (stop recording first)"
