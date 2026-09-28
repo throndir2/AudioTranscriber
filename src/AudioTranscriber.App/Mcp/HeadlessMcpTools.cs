@@ -227,6 +227,17 @@ public sealed class HeadlessMcpTools
                 return McpToolResult.Json(Describe(await controller.MergeSessionsAsync(ids, token)));
             },
             ("session_ids", "string", "Comma-separated session GUIDs (two or more)", true)),
+        McpTool.Create("fill_speakers", "Match every unlabeled line to the speakers of the lines labeled manually (assign_speaker), by voice. Manual labels never change; unclear lines keep their label.",
+            async (args, token) =>
+            {
+                var summary = await controller.FillSpeakersFromLabelsAsync(args.RequireGuid("session_id"), null, token);
+                return McpToolResult.Json(new
+                {
+                    summary.Labeled, summary.Filled, summary.Changed, summary.Unmatched, summary.Skipped, summary.AgreementPercent,
+                    perSpeaker = summary.PerSpeaker.Select(item => new { item.Name, item.Lines })
+                });
+            },
+            ("session_id", "string", "Session GUID", true)),
         McpTool.Create("rename_speaker", "Rename a speaker throughout a session. Using another speaker's name merges the two (voice profiles combine).",
             async (args, token) =>
             {

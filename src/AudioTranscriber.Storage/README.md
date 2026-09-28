@@ -75,6 +75,9 @@ text or corrections. `CreateSpeaker` adds a user-named speaker without a voice
 profile. `MergeSpeakers` moves one speaker's rows and turns to another, removes the
 merged speaker row, renames the kept one, and optionally replaces the registry JSON,
 all in one transaction. `TranscriptRow.ManualSpeaker` exposes the manual flag.
+`ApplyVoiceFill` sets speakers found by matching each line's voice to the lines the
+user labeled; it marks those rows `voice_fill` (`TranscriptRow.VoiceFilled`) so later
+automatic assignments leave them alone, and never touches manual rows (schema version 5).
 
 Schema version 2 adds `segments.manual_speaker`. Version 1 did not record the
 origin of speaker assignments, so migration conservatively protects **all

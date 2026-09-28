@@ -7,9 +7,11 @@ namespace AudioTranscriber.Diarization;
 
 /// <summary>In-process engine for the isolated worker and tests, not UI-process inference.</summary>
 public sealed class SherpaDiarizationService(DiarizationModelPaths models, SpeakerMatchingOptions? matchingOptions = null)
-    : IDiarizationService, ISpeakerEnrollmentService
+    : IDiarizationService, ISpeakerEnrollmentService, ISpeakerEmbeddingService
 {
     public const int MaximumSeconds = 60;
+    public const int MaximumEmbeddingClips = 1000;
+    public const int MaximumEmbeddingClipSeconds = 30;
     public const string AlgorithmVersion = "sherpa-1.13.8-clean-registry-v1";
     private readonly SpeakerMatchingOptions options = matchingOptions ?? new();
     private readonly SemaphoreSlim gate = new(1, 1);
@@ -155,6 +157,68 @@ public sealed class SherpaDiarizationService(DiarizationModelPaths models, Speak
             throw new ArgumentException("Speaker enrollment requires a speaker ID and display name.");
     }
 
+    /// <summary>One voice fingerprint per clip, straight from the embedding model (no segmentation or clustering).</summary>
+    public async Task<IReadOnlyList<float[]?>> EmbedAsync(string audioPath, long sampleCount, IReadOnlyList<SpeakerEmbeddingClip> clips,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateEmbedding(audioPath, sampleCount, clips);
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            if (extractor is null)
+            {
+                await DiarizationModels.VerifyAsync(models, cancellationToken);
+                var config = new SpeakerEmbeddingExtractorConfig
+                {
+                    Model = Path.GetFullPath(models.EmbeddingModelPath),
+                    NumThreads = Math.Clamp(Environment.ProcessorCount / 2, 1, 8)
+                };
+                extractor = new SpeakerEmbeddingExtractor(config);
+                if (extractor.Dim != Embeddings.Dimension) throw new InvalidDataException("Native embedding model format is incompatible.");
+            }
+            await using var file = new FileStream(audioPath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, true);
+            if (file.Length != sampleCount * 2) throw new InvalidDataException("Embedding audio changed before reading.");
+            var result = new float[]?[clips.Count];
+            for (var index = 0; index < clips.Count; index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var clip = clips[index];
+                if (clip.SampleCount < 16000) continue;
+                var bytes = new byte[clip.SampleCount * 2];
+                file.Position = clip.StartSample * 2;
+                await file.ReadExactlyAsync(bytes, cancellationToken);
+                var samples = new float[clip.SampleCount];
+                for (var i = 0; i < samples.Length; i++) samples[i] = BinaryPrimitives.ReadInt16LittleEndian(bytes.AsSpan(i * 2, 2)) / 32768f;
+                using var stream = extractor.CreateStream();
+                stream.AcceptWaveform(16000, samples);
+                stream.InputFinished();
+                if (!extractor.IsReady(stream)) continue;
+                try { result[index] = Embeddings.Normalize(extractor.Compute(stream)); }
+                catch (InvalidDataException) { }
+            }
+            return result;
+        }
+        finally { gate.Release(); }
+    }
+
+    public static void ValidateEmbedding(string audioPath, long sampleCount, IReadOnlyList<SpeakerEmbeddingClip> clips)
+    {
+        if (clips is null || clips.Count is 0 or > MaximumEmbeddingClips || sampleCount <= 0 ||
+            clips.Any(clip => clip is null || clip.StartSample < 0 || clip.SampleCount is <= 0 or > MaximumEmbeddingClipSeconds * 16000 ||
+                              clip.StartSample + clip.SampleCount > sampleCount))
+            throw new ArgumentException("Voice fingerprints require bounded clips inside local mono16k PCM16 audio.");
+        LocalPaths.RequireFile(audioPath);
+        if (new FileInfo(audioPath).Length != sampleCount * 2)
+            throw new InvalidDataException("Embedding PCM16 size does not match the declared sample count.");
+    }
+
+    public static void ValidateEmbeddings(IReadOnlyList<float[]?> embeddings, int count)
+    {
+        if (embeddings is null || embeddings.Count != count) throw new InvalidDataException("Worker returned the wrong number of voice fingerprints.");
+        foreach (var vector in embeddings) if (vector is not null) Embeddings.Validate(vector);
+    }
+
     private async Task<(float[] Samples, LocalSpeakerTurn[] Turns)> SegmentAsync(DiarizationRequest request, CancellationToken cancellationToken)
     {
         if (diarizer is null)
@@ -169,7 +233,7 @@ public sealed class SherpaDiarizationService(DiarizationModelPaths models, Speak
             config.Clustering.NumClusters = -1;
             config.Clustering.Threshold = 0.5f;
             diarizer = new OfflineSpeakerDiarization(config);
-            extractor = new SpeakerEmbeddingExtractor(config.Embedding);
+            extractor ??= new SpeakerEmbeddingExtractor(config.Embedding);
             if (diarizer.SampleRate != 16000 || extractor.Dim != Embeddings.Dimension)
                 throw new InvalidDataException("Native diarization model format is incompatible.");
         }

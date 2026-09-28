@@ -713,6 +713,211 @@ public sealed class AppController : IAppController
     private static bool IsAutomaticName(string name) =>
         System.Text.RegularExpressions.Regex.IsMatch(name.Trim(), @"^Speaker \d+$");
 
+    private const int VoiceClipMinSamples = 16000, VoiceClipMaxSamples = 10 * 16000;
+    private const int VoiceBatchClips = 300, VoiceBatchSamples = 20 * 60 * 16000;
+    // A line takes the closest labeled speaker only when it clearly sounds like them and clearly not like the next best.
+    private const double VoiceMatchThreshold = 0.45, VoiceSoloThreshold = 0.55, VoiceMatchMargin = 0.05;
+    private static readonly long VoiceNeighborGapTicks = 3 * TimeSpan.TicksPerSecond;
+
+    /// <summary>
+    /// Uses every line the user labeled as a voice sample of that speaker, then gives each other line the labeled speaker
+    /// whose samples it sounds closest to. Lines the user labeled are never changed; unclear lines keep their label.
+    /// Tracks are matched by kind, so microphone lines are only filled when some microphone line is labeled.
+    /// </summary>
+    public async Task<SpeakerFillSummary> FillSpeakersFromLabelsAsync(Guid sessionId, IProgress<string>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!DiarizationModelsReady)
+            throw new InvalidOperationException("The speaker models aren't installed yet. They download automatically; you can also install them from Privacy / models.");
+        var session = Store.GetSession(sessionId);
+        var kinds = Store.GetTracks(sessionId).ToDictionary(track => track.Id, track => track.Kind);
+        var rows = await Task.Run(() => Store.EnumerateTranscript(sessionId)
+            .Where(row => kinds.GetValueOrDefault(row.TrackId) is "Loopback" or "Microphone" or "Imported" &&
+                          !row.Provenance.StartsWith("WebVTT ", StringComparison.Ordinal)).ToArray(), cancellationToken);
+        var labeled = rows.Where(row => row.ManualSpeaker && row.SpeakerId is not null).ToArray();
+        if (labeled.Length == 0)
+            throw new InvalidOperationException("Set the speaker on a few lines first (right-click a line → Set speaker). " +
+                "Those lines are the voice samples the rest of the recording is matched to.");
+        var labeledKinds = labeled.Select(row => kinds[row.TrackId]).ToHashSet();
+        var targets = rows.Where(row => labeledKinds.Contains(kinds[row.TrackId]) && !(row.ManualSpeaker && row.SpeakerId is null) &&
+                                        SampleSpan(row) >= VoiceClipMinSamples).ToArray();
+        var vectors = await EmbedRowsAsync(session, targets, progress, cancellationToken);
+
+        var examples = labeled.Where(row => vectors.GetValueOrDefault(row.Id) is not null).GroupBy(row => kinds[row.TrackId])
+            .ToDictionary(kind => kind.Key, kind => kind.GroupBy(row => row.SpeakerId!)
+                .ToDictionary(speaker => speaker.Key, speaker => speaker.Select(row => vectors[row.Id]!).ToArray()));
+        if (examples.Count == 0)
+            throw new InvalidOperationException("The lines you labeled are too short to learn voices from. Label a few longer lines " +
+                "(at least a second of speech each) and try again.");
+
+        // Leave-one-out: how often a labeled line, matched against the other labeled lines, lands on the speaker you chose.
+        int evaluated = 0, agreed = 0;
+        foreach (var row in labeled)
+        {
+            if (vectors.GetValueOrDefault(row.Id) is not { } vector || !examples.TryGetValue(kinds[row.TrackId], out var group) || group.Count < 2) continue;
+            evaluated++;
+            if (PickVoice(vector, group, vector) == row.SpeakerId) agreed++;
+        }
+
+        var assignments = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var row in rows)
+            if (!row.ManualSpeaker && examples.TryGetValue(kinds[row.TrackId], out var group) &&
+                vectors.GetValueOrDefault(row.Id) is { } vector && PickVoice(vector, group, null) is { } speaker)
+                assignments[row.Id] = speaker;
+        // Lines too short to fingerprint take the speaker of both neighbours on their track when those agree.
+        foreach (var track in rows.GroupBy(row => row.TrackId))
+        {
+            var ordered = track.OrderBy(row => row.StartTicks).ToArray();
+            string? Known(TranscriptRow row) => row.ManualSpeaker ? row.SpeakerId : assignments.GetValueOrDefault(row.Id);
+            for (var i = 1; i < ordered.Length - 1; i++)
+            {
+                var row = ordered[i];
+                if (row.ManualSpeaker || assignments.ContainsKey(row.Id) || vectors.ContainsKey(row.Id) ||
+                    !examples.ContainsKey(kinds[row.TrackId])) continue;
+                var (before, after) = (ordered[i - 1], ordered[i + 1]);
+                if (Known(before) is { } speaker && Known(after) == speaker &&
+                    row.StartTicks - before.EndTicks <= VoiceNeighborGapTicks && after.StartTicks - row.EndTicks <= VoiceNeighborGapTicks)
+                    assignments[row.Id] = speaker;
+            }
+        }
+
+        var changed = rows.Count(row => assignments.TryGetValue(row.Id, out var speaker) && speaker != row.SpeakerId);
+        var candidates = rows.Count(row => !row.ManualSpeaker && examples.ContainsKey(kinds[row.TrackId]));
+        await Task.Run(() => Store.ApplyVoiceFill(sessionId, assignments.Select(pair => (pair.Key, pair.Value)).ToArray()), CancellationToken.None);
+        TranscriptChanged?.Invoke(sessionId);
+        var names = Store.GetSpeakers(sessionId).ToDictionary(speaker => speaker.Id, speaker => speaker.Name.Trim());
+        var perSpeaker = assignments.Values.GroupBy(id => id).OrderByDescending(group => group.Count())
+            .Select(group => (names.GetValueOrDefault(group.Key, "Unknown"), group.Count())).ToArray();
+        var skipped = rows.Count(row => !row.ManualSpeaker && !examples.ContainsKey(kinds[row.TrackId]));
+        var summary = new SpeakerFillSummary(labeled.Length, assignments.Count, changed, candidates - assignments.Count, skipped,
+            evaluated >= 5 ? (int)Math.Round(100.0 * agreed / evaluated) : null, perSpeaker);
+        Notify($"Matched {summary.Filled:N0} line(s) to the speakers you labeled ({summary.Changed:N0} changed)" +
+            (perSpeaker.Length > 0 ? ": " + string.Join(", ", perSpeaker.Take(6).Select(item => $"{item.Item1} {item.Item2:N0}")) : "") + "." +
+            (summary.Unmatched > 0 ? $" {summary.Unmatched:N0} unclear line(s) kept their label; labeling a few of them and running this again teaches more voices." : "") +
+            (summary.AgreementPercent is { } agreement ? $" Check: your labeled lines matched their own speaker {agreement}% of the time." : "") +
+            (skipped > 0 ? $" {skipped:N0} line(s) on tracks with no labeled lines (for example the microphone) were left as they were." : ""));
+        return summary;
+    }
+
+    private static long SampleSpan(TranscriptRow row) => Math.Max(0, (row.EndTicks - row.StartTicks) * 16000 / TimeSpan.TicksPerSecond);
+
+    private static string? PickVoice(float[] vector, Dictionary<string, float[][]> speakers, float[]? skip)
+    {
+        var ranked = speakers.Select(speaker =>
+            {
+                var scores = speaker.Value.Where(example => !ReferenceEquals(example, skip)).Select(example => Dot(vector, example))
+                    .OrderByDescending(score => score).Take(3).ToArray();
+                return (Speaker: speaker.Key, Score: scores.Length == 0 ? double.NegativeInfinity : scores.Average());
+            })
+            .Where(item => !double.IsNegativeInfinity(item.Score)).OrderByDescending(item => item.Score).ToArray();
+        if (ranked.Length == 0) return null;
+        if (ranked.Length == 1) return ranked[0].Score >= VoiceSoloThreshold ? ranked[0].Speaker : null;
+        return ranked[0].Score >= VoiceMatchThreshold && ranked[0].Score - ranked[1].Score >= VoiceMatchMargin ? ranked[0].Speaker : null;
+    }
+
+    private static double Dot(float[] a, float[] b)
+    {
+        double sum = 0;
+        for (var i = 0; i < a.Length; i++) sum += (double)a[i] * b[i];
+        return sum;
+    }
+
+    // Fingerprints are cached per line in the session folder, so running the fill again after labeling more lines is quick.
+    private async Task<Dictionary<string, float[]?>> EmbedRowsAsync(StoredSession session, IReadOnlyList<TranscriptRow> rows,
+        IProgress<string>? progress, CancellationToken cancellationToken)
+    {
+        var cachePath = Path.Combine(session.Directory, "voice-fingerprints.json");
+        static string Key(TranscriptRow row) => $"{row.Id}:{row.TrackId:N}:{row.EndTicks - row.StartTicks}";
+        var cache = new Dictionary<string, string>(StringComparer.Ordinal);
+        try
+        {
+            if (File.Exists(cachePath) && new FileInfo(cachePath).Length < 256L * 1024 * 1024)
+                cache = JsonSerializer.Deserialize<Dictionary<string, string>>(await File.ReadAllTextAsync(cachePath, cancellationToken)) ?? cache;
+        }
+        catch (Exception error) when (error is IOException or JsonException or UnauthorizedAccessException) { }
+        var result = new Dictionary<string, float[]?>(StringComparer.Ordinal);
+        var missing = new List<TranscriptRow>();
+        foreach (var row in rows)
+        {
+            if (cache.TryGetValue(Key(row), out var encoded))
+            {
+                var vector = encoded.Length == 0 ? null : DecodeVector(encoded);
+                if (encoded.Length == 0 || vector is not null) { result[row.Id] = vector; continue; }
+            }
+            missing.Add(row);
+        }
+        if (missing.Count > 0)
+        {
+            await using var service = CreateDiarizer(session.Id);
+            if (service is not ISpeakerEmbeddingService embedder)
+                throw new InvalidOperationException("Voice matching is not available in this build.");
+            var chunks = new Dictionary<Guid, IReadOnlyList<StoredAudioChunk>>();
+            var work = Path.Combine(session.Directory, "work");
+            Directory.CreateDirectory(work);
+            var done = rows.Count - missing.Count;
+            for (var next = 0; next < missing.Count;)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                progress?.Report($"Listening to each line's voice: {done:N0} of {rows.Count:N0} lines…");
+                var path = Path.Combine(work, $"voices-{Guid.NewGuid():N}.pcm16");
+                var batch = new List<(TranscriptRow Row, SpeakerEmbeddingClip? Clip)>();
+                long samples = 0;
+                try
+                {
+                    await using (var output = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65_536, true))
+                        while (next < missing.Count && batch.Count < VoiceBatchClips && samples < VoiceBatchSamples)
+                        {
+                            var row = missing[next++];
+                            if (!chunks.TryGetValue(row.TrackId, out var trackChunks)) chunks[row.TrackId] = trackChunks = Store.GetChunks(row.TrackId);
+                            var added = await AppendRowAudioAsync(output, trackChunks, row.StartTicks, row.EndTicks, VoiceClipMaxSamples, 0, cancellationToken);
+                            batch.Add((row, added >= VoiceClipMinSamples ? new SpeakerEmbeddingClip(samples, (int)added) : null));
+                            samples += added;
+                        }
+                    var clips = batch.Where(item => item.Clip is not null).Select(item => item.Clip!).ToArray();
+                    var embedded = clips.Length == 0 ? [] : await embedder.EmbedAsync(path, samples, clips, cancellationToken);
+                    var index = 0;
+                    foreach (var (row, clip) in batch)
+                    {
+                        var vector = clip is null ? null : embedded[index++];
+                        result[row.Id] = vector;
+                        cache[Key(row)] = vector is null ? "" : EncodeVector(vector);
+                    }
+                    done += batch.Count;
+                }
+                finally { if (File.Exists(path)) File.Delete(path); }
+            }
+            try
+            {
+                var partial = cachePath + ".partial";
+                await File.WriteAllTextAsync(partial, JsonSerializer.Serialize(cache), CancellationToken.None);
+                File.Move(partial, cachePath, true);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+        }
+        progress?.Report($"Matching {rows.Count:N0} lines to the speakers you labeled…");
+        return result;
+    }
+
+    private static string EncodeVector(float[] vector)
+    {
+        var bytes = new byte[vector.Length * 4];
+        Buffer.BlockCopy(vector, 0, bytes, 0, bytes.Length);
+        return Convert.ToBase64String(bytes);
+    }
+
+    private static float[]? DecodeVector(string encoded)
+    {
+        try
+        {
+            var bytes = Convert.FromBase64String(encoded);
+            if (bytes.Length != 256 * 4) return null;
+            var vector = new float[256];
+            Buffer.BlockCopy(bytes, 0, vector, 0, bytes.Length);
+            return vector.All(float.IsFinite) ? vector : null;
+        }
+        catch (FormatException) { return null; }
+    }
+
     private static bool SameName(string a, string b) => string.Equals(a.Trim(), b.Trim(), StringComparison.OrdinalIgnoreCase);
 
     private void StartBackground(Func<CancellationToken, Task> work)

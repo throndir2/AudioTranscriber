@@ -6,6 +6,9 @@ namespace AudioTranscriber.Diarization;
 public sealed record DiarizationWorkerRequest(int Version, DiarizationRequest Audio, DiarizationModelPaths Models,
     SpeakerRegistrySnapshot Registry, SpeakerMatchingOptions Matching, SpeakerEnrollment? Enrollment = null);
 public sealed record DiarizationWorkerResponse(int Version, DiarizationResult Result);
+public sealed record SpeakerEmbeddingWorkerRequest(int Version, string AudioPath, long SampleCount,
+    SpeakerEmbeddingClip[] Clips, DiarizationModelPaths Models);
+public sealed record SpeakerEmbeddingWorkerResponse(int Version, float[]?[] Embeddings);
 
 public static class DiarizationWorkerProtocol
 {

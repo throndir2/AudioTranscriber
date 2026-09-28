@@ -21,7 +21,7 @@ public sealed record TranscriptCursor(long StartTicks, string Id);
 public sealed record TranscriptRow(
     string Id, Guid SessionId, Guid TrackId, long StartTicks, long EndTicks,
     string RawText, string? Correction, string? SpeakerId, string SpeakerName,
-    string TimingGranularity, string Provenance, bool Uncertain, bool ManualSpeaker = false)
+    string TimingGranularity, string Provenance, bool Uncertain, bool ManualSpeaker = false, bool VoiceFilled = false)
 {
     public string Text => Correction ?? RawText;
     public string Timestamp => $"{(long)TimeSpan.FromTicks(StartTicks).TotalHours:00}:{TimeSpan.FromTicks(StartTicks).Minutes:00}:{TimeSpan.FromTicks(StartTicks).Seconds:00}";

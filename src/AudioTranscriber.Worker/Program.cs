@@ -24,6 +24,16 @@ internal static class Program
                     return 1;
                 }
             }
+            if (args is ["--embed", var embedRequestPath, var embedResultPath])
+            {
+                var embed = await DiarizationWorkerProtocol.ReadAsync<SpeakerEmbeddingWorkerRequest>(embedRequestPath);
+                if (embed.Version != DiarizationWorkerProtocol.Version) throw new InvalidDataException("Unsupported worker protocol.");
+                await using var embedder = new SherpaDiarizationService(embed.Models);
+                var vectors = await embedder.EmbedAsync(embed.AudioPath, embed.SampleCount, embed.Clips);
+                SherpaDiarizationService.ValidateEmbeddings(vectors, embed.Clips.Length);
+                await DiarizationWorkerProtocol.WriteAsync(embedResultPath, new SpeakerEmbeddingWorkerResponse(1, vectors.ToArray()));
+                return 0;
+            }
             if (args is not ["--diarize", var requestPath, var resultPath])
             {
                 Console.Error.WriteLine("Usage: AudioTranscriber.Worker --diarize <local-request.json> <new-local-result.json> OR --install-models <local-model-directory>");

@@ -65,3 +65,13 @@ public interface ISpeakerEnrollmentService
         DiarizationRequest request, SpeakerRegistrySnapshot registry, SpeakerEnrollment enrollment,
         CancellationToken cancellationToken = default);
 }
+
+// A sample range of one local mono16k PCM16 file.
+public sealed record SpeakerEmbeddingClip(long StartSample, int SampleCount);
+
+// Voice fingerprints (normalized, 256 values) for clips; null where a clip has too little usable speech.
+public interface ISpeakerEmbeddingService
+{
+    Task<IReadOnlyList<float[]?>> EmbedAsync(string audioPath, long sampleCount, IReadOnlyList<SpeakerEmbeddingClip> clips,
+        CancellationToken cancellationToken = default);
+}

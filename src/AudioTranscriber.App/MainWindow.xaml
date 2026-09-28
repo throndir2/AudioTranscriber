@@ -407,6 +407,8 @@
                                 <Button DockPanel.Dock="Right" Content="Stop live file" Command="{Binding StopLiveFileCommand}" />
                                 <Button DockPanel.Dock="Right" Content="_Live file" Command="{Binding LiveMirrorSelectedCommand}" ToolTip="Continuously mirror this session's transcript to the unlocked live text file chosen on Record / import." />
                                 <Button DockPanel.Dock="Right" Content="Analyze speakers" Command="{Binding DiarizeCommand}" ToolTip="Re-checks every line's speaker with the current voice profiles (including voices learned from lines you labeled). Runs locally." />
+                                <Button DockPanel.Dock="Right" Content="Fill speakers from my labels" Command="{Binding FillSpeakersCommand}" Style="{StaticResource PrimaryButton}"
+                                        ToolTip="Label a few lines for each person first (right-click → Set speaker), then press this: every other line in the whole recording gets the labeled person whose voice it sounds closest to. Lines you labeled are never changed; unclear lines keep their label (label a few of those and run it again). Runs locally." />
                                 <TextBlock Text="{Binding TranscriptSummary}" FontSize="12" TextTrimming="CharacterEllipsis" Foreground="{StaticResource Muted}" ToolTip="{Binding TranscriptSummary}" />
                             </DockPanel>
                             <DataGrid x:Name="TranscriptGrid" Grid.Row="2" ItemsSource="{Binding Transcript}" SelectedItem="{Binding SelectedRow}"

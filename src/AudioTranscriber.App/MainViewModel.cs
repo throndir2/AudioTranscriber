@@ -110,6 +110,11 @@ public sealed class MainViewModel : ObservableObject
         if (controller.WhisperModelPath is { } currentModel) { localModel = DescribeModel(currentModel); shownWhisperPath = currentModel; }
         DiarizeCommand = new AsyncCommand(() => RunForSessionAsync("Running local speaker analysis…",
             (id, token) => controller.DiarizeSessionAsync(id, token)), () => CanWorkWithSession() && controller.DiarizationModelsReady);
+        FillSpeakersCommand = new AsyncCommand(() => RunForSessionAsync("Listening to each line's voice…", async (id, token) =>
+        {
+            try { await controller.FillSpeakersFromLabelsAsync(id, new Progress<string>(message => SetStatus(message)), token); }
+            catch (InvalidOperationException error) { SetStatus(error.Message, true); }
+        }), () => CanWorkWithSession() && controller.DiarizationModelsReady);
         PauseCommand = new RelayCommand(() => SessionAction(controller.PauseTranscription,
             "Transcription paused; recording, if active, continues."), () => SelectedSession is not null && !closing);
         ResumeCommand = new RelayCommand(() => SessionAction(controller.ResumeTranscription,
@@ -429,6 +434,7 @@ public sealed class MainViewModel : ObservableObject
     public ICommand InstallVcRuntimeCommand { get; }
     public ICommand RecheckPrerequisitesCommand { get; }
     public ICommand DiarizeCommand { get; }
+    public ICommand FillSpeakersCommand { get; }
     public ICommand PauseCommand { get; }
     public ICommand ResumeCommand { get; }
     public ICommand CancelJobsCommand { get; }
