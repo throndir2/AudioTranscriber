@@ -9,7 +9,7 @@ public sealed record CaptureTrackOptions(Guid TrackId, string DeviceId, bool Loo
 public sealed record CaptureOptions(string RootDirectory, Guid SessionId, CaptureTrackOptions Output,
     CaptureTrackOptions? Microphone = null, long QueueByteLimit = 16 * 1024 * 1024,
     long MinimumFreeBytes = 128 * 1024 * 1024, int MaxChunkSeconds = 30, long MaxChunkBytes = 64 * 1024 * 1024,
-    int PauseSplitAfterMilliseconds = 0);
+    int PauseSplitAfterMilliseconds = 0, long SessionOffsetTicks = 0);
 public sealed record TrackLevel(Guid TrackId, float Peak, float Rms);
 public sealed record CapturedTrack(Guid TrackId, string Name, string DeviceId, bool IsLoopback, NativeWaveFormat Format);
 
@@ -60,7 +60,8 @@ public sealed class CaptureSession : IAsyncDisposable
             SetState(RecordingState.Starting);
             Directory.CreateDirectory(Path.GetFullPath(options.RootDirectory));
             LocalMedia.CheckSpace(options.RootDirectory, options.MinimumFreeBytes);
-            SessionQpcOrigin100ns = Qpc100ns();
+            // A continued session starts its new audio at SessionOffsetTicks on the existing session timeline.
+            SessionQpcOrigin100ns = Qpc100ns() - Math.Max(0, options.SessionOffsetTicks);
             var choices = options.Microphone is null ? new[] { options.Output } : new[] { options.Output, options.Microphone };
             foreach (var choice in choices)
             {

@@ -84,11 +84,15 @@ public sealed class HeadlessMcpTools
                 if (microphone == "default") microphone = controller.GetMicrophoneDevices().FirstOrDefault()?.Id
                     ?? throw new InvalidOperationException("No microphone endpoint.");
                 peakOutput = peakMicrophone = 0;
-                var session = await controller.StartRecordingAsync(args.String("name") ?? $"MCP recording {DateTime.Now:HH:mm:ss}",
-                    output, microphone, args.String("provider_id") ?? "local-parakeet", args.String("language") ?? "en",
-                    args.Bool("cloud_consent", false), args.Bool("reduce_echo", true), token);
+                var continued = args.String("session_id");
+                var session = continued is { Length: > 0 }
+                    ? await controller.ContinueRecordingAsync(Guid.Parse(continued), output, microphone, args.Bool("reduce_echo", true), token)
+                    : await controller.StartRecordingAsync(args.String("name") ?? $"MCP recording {DateTime.Now:HH:mm:ss}",
+                        output, microphone, args.String("provider_id") ?? "local-parakeet", args.String("language") ?? "en",
+                        args.Bool("cloud_consent", false), args.Bool("reduce_echo", true), token);
                 return McpToolResult.Json(Describe(session));
             },
+            ("session_id", "string", "Continue this existing session (new audio follows its current end; name/provider/language/consent are the session's own). Omit to start a new session.", false),
             ("name", "string", "Session name", false),
             ("output_device_id", "string", "Output endpoint id from list_devices (default: Windows default output)", false),
             ("microphone_device_id", "string", "Microphone id, or 'default'; omit to skip the microphone track", false),
@@ -215,6 +219,14 @@ public sealed class HeadlessMcpTools
                 return McpToolResult.Json(await controller.DeleteSessionsAsync(ids, token));
             },
             ("session_ids", "string", "Comma-separated session GUIDs", true)),
+        McpTool.Create("merge_sessions", "Stitch sessions into the earliest one: later recordings' audio, transcript and speakers follow it on one timeline. The other sessions are removed.",
+            async (args, token) =>
+            {
+                var ids = args.RequireString("session_ids").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(Guid.Parse).ToArray();
+                return McpToolResult.Json(Describe(await controller.MergeSessionsAsync(ids, token)));
+            },
+            ("session_ids", "string", "Comma-separated session GUIDs (two or more)", true)),
         McpTool.Create("rename_speaker", "Rename a speaker throughout a session. Using another speaker's name merges the two (voice profiles combine).",
             async (args, token) =>
             {

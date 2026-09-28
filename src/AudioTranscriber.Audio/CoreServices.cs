@@ -108,7 +108,8 @@ public sealed class WasapiAudioCaptureService : Core.IAudioCaptureService
         var mic = options.MicrophoneDeviceId is null ? null :
             new CaptureTrackOptions(options.MicrophoneTrackId ?? Guid.NewGuid(), options.MicrophoneDeviceId, false);
         capture = new(new(options.OutputDirectory, options.SessionId, output, mic, options.QueueCapacityBytes,
-            options.MinimumFreeBytes, options.ChunkDurationSeconds, options.MaximumChunkBytes, options.PauseSplitAfterMilliseconds));
+            options.MinimumFreeBytes, options.ChunkDurationSeconds, options.MaximumChunkBytes, options.PauseSplitAfterMilliseconds,
+            options.SessionOffsetTicks));
         capture.ChunkSealed += chunk => { OriginalSealed?.Invoke(chunk); ChunkSealed?.Invoke(chunk.ToCore()); };
         capture.LevelChanged += level => Levels?.Invoke(new(level.TrackId,
             CaptureSession.Qpc100ns() - capture.SessionQpcOrigin100ns, level.Peak, level.Rms));
