@@ -5,7 +5,7 @@ namespace AudioTranscriber.Storage;
 
 public sealed class LibraryStore
 {
-    private const int CurrentSchemaVersion = 4;
+    private const int CurrentSchemaVersion = 5;
     private readonly string connectionString;
     private readonly object gate = new();
     public string RootDirectory { get; }
@@ -57,6 +57,14 @@ public sealed class LibraryStore
                 UPDATE sessions SET processing_state='Paused'
                     WHERE EXISTS(SELECT 1 FROM jobs WHERE session_id=sessions.id AND state='Paused');
                 PRAGMA user_version=4;
+                """);
+        }
+        if (schemaVersion < 5)
+        {
+            // Speakers matched to the user's labeled lines by voice; background speaker analysis leaves them alone.
+            Execute(connection, """
+                ALTER TABLE segments ADD COLUMN voice_fill INTEGER NOT NULL DEFAULT 0 CHECK(voice_fill IN (0,1));
+                PRAGMA user_version=5;
                 """);
         }
         transaction.Commit();
@@ -539,7 +547,7 @@ public sealed class LibraryStore
         Write("UPDATE segments SET correction=$text WHERE id=$id", ("$text", correction), ("$id", id));
 
     public void AssignSpeaker(string id, string? speakerId) =>
-        Write("UPDATE segments SET speaker_id=$speaker,uncertain=0,manual_speaker=1 WHERE id=$id", ("$speaker", speakerId), ("$id", id));
+        Write("UPDATE segments SET speaker_id=$speaker,uncertain=0,manual_speaker=1,voice_fill=0 WHERE id=$id", ("$speaker", speakerId), ("$id", id));
 
     public void AssignSpeaker(Guid sessionId, IReadOnlyCollection<string> segmentIds, string? speakerId)
     {
@@ -549,7 +557,7 @@ public sealed class LibraryStore
             using var connection = Open();
             using var transaction = connection.BeginTransaction();
             foreach (var id in segmentIds)
-                Execute(connection, "UPDATE segments SET speaker_id=$speaker,uncertain=0,manual_speaker=1 WHERE id=$id AND session_id=$session",
+                Execute(connection, "UPDATE segments SET speaker_id=$speaker,uncertain=0,manual_speaker=1,voice_fill=0 WHERE id=$id AND session_id=$session",
                     ("$speaker", speakerId), ("$id", id), ("$session", sessionId));
             transaction.Commit();
         }
@@ -629,9 +637,28 @@ public sealed class LibraryStore
             using var transaction = connection.BeginTransaction();
             foreach (var assignment in assignments)
                 Execute(connection, """
-                    UPDATE segments SET speaker_id=$speaker,uncertain=$uncertain WHERE id=$id AND manual_speaker=0
+                    UPDATE segments SET speaker_id=$speaker,uncertain=$uncertain WHERE id=$id AND manual_speaker=0 AND voice_fill=0
                     """, ("$speaker", assignment.SpeakerId), ("$uncertain", assignment.Uncertain), ("$id", assignment.SegmentId));
             transaction.Commit();
+        }
+    }
+
+    /// <summary>Sets speakers found by matching voices to the user's labeled lines. Manual rows are never changed.</summary>
+    public int ApplyVoiceFill(Guid sessionId, IReadOnlyList<(string SegmentId, string SpeakerId)> assignments)
+    {
+        ArgumentNullException.ThrowIfNull(assignments);
+        lock (gate)
+        {
+            using var connection = Open();
+            using var transaction = connection.BeginTransaction();
+            var count = 0;
+            foreach (var (segment, speaker) in assignments)
+                count += Execute(connection, """
+                    UPDATE segments SET speaker_id=$speaker,uncertain=0,voice_fill=1
+                    WHERE id=$id AND session_id=$session AND manual_speaker=0
+                    """, ("$speaker", speaker), ("$id", segment), ("$session", sessionId));
+            transaction.Commit();
+            return count;
         }
     }
 
@@ -769,7 +796,7 @@ public sealed class LibraryStore
     private static TranscriptRow ReadTranscript(SqliteDataReader r) =>
         new(S(r, "id"), G(r, "session_id"), G(r, "track_id"), L(r, "start_ticks"), L(r, "end_ticks"),
             S(r, "raw_text"), N(r, "correction"), N(r, "speaker_id"), S(r, "speaker_name"), S(r, "granularity"),
-            S(r, "provenance"), L(r, "uncertain") != 0, L(r, "manual_speaker") != 0);
+            S(r, "provenance"), L(r, "uncertain") != 0, L(r, "manual_speaker") != 0, L(r, "voice_fill") != 0);
 
     private const string TranscriptSelect = """
         SELECT t.*,coalesce(s.name,CASE WHEN t.speaker_id IS NOT NULL THEN t.speaker_id WHEN (SELECT kind FROM tracks WHERE id=t.track_id)='Microphone' THEN 'Me (mic)' ELSE 'Unknown' END) AS speaker_name

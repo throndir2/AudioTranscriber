@@ -10,6 +10,9 @@ public sealed record MediaProbeSummary(string Path, double DurationSeconds, IRea
 public sealed record AppNotification(string Message, bool IsError = false);
 public sealed record CaptureMeter(double Output, double Microphone);
 public sealed record SessionDeletion(int Deleted, IReadOnlyList<string> LeftoverFolders);
+// Result of matching unlabeled lines to the speakers of the lines the user labeled.
+public sealed record SpeakerFillSummary(int Labeled, int Filled, int Changed, int Unmatched, int Skipped, int? AgreementPercent,
+    IReadOnlyList<(string Name, int Lines)> PerSpeaker);
 
 public interface IAppController : IAsyncDisposable
 {
@@ -59,6 +62,9 @@ public interface IAppController : IAsyncDisposable
     Task FetchTeamsTranscriptAsync(Guid sessionId, TeamsTranscriptRequest request,
         Func<DeviceSignInPrompt, Task> showSignIn, CancellationToken cancellationToken = default);
     Task DiarizeSessionAsync(Guid sessionId, CancellationToken cancellationToken = default);
+    // Gives every line you didn't label the labeled speaker it sounds closest to; your own labels are never changed.
+    Task<SpeakerFillSummary> FillSpeakersFromLabelsAsync(Guid sessionId, IProgress<string>? progress = null,
+        CancellationToken cancellationToken = default);
     // Finds a session speaker by name (case-insensitive) or creates a user-named one.
     StoredSpeaker GetOrCreateSpeaker(Guid sessionId, string name);
     // Manually labels rows (null = Unknown). With speaker models installed, the rows' voice is learned in the background.

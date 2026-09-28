@@ -249,7 +249,7 @@ public sealed class DiarizationPersistenceTests : IDisposable
         store.AssignSpeaker("legacy-name", "chosen");
         store.AssignSpeaker("legacy-unknown", null);
         store.CorrectSegment("legacy-name", "legacy dungeon");
-        ExecuteSql("DROP TABLE job_attempts; ALTER TABLE segments DROP COLUMN manual_speaker; ALTER TABLE sessions DROP COLUMN processing_state; PRAGMA user_version=1;");
+        ExecuteSql("DROP TABLE job_attempts; ALTER TABLE segments DROP COLUMN manual_speaker; ALTER TABLE segments DROP COLUMN voice_fill; ALTER TABLE sessions DROP COLUMN processing_state; PRAGMA user_version=1;");
 
         var stores = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => Task.Run(() => new LibraryStore(root))));
         var reopened = stores[0];
@@ -262,16 +262,16 @@ public sealed class DiarizationPersistenceTests : IDisposable
         Assert.Null(rows["legacy-unknown"].SpeakerId);
         Assert.Equal("auto", rows["new"].SpeakerId);
         Assert.Equal("legacy-name", Assert.Single(reopened.GetTranscriptPage(session.Id, "dungeon")).Id);
-        Assert.Equal(4L, ScalarSql("PRAGMA user_version"));
+        Assert.Equal(5L, ScalarSql("PRAGMA user_version"));
         Assert.Equal(3, new LibraryStore(root).GetTranscriptPage(session.Id).Count);
     }
 
     [Fact]
     public void NewerSchemaVersionIsRejectedWithoutDowngrading()
     {
-        ExecuteSql("PRAGMA user_version=5");
+        ExecuteSql("PRAGMA user_version=6");
         Assert.Throws<InvalidDataException>(() => new LibraryStore(root));
-        Assert.Equal(5L, ScalarSql("PRAGMA user_version"));
+        Assert.Equal(6L, ScalarSql("PRAGMA user_version"));
     }
 
     [Fact]
@@ -496,7 +496,7 @@ public sealed class DiarizationPersistenceTests : IDisposable
         store.AssignSpeaker("manual", "chosen");
         QueueChunk();
         var job = Assert.IsType<StoredJob>(store.ClaimNextJob());
-        ExecuteSql("DROP TABLE job_attempts; ALTER TABLE sessions DROP COLUMN processing_state; PRAGMA user_version=2;");
+        ExecuteSql("DROP TABLE job_attempts; ALTER TABLE segments DROP COLUMN voice_fill; ALTER TABLE sessions DROP COLUMN processing_state; PRAGMA user_version=2;");
 
         var reopened = new LibraryStore(root);
         reopened.ApplyAutomaticSpeakerAssignments([("automatic", "auto", false), ("manual", "auto", false)]);
@@ -505,7 +505,7 @@ public sealed class DiarizationPersistenceTests : IDisposable
         var rows = reopened.GetTranscriptPage(session.Id).ToDictionary(row => row.Id);
         Assert.Equal("auto", rows["automatic"].SpeakerId);
         Assert.Equal("chosen", rows["manual"].SpeakerId);
-        Assert.Equal(4L, ScalarSql("PRAGMA user_version"));
+        Assert.Equal(5L, ScalarSql("PRAGMA user_version"));
         Assert.Equal(1L, ScalarSql("SELECT count(*) FROM job_attempts WHERE job_id=$id", ("$id", job.Id)));
         Assert.Equal("Running", Assert.Single(new LibraryStore(root).GetJobs(session.Id)).State);
     }

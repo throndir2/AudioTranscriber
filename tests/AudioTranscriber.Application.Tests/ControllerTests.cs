@@ -250,6 +250,36 @@ public sealed class ControllerTests
     }
 
     [Fact]
+    public async Task FillSpeakersMatchesUnlabeledLinesToTheVoicesTheUserLabeled()
+    {
+        await using var fixture = new Fixture();
+        fixture.Provider.SegmentMilliseconds = 1500;
+        fixture.Provider.Release.TrySetResult();
+        var session = await fixture.App.StartRecordingAsync("Synthetic voices", "synthetic-output", null, "local-whisper", "en", false);
+        float[] Voice(double amplitude) => Enumerable.Range(0, 32000).Select(i => (float)(amplitude * Math.Sin(2 * Math.PI * 300 * i / 16000.0))).ToArray();
+        foreach (var loud in new[] { true, false, true, false, true, false }) fixture.Capture.EmitAudio(fixture.Capture.TrackId, Voice(loud ? 0.5 : 0.05));
+        await fixture.App.StopRecordingAsync();
+        await UntilAsync(() => fixture.App.Store.GetProgress(session.Id) is { Pending: 0, Running: 0, Succeeded: > 0 }, 30);
+        var rows = fixture.App.Store.GetTranscriptPage(session.Id);
+        var progress = fixture.App.Store.GetProgress(session.Id);
+        Assert.True(rows.Count >= 6, $"{rows.Count} rows; {progress}; " + string.Join(" | ", fixture.App.Store.GetJobs(session.Id).Select(job => job.State + " " + job.Error)));
+        var alice = fixture.App.GetOrCreateSpeaker(session.Id, "Alice");
+        var bob = fixture.App.GetOrCreateSpeaker(session.Id, "Bob");
+        fixture.App.AssignSpeaker(session.Id, [rows[0].Id], alice.Id);
+        fixture.App.AssignSpeaker(session.Id, [rows[1].Id], bob.Id);
+
+        var summary = await fixture.App.FillSpeakersFromLabelsAsync(session.Id);
+
+        var filled = fixture.App.Store.GetTranscriptPage(session.Id);
+        Assert.Equal(["Alice", "Bob", "Alice", "Bob", "Alice", "Bob"], filled.Take(6).Select(row => row.SpeakerName));
+        Assert.All(filled.Skip(2).Take(4), row => Assert.True(row.VoiceFilled && !row.ManualSpeaker));
+        Assert.True(summary.Filled >= 4);
+        // Background speaker analysis must not undo the fill.
+        fixture.App.Store.ApplyAutomaticSpeakerAssignments([(filled[2].Id, null, true)]);
+        Assert.Equal("Alice", fixture.App.Store.GetTranscriptPage(session.Id)[2].SpeakerName);
+    }
+
+    [Fact]
     public async Task MicrophoneWaitsForSpeakerAudioAndHasItsEchoRemoved()
     {
         await using var fixture = new Fixture();
@@ -431,6 +461,7 @@ public sealed class ControllerTests
         private int calls;
         public int Calls => Volatile.Read(ref calls);
         public bool WasCanceled { get; private set; }
+        public int SegmentMilliseconds { get; set; } = 100;
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public ConcurrentDictionary<Guid, double> TailDecibels { get; } = new();
         public ProviderDescriptor Descriptor { get; } = new(id, "Synthetic test provider", "no-model",
@@ -447,13 +478,13 @@ public sealed class ControllerTests
             catch (OperationCanceledException) { WasCanceled = true; throw; }
             var start = request.CoreStartSample * 1000 / 16000 + 100;
             return new(id, "synthetic", TranscriptionStatus.Succeeded,
-                [new("hello", start, start + 100, TimingGranularity.Word, [new("hello", start, start + 100)])],
+                [new("hello", start, start + SegmentMilliseconds, TimingGranularity.Word, [new("hello", start, start + SegmentMilliseconds)])],
                 "{\"synthetic\":true}");
         }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class FakeDiarizer : IDiarizationService
+    private sealed class FakeDiarizer : IDiarizationService, ISpeakerEmbeddingService
     {
         public Task<DiarizationResult> DiarizeAsync(DiarizationRequest request, SpeakerRegistrySnapshot registry,
             CancellationToken cancellationToken = default)
@@ -471,6 +502,21 @@ public sealed class ControllerTests
             return Task.FromResult(new DiarizationResult(
                 [new(request.TrackId, request.SessionStartTicks, end, speaker.Identity.Id)],
                 new(request.SessionId, registry.Revision + 1, [speaker])));
+        }
+        // Loud clips are one voice, quiet clips another.
+        public async Task<IReadOnlyList<float[]?>> EmbedAsync(string audioPath, long sampleCount, IReadOnlyList<SpeakerEmbeddingClip> clips,
+            CancellationToken cancellationToken = default)
+        {
+            var bytes = await File.ReadAllBytesAsync(audioPath, cancellationToken);
+            return clips.Select(clip =>
+            {
+                double sum = 0;
+                for (var i = 0; i < clip.SampleCount; i++)
+                    sum += Math.Pow(BitConverter.ToInt16(bytes, (int)(clip.StartSample + i) * 2) / 32768.0, 2);
+                var vector = new float[256];
+                vector[Math.Sqrt(sum / clip.SampleCount) > 0.1 ? 0 : 1] = 1;
+                return (float[]?)vector;
+            }).ToArray();
         }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }

@@ -4,7 +4,7 @@ using AudioTranscriber.Core;
 namespace AudioTranscriber.Diarization;
 
 /// <summary>Production boundary: cancellation terminates only this service's owned native worker tree.</summary>
-public sealed class WorkerDiarizationService : IDiarizationService, ISpeakerEnrollmentService
+public sealed class WorkerDiarizationService : IDiarizationService, ISpeakerEnrollmentService, ISpeakerEmbeddingService
 {
     private readonly string executable;
     private readonly string? workerAssembly;
@@ -54,12 +54,34 @@ public sealed class WorkerDiarizationService : IDiarizationService, ISpeakerEnro
         return RunAsync(request, registry, enrollment, cancellationToken);
     }
 
+    public async Task<IReadOnlyList<float[]?>> EmbedAsync(string audioPath, long sampleCount, IReadOnlyList<SpeakerEmbeddingClip> clips,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        SherpaDiarizationService.ValidateEmbedding(audioPath, sampleCount, clips);
+        var response = await RunWorkerAsync<SpeakerEmbeddingWorkerRequest, SpeakerEmbeddingWorkerResponse>("--embed",
+            new(1, Path.GetFullPath(audioPath), sampleCount, clips.ToArray(), models), cancellationToken);
+        if (response.Version != DiarizationWorkerProtocol.Version) throw new InvalidDataException("Unsupported diarization worker protocol.");
+        SherpaDiarizationService.ValidateEmbeddings(response.Embeddings, clips.Count);
+        return response.Embeddings;
+    }
+
     private async Task<DiarizationResult> RunAsync(DiarizationRequest request, SpeakerRegistrySnapshot registry,
         SpeakerEnrollment? enrollment, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
         SherpaDiarizationService.ValidateRequest(request, registry);
         CoreRegistrySerializer.ToState(registry);
+        var response = await RunWorkerAsync<DiarizationWorkerRequest, DiarizationWorkerResponse>("--diarize",
+            new(1, request with { AudioPath = Path.GetFullPath(request.AudioPath) }, models, registry, matching, enrollment), cancellationToken);
+        if (response.Version != DiarizationWorkerProtocol.Version)
+            throw new InvalidDataException("Unsupported diarization worker protocol.");
+        DiarizationWorkerProtocol.ValidateResult(response.Result, request, registry.Revision);
+        return response.Result;
+    }
+
+    private async Task<TResponse> RunWorkerAsync<TRequest, TResponse>(string mode, TRequest workerRequest, CancellationToken cancellationToken)
+    {
         using var deadline = new CancellationTokenSource(timeout);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, shutdown.Token, deadline.Token);
         await gate.WaitAsync(linked.Token);
@@ -70,9 +92,7 @@ public sealed class WorkerDiarizationService : IDiarizationService, ISpeakerEnro
             Directory.CreateDirectory(jobDirectory);
             var requestPath = Path.Combine(jobDirectory, "request.json");
             var resultPath = Path.Combine(jobDirectory, "result.json");
-            await DiarizationWorkerProtocol.WriteAsync(requestPath,
-                new DiarizationWorkerRequest(1, request with { AudioPath = Path.GetFullPath(request.AudioPath) },
-                    models, registry, matching, enrollment), linked.Token);
+            await DiarizationWorkerProtocol.WriteAsync(requestPath, workerRequest, linked.Token);
             using var process = new Process
             {
                 StartInfo = new ProcessStartInfo
@@ -95,7 +115,7 @@ public sealed class WorkerDiarizationService : IDiarizationService, ISpeakerEnro
             foreach (var name in inherited.Keys.Where(name => !runtimeKeys.Contains(name)).ToArray())
                 inherited.Remove(name);
             if (workerAssembly is not null) process.StartInfo.ArgumentList.Add(workerAssembly);
-            process.StartInfo.ArgumentList.Add("--diarize");
+            process.StartInfo.ArgumentList.Add(mode);
             process.StartInfo.ArgumentList.Add(requestPath);
             process.StartInfo.ArgumentList.Add(resultPath);
             linked.Token.ThrowIfCancellationRequested();
@@ -114,11 +134,7 @@ public sealed class WorkerDiarizationService : IDiarizationService, ISpeakerEnro
                 linked.Token.ThrowIfCancellationRequested();
                 if (process.ExitCode != 0)
                     throw new InvalidOperationException($"Local diarization worker failed (exit {process.ExitCode}). Check installed models/runtime; no audio was uploaded.");
-                var response = await DiarizationWorkerProtocol.ReadAsync<DiarizationWorkerResponse>(resultPath, linked.Token);
-                if (response.Version != DiarizationWorkerProtocol.Version)
-                    throw new InvalidDataException("Unsupported diarization worker protocol.");
-                DiarizationWorkerProtocol.ValidateResult(response.Result, request, registry.Revision);
-                return response.Result;
+                return await DiarizationWorkerProtocol.ReadAsync<TResponse>(resultPath, linked.Token);
             }
             finally
             {
