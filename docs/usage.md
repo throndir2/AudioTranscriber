@@ -21,7 +21,10 @@ recording's session name), a **Record** quick-start button (or **Stop recording*
 while capturing), **Restart to update** when an update is staged, and the window
 buttons. Drag the title bar to move the window; double-click it to maximize. The
 session list is on the left (drag its edge to resize), and the tabs fill the rest.
-Right-click a session (or select it and press **Delete**) to delete it; the trash
+Right-click a session (or select it and press **Delete**) to delete it. Shift-click
+selects a range of sessions and Ctrl-click adds or removes one; right-click the
+selection to **Merge N selected sessions…** or **Delete N selected sessions…** (Delete
+works too). The trash
 button above the list opens **Delete sessions**, where you can check sessions by
 hand or check everything older than a week, 30/90 days, 6 months, or a year, and
 see how much disk space they use. Deleting removes the session's transcript,

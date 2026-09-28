@@ -25,6 +25,7 @@ public partial class MainWindow : Window
         ApplyWindowState();
         viewModel.TranscriptReloading += () => followTranscriptEnd = TranscriptAtEnd();
         viewModel.TranscriptReloaded += RestoreTranscriptSelection;
+        viewModel.SessionsReloaded += RestoreSessionSelection;
         viewModel.ActivityLog.CollectionChanged += (_, e) =>
         {
             // Defer until the ListBox has processed the change; scrolling inside the event corrupts its generator.
@@ -190,7 +191,8 @@ public partial class MainWindow : Window
         }, enabled: rows.Count == 1));
     }
 
-    // Right-clicking a session selects it first, so the menu and the main pane agree on which one it acts on.
+    // Right-clicking a session outside the selection selects just it (like Explorer), so the menu and the main pane
+    // agree on what it acts on; right-clicking inside a Shift/Ctrl-click selection keeps the whole selection.
     private void SessionListRightButtonDown(object sender, MouseButtonEventArgs e)
     {
         var source = e.OriginalSource as DependencyObject;
@@ -199,9 +201,19 @@ public partial class MainWindow : Window
                 ? VisualTreeHelper.GetParent(source) : LogicalTreeHelper.GetParent(source);
         if (source is ListBoxItem item)
         {
-            item.IsSelected = true;
+            if (!item.IsSelected) SessionList.SetCurrentValue(System.Windows.Controls.Primitives.Selector.SelectedItemProperty, item.DataContext);
             item.Focus();
         }
+    }
+
+    private void SessionListSelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        viewModel.UpdateSessionSelection(SessionList.SelectedItems.OfType<AudioTranscriber.Storage.StoredSession>());
+
+    // A library refresh rebuilds the list and keeps only the shown session selected; add the rest back.
+    private void RestoreSessionSelection(IReadOnlyCollection<Guid> ids)
+    {
+        foreach (var session in viewModel.Sessions)
+            if (ids.Contains(session.Id) && !SessionList.SelectedItems.Contains(session)) SessionList.SelectedItems.Add(session);
     }
 
     private void SessionListContextMenuOpening(object sender, ContextMenuEventArgs e)
@@ -214,7 +226,19 @@ public partial class MainWindow : Window
             menu.IsOpen = false;
             Dispatcher.BeginInvoke(action, System.Windows.Threading.DispatcherPriority.Input);
         };
-        if (viewModel.SelectedSession is { } session)
+        var selected = viewModel.SelectedSessions;
+        if (selected.Count > 1)
+        {
+            menu.Items.Add(Item($"Merge {selected.Count:N0} selected sessions…", Later(() => _ = viewModel.MergeSelectedSessionsAsync()),
+                enabled: viewModel.CanMergeSelectedSessions));
+            menu.Items.Add(new Separator());
+            var header = selected.Any(s => viewModel.IsRecordingSession(s.Id))
+                ? $"Delete {selected.Count:N0} selected sessions (stop recording first)"
+                : $"Delete {selected.Count:N0} selected sessions…";
+            menu.Items.Add(Item(header, Later(() => _ = viewModel.DeleteSelectedSessionsAsync()), enabled: viewModel.CanDeleteSelectedSessions));
+            menu.Items.Add(new Separator());
+        }
+        else if (viewModel.SelectedSession is { } session)
         {
             var name = session.Name.Length > 40 ? session.Name[..39] + "…" : session.Name;
             menu.Items.Add(Item($"● Continue recording into \"{name}\"", Later(() => viewModel.ContinueRecordingCommand.Execute(null)),
@@ -238,7 +262,8 @@ public partial class MainWindow : Window
     {
         if (e.Key != Key.Delete || Keyboard.Modifiers != ModifierKeys.None) return;
         e.Handled = true;
-        if (viewModel.DeleteSessionCommand.CanExecute(null)) viewModel.DeleteSessionCommand.Execute(null);
+        if (viewModel.SelectedSessions.Count > 1) _ = viewModel.DeleteSelectedSessionsAsync();
+        else if (viewModel.DeleteSessionCommand.CanExecute(null)) viewModel.DeleteSessionCommand.Execute(null);
         else if (viewModel.SelectedSession is { } session && viewModel.IsRecordingSession(session.Id)) _ = viewModel.DeleteSessionAsync(session);
     }
 

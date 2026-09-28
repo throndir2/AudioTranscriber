@@ -419,6 +419,16 @@ public sealed class MainViewModel : ObservableObject
         if (reloadingTranscript) return;
         SelectedRows = rows.OrderBy(row => row.Row.StartTicks).ThenBy(row => row.Row.Id, StringComparer.Ordinal).ToArray();
     }
+    // Every session selected in the list (Shift/Ctrl-click); SelectedSession is the one the main pane shows.
+    public IReadOnlyList<StoredSession> SelectedSessions { get; private set; } = [];
+    // Raised after a library refresh rebuilt the list, with the ids that were selected, so the view can reselect them.
+    public event Action<IReadOnlyCollection<Guid>>? SessionsReloaded;
+    public void UpdateSessionSelection(IEnumerable<StoredSession> sessions)
+    {
+        if (refreshingSelection) return;
+        SelectedSessions = sessions.ToArray();
+        CommandManager.InvalidateRequerySuggested();
+    }
     public string RawText => SelectedRow?.RawText ?? "";
     public string RowDetails => SelectedRow is { } item
         ? $"{item.TrackName}  ·  {item.Timestamp} – {TranscriptPresentation.Duration(item.EndTicks)}  ·  {item.Timing}  ·  {item.Attribution}" +
@@ -911,15 +921,19 @@ public sealed class MainViewModel : ObservableObject
     private void RefreshLibrary()
     {
         var id = SelectedSession?.Id;
+        var keep = SelectedSessions.Select(session => session.Id).ToHashSet();
         var sessions = controller.Store.GetSessions(2000);
+        var reloaded = false;
         if (!Sessions.SequenceEqual(sessions))
         {
             refreshingSelection = true;
             try { Replace(Sessions, sessions); }
             finally { refreshingSelection = false; }
+            reloaded = true;
         }
         SelectedSession = sessions.FirstOrDefault(x => x.Id == id) ?? sessions.FirstOrDefault();
         Changed(nameof(SelectedSession));
+        if (reloaded && keep.Count > 1) SessionsReloaded?.Invoke(keep);
         RefreshSessionDetails();
         Changed(nameof(IsRecording));
         Changed(nameof(CaptureState));
@@ -1059,8 +1073,26 @@ public sealed class MainViewModel : ObservableObject
 
     private Task MergeSessionsInteractiveAsync()
     {
-        var ids = dialogs.ChooseSessionsToMerge(Sessions.ToArray(), SelectedSession?.Id, controller.RecordingSessionId);
+        var preselected = SelectedSessions.Select(session => session.Id).ToArray();
+        if (preselected.Length == 0 && SelectedSession is { } current) preselected = [current.Id];
+        var ids = dialogs.ChooseSessionsToMerge(Sessions.ToArray(), preselected, controller.RecordingSessionId);
         return ids is { Count: > 1 } ? MergeSessionsAsync(ids) : Task.CompletedTask;
+    }
+
+    public bool CanMergeSelectedSessions => SelectedSessions.Count > 1 && !Busy && !closing && !SelectedSessions.Any(s => IsRecordingSession(s.Id));
+
+    public Task MergeSelectedSessionsAsync()
+    {
+        if (!CanMergeSelectedSessions) return Task.CompletedTask;
+        var chosen = SelectedSessions.OrderBy(session => session.CreatedUtc).ToArray();
+        var later = string.Join("\n", chosen.Skip(1).Take(12).Select(s => $"  • {s.Name} ({s.CreatedUtc.ToLocalTime():MMM d · HH:mm})")) +
+            (chosen.Length > 13 ? $"\n  …and {chosen.Length - 13:N0} more" : "");
+        if (!dialogs.Confirm("Merge sessions?",
+                $"Merge {chosen.Length:N0} sessions into \"{chosen[0].Name}\" ({chosen[0].CreatedUtc.ToLocalTime():MMM d · HH:mm})?\n\n" +
+                $"These follow it, in recording order:\n{later}\n\n" +
+                $"Together they run {TranscriptPresentation.Duration(chosen.Sum(s => s.DurationTicks))}. They stop being separate sessions. This cannot be undone."))
+            return Task.CompletedTask;
+        return MergeSessionsAsync(chosen.Select(session => session.Id).ToArray());
     }
 
     public Task MergeSessionsAsync(IReadOnlyCollection<Guid> ids) =>
@@ -1263,6 +1295,28 @@ public sealed class MainViewModel : ObservableObject
     {
         var ids = dialogs.ChooseSessionsToDelete(Sessions.ToArray(), controller.RecordingSessionId);
         return ids is { Count: > 0 } ? DeleteAsync(ids) : Task.CompletedTask;
+    }
+
+    public bool CanDeleteSelectedSessions => SelectedSessions.Count > 0 && !Busy && !closing && !SelectedSessions.Any(s => IsRecordingSession(s.Id));
+
+    public Task DeleteSelectedSessionsAsync()
+    {
+        var chosen = SelectedSessions.ToArray();
+        if (chosen.Length == 1) return DeleteSessionAsync(chosen[0]);
+        if (chosen.Any(s => IsRecordingSession(s.Id)))
+        {
+            SetStatus("Stop the recording before deleting its session.", true);
+            return Task.CompletedTask;
+        }
+        if (!CanDeleteSelectedSessions) return Task.CompletedTask;
+        var list = string.Join("\n", chosen.Take(12).Select(s => $"  • {s.Name} ({s.CreatedUtc.ToLocalTime():MMM d, yyyy · HH:mm})")) +
+            (chosen.Length > 12 ? $"\n  …and {chosen.Length - 12:N0} more" : "");
+        if (!dialogs.Confirm("Delete sessions?",
+                $"Permanently delete these {chosen.Length:N0} sessions?\n\n{list}\n\n" +
+                "Their transcripts, speakers, jobs and retained original audio are removed from this PC. This cannot be undone.\n" +
+                "Exported transcripts and the live transcript file are not touched."))
+            return Task.CompletedTask;
+        return DeleteAsync(chosen.Select(session => session.Id).ToArray());
     }
 
     private Task DeleteAsync(IReadOnlyCollection<Guid> ids) =>
