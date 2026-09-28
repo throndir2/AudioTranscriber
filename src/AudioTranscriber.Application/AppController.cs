@@ -83,11 +83,16 @@ public sealed class AppController : IAppController
                    (File.Exists(paths.SegmentationModelPath) && File.Exists(paths.EmbeddingModelPath));
         }
     }
-    public IReadOnlyList<ProviderOption> Providers { get; } = NvidiaModelCatalog.All
-        .Select(model => new ProviderOption(model.Id, model.DisplayName, true,
-            model.VerifiedWordTiming ? "Word timestamps when returned" : "Coarse audio-chunk timestamps"))
-        .Append(new(SherpaParakeetProvider.ProviderId, "Local Parakeet TDT v3 · recommended (runs on this PC; 25 European languages)", false, "Word timestamps"))
-        .Append(new("local-whisper", "Local Whisper · large-v3-turbo (any language; GPU via Vulkan when available)", false, "Segment timestamps"))
+    public IReadOnlyList<ProviderOption> Providers { get; } = new ProviderOption[]
+        {
+            new(SherpaParakeetProvider.ProviderId,
+                "Local · CPU (NVIDIA GPU if enabled) — Parakeet TDT v3 · recommended, 25 European languages", false, "Word timestamps"),
+            new("local-whisper",
+                "Local · GPU via Vulkan (CPU if no GPU) — Whisper large-v3-turbo · any language", false, "Segment timestamps")
+        }
+        .Concat(NvidiaModelCatalog.All.Select(model => new ProviderOption(model.Id,
+            $"Internet · NVIDIA cloud — {model.DisplayName.Replace("Hosted ", "")} · English, needs API key", true,
+            model.VerifiedWordTiming ? "Word timestamps when returned" : "Coarse audio-chunk timestamps")))
         .ToArray();
     public event Action<AppNotification>? Notification;
     public event Action<CaptureMeter>? LevelsChanged;

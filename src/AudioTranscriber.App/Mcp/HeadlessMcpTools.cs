@@ -39,7 +39,7 @@ public sealed class HeadlessMcpTools
             _ => McpToolResult.Json(Status())),
         McpTool.Create("list_devices", "List available Windows output (loopback) and microphone endpoints. The first entry is the Windows default.",
             _ => McpToolResult.Json(new { outputs = controller.GetOutputDevices(), microphones = controller.GetMicrophoneDevices() })),
-        McpTool.Create("list_providers", "List transcription providers (local-parakeet and local-whisper run on this PC; others are NVIDIA cloud).",
+        McpTool.Create("list_providers", "List transcription providers. Names start with where they run: 'Local · CPU/GPU' runs on this PC (local-parakeet, local-whisper); 'Internet · NVIDIA cloud' uploads audio to NVIDIA (isCloud=true).",
             _ => McpToolResult.Json(controller.Providers)),
         McpTool.Create("install_parakeet_model", "Download (465 MiB, SHA-256 verified) the default local Parakeet TDT v3 model.",
             async (_, token) =>
