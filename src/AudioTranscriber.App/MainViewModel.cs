@@ -311,7 +311,11 @@ public sealed class MainViewModel : ObservableObject
     public string QueueSummary { get => queueSummary; private set => Set(ref queueSummary, value); }
     public string KeyStatus => controller.HasNvidiaKey ? "A key is available (never displayed)." : "No NVIDIA key. Recording and local work remain available.";
     public string ModelStatus { get => modelStatus; private set => Set(ref modelStatus, value); }
-    public string LocalGpuStatus { get => localGpuStatus; private set => Set(ref localGpuStatus, value); }
+    public string LocalGpuStatus
+    {
+        get => localGpuStatus;
+        private set { if (Set(ref localGpuStatus, value)) Changed(nameof(ProviderHelp)); }
+    }
     private string localGpuStatus = "Checking for a usable NVIDIA GPU after the default models are ready…";
     public string ParakeetStatus { get => parakeetStatus; private set => Set(ref parakeetStatus, value); }
     private string parakeetStatus = "";
@@ -355,8 +359,12 @@ public sealed class MainViewModel : ObservableObject
         }
     }
     public string ProviderHelp => SelectedProvider is { } p
-        ? $"{(p.IsCloud ? "NVIDIA-hosted. Upload requires this session's consent AND a key." : p.Id == "local-parakeet" ? "Runs on this PC (CPU; no key, no upload). Most accurate local option; supports 25 European languages, detected automatically." : "Runs on this PC; any language. English chunks Whisper is unsure about are re-checked by local Parakeet when it's installed, otherwise by hosted Parakeet only if you allow NVIDIA uploads below.")} {p.TimingDescription}"
-        : "Choose a transcription provider.";
+        ? $"{(p.IsCloud
+            ? "Hosted on the internet: audio chunks are uploaded to NVIDIA's cloud. Requires this session's upload consent AND an NVIDIA API key. English only."
+            : p.Id == "local-parakeet"
+                ? $"Runs locally on this PC (no upload, no key). Uses the CPU by default, or your NVIDIA GPU if enabled in Privacy / models. Now: {LocalGpuStatus} Most accurate local option; 25 European languages, detected automatically."
+                : "Runs locally on this PC (no upload, no key). Uses your GPU through Vulkan (NVIDIA, AMD, or Intel) when a driver is present, otherwise the CPU (much slower). Any language. English chunks Whisper is unsure about are re-checked by local Parakeet when it's installed, otherwise by hosted Parakeet only if you allow NVIDIA uploads below.")} {p.TimingDescription}."
+        : "Choose a transcription provider: Local runs on this PC (CPU or GPU); Internet uploads audio to NVIDIA's cloud.";
     private bool HasNewSessionDetails => !string.IsNullOrWhiteSpace(SessionName) && !string.IsNullOrWhiteSpace(Language) && SelectedProvider is not null;
     public string ContinueRecordingLabel => SelectedSession is { } s
         ? $"●  Continue \"{(s.Name.Length > 28 ? s.Name[..27] + "…" : s.Name)}\"".Replace("_", "__") : "●  Continue selected session";
