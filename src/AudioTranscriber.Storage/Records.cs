@@ -33,4 +33,14 @@ public sealed record SegmentDraft(
 
 public sealed record StoredSpeaker(string Id, Guid SessionId, string Name, string? ParticipantId, string Provenance);
 public sealed record StoredTurn(Guid TrackId, long StartTicks, long EndTicks, string? SpeakerId, bool Overlap, bool Uncertain);
+// Row rewrites for merging Source into Target; metadata values are already shifted by OffsetTicks.
+public sealed record SessionMerge(
+    Guid TargetId, Guid SourceId, long OffsetTicks,
+    IReadOnlyList<(Guid Id, string Name, string? Metadata)> Tracks,
+    IReadOnlyList<(Guid Id, string Metadata)> ArchiveChunks,
+    IReadOnlyList<(Guid Id, string Metadata)> NormalizedChunks,
+    IReadOnlyDictionary<string, string> SpeakerNames,
+    IReadOnlyDictionary<string, string> SpeakerMerges,
+    string? RegistryJson);
+
 public sealed record QueueProgress(int Pending, int Running, int Succeeded, int Failed, int Paused);

@@ -185,6 +185,80 @@ public sealed class DesktopDialogs(Func<Window> owner)
         return accepted ? rows.Where(row => row.IsChecked).Select(row => row.Session.Id).ToArray() : null;
     }
 
+    /// <summary>Lets the user check two or more sessions to stitch into the earliest one. Returns null when canceled.</summary>
+    public IReadOnlyList<Guid>? ChooseSessionsToMerge(IReadOnlyList<StoredSession> sessions, Guid? selectedId, Guid? recordingSessionId)
+    {
+        var window = Dialog("Merge sessions", 640);
+        static string? Blocked(StoredSession session, Guid? recording) =>
+            session.Id == recording ? "recording now" :
+            session.State == "Recoverable" ? "needs recovery first (Jobs → Resume)" :
+            session.State is "Recorded" or "Created" or "Faulted" ? null : session.State.ToLowerInvariant();
+        var rows = sessions.OrderBy(session => session.CreatedUtc)
+            .Select(session => new SessionDeletionRow(session, Blocked(session, recordingSessionId) is null, Blocked(session, recordingSessionId) ?? ""))
+            .ToArray();
+        foreach (var row in rows) row.IsChecked = row.Session.Id == selectedId;
+        var panel = new DockPanel { Margin = new Thickness(22) };
+        var intro = Help("Check the sessions that belong together, for example a meeting that was split when the app restarted. " +
+            "They are joined in the order they were recorded: the earliest keeps its name, and each later session's audio, transcript " +
+            "and speakers follow it on one timeline. Automatic speaker labels are renumbered; speakers you named alike are combined. " +
+            "The later sessions stop being separate entries. This can't be undone.");
+        DockPanel.SetDock(intro, Dock.Top);
+        panel.Children.Add(intro);
+
+        var summary = new TextBlock { VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap };
+        var cancel = new Button { Content = "Cancel", IsCancel = true, IsDefault = true };
+        var merge = new Button { Content = "Merge checked…", Style = (Style)System.Windows.Application.Current.FindResource("PrimaryButton"), Margin = new Thickness(8, 0, 0, 0) };
+        var footer = new DockPanel { Margin = new Thickness(0, 12, 0, 0) };
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal };
+        buttons.Children.Add(cancel);
+        buttons.Children.Add(merge);
+        DockPanel.SetDock(buttons, Dock.Right);
+        footer.Children.Add(buttons);
+        footer.Children.Add(summary);
+        DockPanel.SetDock(footer, Dock.Bottom);
+        panel.Children.Add(footer);
+
+        var list = new ListBox
+        {
+            ItemsSource = rows, Height = 380, HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            ItemTemplate = (DataTemplate)System.Windows.Markup.XamlReader.Parse("""
+                <DataTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
+                    <CheckBox IsChecked="{Binding IsChecked}" IsEnabled="{Binding CanDelete}" Margin="0" HorizontalAlignment="Stretch">
+                        <StackPanel>
+                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding Details}" FontSize="12" Foreground="{DynamicResource Dim}" Margin="0,2,0,0" />
+                        </StackPanel>
+                    </CheckBox>
+                </DataTemplate>
+                """)
+        };
+        System.Windows.Automation.AutomationProperties.SetName(list, "Sessions to merge");
+        panel.Children.Add(list);
+        window.Content = panel;
+
+        SessionDeletionRow[] Chosen() => rows.Where(row => row.IsChecked).ToArray();
+        void UpdateSummary()
+        {
+            var chosen = Chosen();
+            summary.Text = chosen.Length < 2 ? "Check at least two sessions."
+                : $"{chosen.Length:N0} sessions → \"{chosen[0].Name}\" · {TranscriptPresentation.Duration(chosen.Sum(row => row.Session.DurationTicks))} in total";
+            merge.IsEnabled = chosen.Length > 1;
+        }
+        foreach (var row in rows) row.PropertyChanged += (_, _) => UpdateSummary();
+        merge.Click += (_, _) =>
+        {
+            var chosen = Chosen();
+            if (chosen.Length < 2) return;
+            var later = string.Join("\n", chosen.Skip(1).Select(row => $"  • {row.Name} ({row.Session.CreatedUtc.ToLocalTime():MMM d · HH:mm})"));
+            if (MessageBox.Show(window, $"Merge into \"{chosen[0].Name}\" ({chosen[0].Session.CreatedUtc.ToLocalTime():MMM d · HH:mm})?\n\n" +
+                    $"These follow it, in this order:\n{later}\n\nThey stop being separate sessions. This cannot be undone.",
+                    "Merge sessions?", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes)
+                window.DialogResult = true;
+        };
+        UpdateSummary();
+        return window.ShowDialog() == true ? Chosen().Select(row => row.Session.Id).ToArray() : null;
+    }
+
     /// <summary>Asks for a speaker name; existing names are offered but any text is accepted.</summary>
     public string? PromptSpeakerName(string title, string message, string initial, IEnumerable<string> suggestions, string affirmative)
     {
@@ -333,7 +407,7 @@ public sealed class DesktopDialogs(Func<Window> owner)
     }
 }
 
-public sealed class SessionDeletionRow(StoredSession session, bool canDelete) : ObservableObject
+public sealed class SessionDeletionRow(StoredSession session, bool canDelete, string blockedNote = "recording now") : ObservableObject
 {
     private bool isChecked;
     private long? bytes;
@@ -341,7 +415,7 @@ public sealed class SessionDeletionRow(StoredSession session, bool canDelete) : 
     public bool CanDelete { get; } = canDelete;
     public string Name => Session.Name;
     public string Details => $"{Session.CreatedUtc.ToLocalTime():MMM d, yyyy · HH:mm} · {TranscriptPresentation.Duration(Session.DurationTicks)} · {Session.State}" +
-        (CanDelete ? "" : " · recording now");
+        (CanDelete ? "" : " · " + blockedNote);
     public bool IsChecked { get => isChecked; set => Set(ref isChecked, value && CanDelete); }
     public long? Bytes
     {

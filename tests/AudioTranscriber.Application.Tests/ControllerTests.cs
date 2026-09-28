@@ -179,6 +179,77 @@ public sealed class ControllerTests
     }
 
     [Fact]
+    public async Task ContinueRecordingAppendsANewPartAfterTheExistingAudio()
+    {
+        await using var fixture = new Fixture();
+        fixture.Provider.Release.TrySetResult();
+        var session = await fixture.App.StartRecordingAsync("Synthetic continued", "synthetic-output", null, "local-whisper", "en", false);
+        fixture.Capture.Emit(32000);
+        await fixture.App.StopRecordingAsync();
+        await UntilAsync(() => fixture.App.Store.GetProgress(session.Id).Succeeded == 3);
+        var firstEnd = fixture.App.Store.GetSession(session.Id).DurationTicks;
+
+        var continued = await fixture.App.ContinueRecordingAsync(session.Id, "synthetic-output", null);
+        Assert.Equal(session.Id, continued.Id);
+        fixture.Capture.Emit(32000);
+        await fixture.App.StopRecordingAsync();
+        await UntilAsync(() => fixture.App.Store.GetProgress(session.Id).Succeeded == 6);
+
+        Assert.Single(fixture.App.Store.GetSessions());
+        var tracks = fixture.App.Store.GetTracks(session.Id);
+        Assert.Equal(["Windows output", "Windows output (part 2)"], tracks.Select(track => track.Name));
+        var part2 = fixture.App.Store.GetChunks(tracks[1].Id);
+        Assert.Equal(firstEnd + 2 * TimeSpan.TicksPerSecond, part2[0].StartTicks);
+        var transcript = fixture.App.Store.GetTranscriptPage(session.Id);
+        Assert.Equal(4, transcript.Count);
+        Assert.Equal([tracks[0].Id, tracks[0].Id, tracks[1].Id, tracks[1].Id], transcript.Select(row => row.TrackId));
+        Assert.True(transcript[2].StartTicks > firstEnd);
+        Assert.Equal("Recorded", fixture.App.Store.GetSession(session.Id).State);
+        Assert.True(fixture.App.Store.GetSession(session.Id).DurationTicks >= part2[^1].StartTicks);
+    }
+
+    [Fact]
+    public async Task MergeStitchesLaterSessionsAfterTheEarliestAndDeletesAllTheirFolders()
+    {
+        await using var fixture = new Fixture();
+        fixture.Provider.Release.TrySetResult();
+        var first = await fixture.App.StartRecordingAsync("Synthetic part one", "synthetic-output", null, "local-whisper", "en", false);
+        fixture.Capture.Emit(32000);
+        await fixture.App.StopRecordingAsync();
+        await UntilAsync(() => fixture.App.Store.GetProgress(first.Id).Succeeded == 3);
+        await Task.Delay(20);
+        var second = await fixture.App.StartRecordingAsync("Synthetic part two", "synthetic-output", null, "local-whisper", "en", false);
+        fixture.Capture.Emit(32000);
+        await fixture.App.StopRecordingAsync();
+        await UntilAsync(() => fixture.App.Store.GetProgress(second.Id).Succeeded == 3);
+        var firstEnd = fixture.App.Store.GetSession(first.Id).DurationTicks;
+        var secondRows = fixture.App.Store.GetTranscriptPage(second.Id);
+
+        var merged = await fixture.App.MergeSessionsAsync([second.Id, first.Id]);
+
+        Assert.Equal(first.Id, merged.Id);
+        Assert.Equal("Synthetic part one", Assert.Single(fixture.App.Store.GetSessions()).Name);
+        Assert.Equal(6, fixture.App.Store.GetProgress(first.Id).Succeeded);
+        var tracks = fixture.App.Store.GetTracks(first.Id);
+        Assert.Equal(["Windows output", "Windows output (part 2)"], tracks.Select(track => track.Name));
+        var transcript = fixture.App.Store.GetTranscriptPage(first.Id);
+        Assert.Equal(4, transcript.Count);
+        var offset = firstEnd + 2 * TimeSpan.TicksPerSecond;
+        Assert.Equal(secondRows.Select(row => row.StartTicks + offset), transcript.Skip(2).Select(row => row.StartTicks));
+        Assert.Equal(["Speaker 1", "Speaker 1", "Speaker 2", "Speaker 2"], transcript.Select(row => row.SpeakerName));
+        Assert.Equal(2, fixture.App.Store.GetSpeakers(first.Id).Count);
+        var registry = CoreRegistrySerializer.Deserialize(fixture.App.Store.GetSpeakerRegistry(first.Id)!);
+        Assert.Equal([1, 2], registry.Speakers.Select(entry => entry.Identity.Number));
+        var chunk = fixture.App.Store.GetChunks(tracks[1].Id)[0];
+        Assert.Equal(chunk.StartTicks, JsonSerializer.Deserialize<NormalizedChunk>(chunk.MetadataJson)!.SessionStartTicks);
+        Assert.Equal([second.Directory], fixture.App.Store.GetMergedFolders(first.Id));
+
+        await fixture.App.DeleteSessionsAsync([first.Id]);
+        Assert.False(Directory.Exists(first.Directory));
+        Assert.False(Directory.Exists(second.Directory));
+    }
+
+    [Fact]
     public async Task MicrophoneWaitsForSpeakerAudioAndHasItsEchoRemoved()
     {
         await using var fixture = new Fixture();
@@ -291,7 +362,7 @@ public sealed class ControllerTests
             File.WriteAllBytes(path, bytes);
             var start = trackFrames.GetValueOrDefault(trackId);
             ChunkSealed?.Invoke(new(id, trackId, path, AudioFormat.Pcm16Mono16K, start, samples.Length,
-                AudioTime.FramesToTicks(start, 16000), continuity));
+                AudioTime.FramesToTicks(start, 16000) + options.SessionOffsetTicks, continuity));
             trackFrames[trackId] = start + samples.Length;
             if (trackId == TrackId) frames = start + samples.Length;
         }
@@ -301,7 +372,7 @@ public sealed class ControllerTests
             var path = Path.Combine(options!.OutputDirectory, id.ToString("N") + ".synthetic-pcm");
             File.WriteAllBytes(path, Tone(samples));
             ChunkSealed?.Invoke(new(id, TrackId, path, AudioFormat.Pcm16Mono16K, frames, samples,
-                AudioTime.FramesToTicks(frames, 16000), continuity));
+                AudioTime.FramesToTicks(frames, 16000) + options.SessionOffsetTicks, continuity));
             frames += samples;
             Levels?.Invoke(new(TrackId, 0, 0, 0));
         }

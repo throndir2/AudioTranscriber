@@ -88,6 +88,9 @@ public sealed class MainViewModel : ObservableObject
         }), () => !Busy && !IsRecording);
         StartRecordingCommand = new AsyncCommand(StartRecordingAsync, () =>
             !Busy && !IsRecording && !Stopping && OutputDevice is not null && HasNewSessionDetails && !closing);
+        ContinueRecordingCommand = new AsyncCommand(ContinueRecordingAsync, () =>
+            !Busy && !IsRecording && !Stopping && OutputDevice is not null && SelectedSession is { } s && CanContinueSession(s) && !closing);
+        MergeSessionsCommand = new AsyncCommand(MergeSessionsInteractiveAsync, () => Sessions.Count > 1 && !Busy && !closing);
         StopRecordingCommand = new AsyncCommand(StopRecordingAsync, () => IsRecording && !Stopping && !closing);
         ImportAudioCommand = new AsyncCommand(ImportAudioAsync, () => !Busy && HasNewSessionDetails && !closing);
         ImportVttCommand = new AsyncCommand(ImportVttAsync, CanWorkWithSession);
@@ -317,6 +320,10 @@ public sealed class MainViewModel : ObservableObject
         ? $"{(p.IsCloud ? "NVIDIA-hosted. Upload requires this session's consent AND a key." : p.Id == "local-parakeet" ? "Runs on this PC (CPU; no key, no upload). Most accurate local option; supports 25 European languages, detected automatically." : "Runs on this PC; any language. English chunks Whisper is unsure about are re-checked by local Parakeet when it's installed, otherwise by hosted Parakeet only if you allow NVIDIA uploads below.")} {p.TimingDescription}"
         : "Choose a transcription provider.";
     private bool HasNewSessionDetails => !string.IsNullOrWhiteSpace(SessionName) && !string.IsNullOrWhiteSpace(Language) && SelectedProvider is not null;
+    public string ContinueRecordingLabel => SelectedSession is { } s
+        ? $"●  Continue \"{(s.Name.Length > 28 ? s.Name[..27] + "…" : s.Name)}\"".Replace("_", "__") : "●  Continue selected session";
+    public bool CanContinueSession(StoredSession session) =>
+        session.State is not ("Starting" or "Recording" or "Stopping" or "Importing") && !IsRecordingSession(session.Id);
 
     public StoredSession? SelectedSession
     {
@@ -330,6 +337,7 @@ public sealed class MainViewModel : ObservableObject
             Changed(nameof(SessionSummary));
             Changed(nameof(SessionError));
             Changed(nameof(ConsentSummary));
+            Changed(nameof(ContinueRecordingLabel));
             if (!changedId) return;
             SelectedCloudConsent = false;
             previousSucceeded = -1;
@@ -406,6 +414,8 @@ public sealed class MainViewModel : ObservableObject
 
     public ICommand RefreshDevicesCommand { get; }
     public ICommand StartRecordingCommand { get; }
+    public ICommand ContinueRecordingCommand { get; }
+    public ICommand MergeSessionsCommand { get; }
     public ICommand StopRecordingCommand { get; }
     public ICommand ImportAudioCommand { get; }
     public ICommand ImportVttCommand { get; }
@@ -972,6 +982,50 @@ public sealed class MainViewModel : ObservableObject
         stopTask = StopCoreAsync();
         return stopTask;
     }
+
+    // Records into the selected session; the live file keeps mirroring that same session, so nothing is overwritten.
+    private async Task ContinueRecordingAsync()
+    {
+        if (SelectedSession is not { } target || OutputDevice is not { } output) return;
+        if (MicrophoneEnabled && MicrophoneDevice is null)
+        {
+            SetStatus("Select an available microphone or turn off the separate microphone track.", true);
+            return;
+        }
+        var microphoneId = MicrophoneEnabled ? MicrophoneDevice?.Id : null;
+        var reduceEcho = ReduceEcho;
+        SaveRecordingPreferences();
+        await RunAsync($"Continuing \"{target.Name}\" with the selected audio devices…", async token =>
+        {
+            StoredSession session;
+            try { session = await controller.ContinueRecordingAsync(target.Id, output.Id, microphoneId, reduceEcho, token); }
+            catch (InvalidOperationException error) { SetStatus(error.Message, true); return; }
+            if (LiveFileEnabled && liveSessionId != session.Id) StartLiveFile(session.Id);
+            RefreshLibrary();
+            SelectedSession = Sessions.FirstOrDefault(x => x.Id == session.Id) ?? session;
+            SetStatus($"Recording continues in \"{session.Name}\"; new audio and text follow what it already had.");
+        });
+    }
+
+    private Task MergeSessionsInteractiveAsync()
+    {
+        var ids = dialogs.ChooseSessionsToMerge(Sessions.ToArray(), SelectedSession?.Id, controller.RecordingSessionId);
+        return ids is { Count: > 1 } ? MergeSessionsAsync(ids) : Task.CompletedTask;
+    }
+
+    public Task MergeSessionsAsync(IReadOnlyCollection<Guid> ids) =>
+        RunAsync($"Merging {ids.Count:N0} sessions…", async token =>
+        {
+            StoredSession merged;
+            try { merged = await controller.MergeSessionsAsync(ids, token); }
+            catch (InvalidOperationException error) { SetStatus(error.Message, true); return; }
+            // Rewrite the live file with the stitched transcript if it mirrored one of the parts (or is armed and idle).
+            if (liveSessionId is { } live ? ids.Contains(live) : LiveFileEnabled) StartLiveFile(merged.Id);
+            RefreshLibrary();
+            SelectedSession = Sessions.FirstOrDefault(x => x.Id == merged.Id) ?? merged;
+            LoadTranscript();
+            SetStatus($"Merged {ids.Count:N0} sessions into \"{merged.Name}\". The transcript now runs through every part in recording order.");
+        });
 
     private async Task StopCoreAsync()
     {

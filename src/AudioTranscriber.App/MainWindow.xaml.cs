@@ -215,6 +215,11 @@ public partial class MainWindow : Window
         if (viewModel.SelectedSession is { } session)
         {
             var name = session.Name.Length > 40 ? session.Name[..39] + "…" : session.Name;
+            menu.Items.Add(Item($"● Continue recording into \"{name}\"", Later(() => viewModel.ContinueRecordingCommand.Execute(null)),
+                enabled: viewModel.ContinueRecordingCommand.CanExecute(null)));
+            menu.Items.Add(Item("Merge with other sessions…", Later(() => viewModel.MergeSessionsCommand.Execute(null)),
+                enabled: viewModel.MergeSessionsCommand.CanExecute(null)));
+            menu.Items.Add(new Separator());
             var header = viewModel.IsRecordingSession(session.Id)
                 ? $"Delete \"{name}\" (stop recording first)"
                 : $"Delete \"{name}\"…";

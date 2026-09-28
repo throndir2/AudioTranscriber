@@ -47,6 +47,11 @@ public interface IAppController : IAsyncDisposable
     Task<MediaProbeSummary> ProbeMediaAsync(string path, CancellationToken cancellationToken = default);
     Task<StoredSession> StartRecordingAsync(string name, string outputDeviceId, string? microphoneDeviceId,
         string providerId, string language, bool cloudConsent, bool reduceEcho = true, CancellationToken cancellationToken = default);
+    // Records more audio into an existing session, placed after everything it already holds.
+    Task<StoredSession> ContinueRecordingAsync(Guid sessionId, string outputDeviceId, string? microphoneDeviceId,
+        bool reduceEcho = true, CancellationToken cancellationToken = default);
+    // Stitches sessions into the earliest one, in recording order, on one timeline. Returns the merged session.
+    Task<StoredSession> MergeSessionsAsync(IReadOnlyCollection<Guid> sessionIds, CancellationToken cancellationToken = default);
     Task StopRecordingAsync(CancellationToken cancellationToken = default);
     Task<StoredSession> ImportAudioAsync(string name, string path, int streamIndex, string providerId,
         string language, bool cloudConsent, CancellationToken cancellationToken = default);

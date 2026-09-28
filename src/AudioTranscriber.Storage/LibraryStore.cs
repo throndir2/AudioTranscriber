@@ -111,11 +111,85 @@ public sealed class LibraryStore
                          "DELETE FROM normalized_chunks WHERE session_id=$session",
                          $"DELETE FROM archive_chunks WHERE track_id IN ({tracks})",
                          "DELETE FROM tracks WHERE session_id=$session",
+                         "DELETE FROM merged_folders WHERE session_id=$session",
                          "DELETE FROM sessions WHERE id=$session"
                      })
                 Execute(connection, sql, ("$session", sessionId));
             transaction.Commit();
             return directory;
+        }
+    }
+
+    /// <summary>Folders of sessions that were merged into this one; their audio files stay where they were recorded.</summary>
+    public IReadOnlyList<string> GetMergedFolders(Guid sessionId) =>
+        Read("SELECT directory FROM merged_folders WHERE session_id=$session", r => r.GetString(0), ("$session", sessionId));
+
+    /// <summary>Stops the scheduler from claiming this session's jobs without changing their states.</summary>
+    public void SetProcessingStateOnly(Guid sessionId, string state) =>
+        Write("UPDATE sessions SET processing_state=$state WHERE id=$id", ("$state", state), ("$id", sessionId));
+
+    /// <summary>
+    /// Moves everything of the source session into the target, shifted by OffsetTicks on the target's timeline,
+    /// then removes the source session row. Files are not moved; the source folder is remembered for deletion.
+    /// </summary>
+    public void MergeSessions(SessionMerge merge)
+    {
+        ArgumentNullException.ThrowIfNull(merge);
+        if (merge.SourceId == merge.TargetId) throw new ArgumentException("A session cannot be merged into itself.");
+        ArgumentOutOfRangeException.ThrowIfNegative(merge.OffsetTicks);
+        lock (gate)
+        {
+            using var connection = Open();
+            using var transaction = connection.BeginTransaction();
+            string? directory;
+            long duration;
+            using (var find = Command(connection, "SELECT directory,duration FROM sessions WHERE id=$source", ("$source", merge.SourceId)))
+            using (var reader = find.ExecuteReader())
+            {
+                if (!reader.Read()) throw new InvalidOperationException("The session to merge no longer exists.");
+                directory = reader.GetString(0);
+                duration = reader.GetInt64(1);
+            }
+            if (Execute(connection, "UPDATE sessions SET duration=max(duration,$end) WHERE id=$target",
+                    ("$end", checked(merge.OffsetTicks + duration)), ("$target", merge.TargetId)) != 1)
+                throw new InvalidOperationException("The session to merge into no longer exists.");
+            (string, object?) source = ("$source", merge.SourceId), target = ("$target", merge.TargetId), offset = ("$offset", merge.OffsetTicks);
+            const string sourceTracks = "SELECT id FROM tracks WHERE session_id=$source";
+            foreach (var (from, into) in merge.SpeakerMerges)
+            {
+                Execute(connection, "UPDATE segments SET speaker_id=$into WHERE session_id=$source AND speaker_id=$from", ("$into", into), ("$from", from), source);
+                Execute(connection, $"UPDATE turns SET speaker_id=$into WHERE speaker_id=$from AND track_id IN ({sourceTracks})", ("$into", into), ("$from", from), source);
+                Execute(connection, "DELETE FROM speakers WHERE session_id=$source AND id=$from", ("$from", from), source);
+            }
+            foreach (var (id, name) in merge.SpeakerNames)
+                Execute(connection, "UPDATE speakers SET name=$name WHERE session_id=$source AND id=$id", ("$name", name), ("$id", id), source);
+            // The same speaker ID in both (e.g. the same WebVTT file imported twice) is the same speaker.
+            Execute(connection, "DELETE FROM speakers WHERE session_id=$source AND id IN (SELECT id FROM speakers WHERE session_id=$target)", source, target);
+            Execute(connection, "UPDATE speakers SET session_id=$target WHERE session_id=$source", source, target);
+            Execute(connection, $"UPDATE turns SET start_ticks=start_ticks+$offset,end_ticks=end_ticks+$offset WHERE track_id IN ({sourceTracks})", source, offset);
+            foreach (var (id, metadata) in merge.ArchiveChunks)
+                Execute(connection, "UPDATE archive_chunks SET start_ticks=start_ticks+$offset,metadata=$metadata WHERE id=$id",
+                    ("$id", id), ("$metadata", metadata), offset);
+            Execute(connection, "UPDATE normalized_chunks SET session_id=$target,start_ticks=start_ticks+$offset WHERE session_id=$source", source, target, offset);
+            foreach (var (id, metadata) in merge.NormalizedChunks)
+                Execute(connection, "UPDATE normalized_chunks SET metadata=$metadata WHERE id=$id", ("$id", id), ("$metadata", metadata));
+            // Invalidate leases: a response still in flight for the old session is rejected and the job simply runs again.
+            Execute(connection, """
+                UPDATE jobs SET session_id=$target,state=CASE state WHEN 'Running' THEN 'Pending' ELSE state END,lease=NULL,lease_until=NULL
+                WHERE session_id=$source
+                """, source, target);
+            Execute(connection, "UPDATE segments SET session_id=$target,start_ticks=start_ticks+$offset,end_ticks=end_ticks+$offset WHERE session_id=$source",
+                source, target, offset);
+            foreach (var (id, name, metadata) in merge.Tracks)
+                Execute(connection, "UPDATE tracks SET name=$name,metadata=$metadata WHERE id=$id AND session_id=$source",
+                    ("$id", id), ("$name", name), ("$metadata", metadata), source);
+            Execute(connection, "UPDATE tracks SET session_id=$target WHERE session_id=$source", source, target);
+            if (merge.RegistryJson is not null)
+                Execute(connection, "UPDATE sessions SET registry=$registry WHERE id=$target", ("$registry", merge.RegistryJson), target);
+            Execute(connection, "UPDATE merged_folders SET session_id=$target WHERE session_id=$source", source, target);
+            Execute(connection, "INSERT INTO merged_folders(session_id,directory) VALUES($target,$directory)", target, ("$directory", directory));
+            Execute(connection, "DELETE FROM sessions WHERE id=$source", source);
+            transaction.Commit();
         }
     }
 
@@ -455,6 +529,9 @@ public sealed class LibraryStore
     public int CountSegments(Guid sessionId) =>
         Read("SELECT count(*) FROM segments WHERE session_id=$session", r => (int)r.GetInt64(0), ("$session", sessionId)).Single();
 
+    public long GetLastSegmentEndTicks(Guid sessionId) =>
+        Read("SELECT coalesce(max(end_ticks),0) FROM segments WHERE session_id=$session", r => r.GetInt64(0), ("$session", sessionId)).Single();
+
     public int CountJobSegments(Guid jobId) =>
         Read("SELECT count(*) FROM segments WHERE job_id=$job", r => (int)r.GetInt64(0), ("$job", jobId)).Single();
 
@@ -742,5 +819,6 @@ public sealed class LibraryStore
             track_id TEXT NOT NULL REFERENCES tracks(id),start_ticks INTEGER NOT NULL,end_ticks INTEGER NOT NULL,
             speaker_id TEXT,overlap INTEGER NOT NULL,uncertain INTEGER NOT NULL);
         CREATE INDEX IF NOT EXISTS turn_time ON turns(track_id,start_ticks,end_ticks);
+        CREATE TABLE IF NOT EXISTS merged_folders(session_id TEXT NOT NULL REFERENCES sessions(id),directory TEXT NOT NULL);
         """;
 }

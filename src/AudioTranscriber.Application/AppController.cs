@@ -45,6 +45,10 @@ public sealed class AppController : IAppController
     private readonly ConcurrentDictionary<Guid, CaptureFeed> captureFeeds = new();
     private readonly Dictionary<string, ITranscriptionProvider> providerCache = new();
     private readonly System.Diagnostics.Stopwatch recordingClock = new();
+    // A continued recording starts at this point of its session's timeline.
+    private long recordingOffsetTicks;
+    private (string State, string? Error)? recordingRestoreState;
+    private const long PartGapTicks = 2 * TimeSpan.TicksPerSecond;
     private readonly object settingsGate = new();
     private readonly object setupGate = new();
     private Task? modelSetup;
@@ -425,52 +429,109 @@ public sealed class AppController : IAppController
         {
             if (IsRecording) throw new InvalidOperationException("Stop the current recording before starting another.");
             RequireProvider(providerId);
-            if (providerId == "local-whisper") StartWhisperDownload();
             var session = Store.CreateSession(name, providerId, language);
-            var outputId = Guid.NewGuid();
-            microphoneTrackId = microphoneDeviceId is null ? null : Guid.NewGuid();
-            Store.AddTrack(new(outputId, session.Id, "Loopback", "Windows output", null, 0, null));
-            if (microphoneTrackId is { } mic)
-                Store.AddTrack(new(mic, session.Id, "Microphone", "Local microphone", null, 0,
-                    reduceEcho ? JsonSerializer.Serialize(new MicrophoneOptions(outputId)) : null));
             Store.SetConsent(session.Id, cloudConsent);
-            Store.SetSessionState(session.Id, "Starting");
-            RecordingSessionId = session.Id;
-            captureFaulted = false;
-            recordingClock.Restart();
-            StartCaptureFeed(session, outputId);
-            if (microphoneTrackId is { } microphone) StartCaptureFeed(session, microphone);
-            try
+            return await StartCaptureAsync(session, outputDeviceId, microphoneDeviceId, reduceEcho, 0, 1, cancellationToken);
+        }
+        finally { captureGate.Release(); }
+    }
+
+    /// <summary>
+    /// Records more audio into an existing session: new tracks start just after its current end, so earlier audio,
+    /// transcript and speakers stay and the new text follows them. The session's own provider, language and consent apply.
+    /// </summary>
+    public async Task<StoredSession> ContinueRecordingAsync(Guid sessionId, string outputDeviceId, string? microphoneDeviceId,
+        bool reduceEcho = true, CancellationToken cancellationToken = default)
+    {
+        await captureGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (IsRecording) throw new InvalidOperationException("Stop the current recording before starting another.");
+            var session = Store.GetSession(sessionId);
+            if (mediaTasks.ContainsKey(sessionId) || session.State is "Starting" or "Recording" or "Stopping" or "Importing")
+                throw new InvalidOperationException($"\"{session.Name}\" is still importing or recovering audio. Wait for it to finish, then continue recording.");
+            RequireProvider(session.ProviderId);
+            var part = AudioParts(Store.GetTracks(sessionId)) + 1;
+            return await StartCaptureAsync(session, outputDeviceId, microphoneDeviceId, reduceEcho, AppendStartTicks(session), part, cancellationToken);
+        }
+        finally { captureGate.Release(); }
+    }
+
+    private async Task<StoredSession> StartCaptureAsync(StoredSession session, string outputDeviceId, string? microphoneDeviceId,
+        bool reduceEcho, long offsetTicks, int part, CancellationToken cancellationToken)
+    {
+        if (session.ProviderId == "local-whisper") StartWhisperDownload();
+        var suffix = part > 1 ? $" (part {part})" : "";
+        var outputId = Guid.NewGuid();
+        microphoneTrackId = microphoneDeviceId is null ? null : Guid.NewGuid();
+        Store.AddTrack(new(outputId, session.Id, "Loopback", "Windows output" + suffix, null, 0, null));
+        if (microphoneTrackId is { } mic)
+            Store.AddTrack(new(mic, session.Id, "Microphone", "Local microphone" + suffix, null, 0,
+                reduceEcho ? JsonSerializer.Serialize(new MicrophoneOptions(outputId)) : null));
+        // A continued session that still has interrupted audio to recover keeps saying so after this part stops.
+        var previous = offsetTicks > 0 && session.State is "Recoverable" ? (session.State, session.Error) : ((string, string?)?)null;
+        Store.SetSessionState(session.Id, "Starting");
+        RecordingSessionId = session.Id;
+        recordingOffsetTicks = offsetTicks;
+        recordingRestoreState = previous;
+        captureFaulted = false;
+        recordingClock.Restart();
+        StartCaptureFeed(session, outputId);
+        if (microphoneTrackId is { } microphone) StartCaptureFeed(session, microphone);
+        try
+        {
+            // Short, pause-aligned chunks keep speech-to-text latency near one phrase instead of 30 seconds.
+            await capture.StartAsync(new(session.Id, Path.Combine(session.Directory, "originals"), outputDeviceId,
+                microphoneDeviceId, outputId, microphoneTrackId, ChunkDurationSeconds: LiveChunkMaxSeconds,
+                PauseSplitAfterMilliseconds: LivePauseSplitAfterMilliseconds, SessionOffsetTicks: offsetTicks), cancellationToken);
+            Store.SetSessionState(session.Id, "Recording");
+            Notify((offsetTicks > 0 ? $"Continuing \"{session.Name}\" at {Clock(offsetTicks)}: recording" : "Recording") +
+                " selected Windows output" + (microphoneDeviceId is null ? ". Local microphone is not captured." : " and a separate microphone track."));
+        }
+        catch
+        {
+            try { await capture.StopAsync(CancellationToken.None); }
+            finally
             {
-                // Short, pause-aligned chunks keep speech-to-text latency near one phrase instead of 30 seconds.
-                await capture.StartAsync(new(session.Id, Path.Combine(session.Directory, "originals"), outputDeviceId,
-                    microphoneDeviceId, outputId, microphoneTrackId, ChunkDurationSeconds: LiveChunkMaxSeconds,
-                    PauseSplitAfterMilliseconds: LivePauseSplitAfterMilliseconds), cancellationToken);
-                Store.SetSessionState(session.Id, "Recording");
-                Notify("Recording selected Windows output" + (microphoneDeviceId is null ? ". Local microphone is not captured." : " and a separate microphone track."));
-            }
-            catch
-            {
-                try { await capture.StopAsync(CancellationToken.None); }
+                recordingClock.Stop();
+                foreach (var feed in captureFeeds.Values) feed.Signals.Writer.TryComplete();
+                try { await Task.WhenAll(captureFeeds.Values.Select(feed => feed.Task)); }
                 finally
                 {
-                    recordingClock.Stop();
-                    foreach (var feed in captureFeeds.Values) feed.Signals.Writer.TryComplete();
-                    try { await Task.WhenAll(captureFeeds.Values.Select(feed => feed.Task)); }
-                    finally
+                    captureFeeds.Clear();
+                    RecordingSessionId = null;
+                    if (offsetTicks > 0)
+                        UpdateCaptureCheckpoint(() => Store.SetSessionState(session.Id, session.State, session.Error));
+                    else
                     {
-                        captureFeeds.Clear();
-                        RecordingSessionId = null;
                         UpdateCaptureCheckpoint(() => Store.SetSessionDuration(session.Id, recordingClock.Elapsed.Ticks));
                         UpdateCaptureCheckpoint(() => Store.SetSessionState(session.Id, "Faulted",
                             "Capture could not start. Check the selected endpoint and Windows microphone permissions."));
                     }
                 }
-                throw;
             }
-            return Store.GetSession(session.Id);
+            throw;
         }
-        finally { captureGate.Release(); }
+        return Store.GetSession(session.Id);
+    }
+
+    // Separate recordings in one session (the first recording, each continuation, each merged-in import).
+    private static int AudioParts(IEnumerable<StoredTrack> tracks) => tracks.Count(track => track.Kind is "Loopback" or "Imported");
+
+    private static string Clock(long ticks)
+    {
+        var time = TimeSpan.FromTicks(ticks);
+        return $"{(long)time.TotalHours:00}:{time.Minutes:00}:{time.Seconds:00}";
+    }
+
+    // Where appended audio starts: just after everything the session already holds, with a short gap between parts.
+    private long AppendStartTicks(StoredSession session)
+    {
+        var end = Math.Max(session.DurationTicks, Store.GetLastSegmentEndTicks(session.Id));
+        foreach (var track in Store.GetTracks(session.Id))
+        foreach (var manifest in Store.GetArchiveManifests(track.Id))
+            end = Math.Max(end, DeserializeNative(manifest).SessionEndTicks);
+        return end > 0 ? checked(end + PartGapTicks) : 0;
     }
 
     public async Task StopRecordingAsync(CancellationToken cancellationToken = default)
@@ -495,9 +556,10 @@ public sealed class AppController : IAppController
                     recordingClock.Stop();
                     foreach (var feed in captureFeeds.Values) feed.Signals.Writer.TryComplete();
                     await Task.WhenAll(captureFeeds.Values.Select(feed => feed.Task));
-                    UpdateCaptureCheckpoint(() => Store.SetSessionDuration(sessionId, recordingClock.Elapsed.Ticks));
-                    UpdateCaptureCheckpoint(() => Store.SetSessionState(sessionId, captureFaulted ? "Recoverable" : "Recorded",
-                        captureFaulted ? "Capture or indexing reported an error. Original chunks and gap diagnostics are retained." : null));
+                    UpdateCaptureCheckpoint(() => Store.SetSessionDuration(sessionId, recordingOffsetTicks + recordingClock.Elapsed.Ticks));
+                    UpdateCaptureCheckpoint(() => Store.SetSessionState(sessionId,
+                        captureFaulted ? "Recoverable" : recordingRestoreState?.State ?? "Recorded",
+                        captureFaulted ? "Capture or indexing reported an error. Original chunks and gap diagnostics are retained." : recordingRestoreState?.Error));
                 }
             }
             finally
@@ -870,12 +932,16 @@ public sealed class AppController : IAppController
         var leftovers = new List<string>();
         foreach (var id in ids)
         {
+            var merged = Store.GetMergedFolders(id);
             var directory = await Task.Run(() => Store.DeleteSession(id), CancellationToken.None);
             if (directory is null) continue;
             deleted++;
-            var full = Path.GetFullPath(directory);
-            if (full.StartsWith(sessionsRoot, StringComparison.OrdinalIgnoreCase) && !await TryDeleteDirectoryAsync(full))
-                leftovers.Add(full);
+            foreach (var folder in merged.Prepend(directory))
+            {
+                var full = Path.GetFullPath(folder);
+                if (full.StartsWith(sessionsRoot, StringComparison.OrdinalIgnoreCase) && !await TryDeleteDirectoryAsync(full))
+                    leftovers.Add(full);
+            }
         }
         var what = deleted == 1 ? "1 session and its" : $"{deleted:N0} sessions and their";
         Notify(leftovers.Count == 0
@@ -883,6 +949,179 @@ public sealed class AppController : IAppController
             : $"Deleted {what} records. {leftovers.Count:N0} folder(s) were in use and remain on disk: {string.Join("; ", leftovers)}",
             leftovers.Count > 0);
         return new(deleted, leftovers);
+    }
+
+    /// <summary>
+    /// Stitches sessions into the earliest one: each later session's audio tracks, transcript, speakers and jobs follow
+    /// it on one timeline, in recording order. The earliest keeps its name, provider and consent; the others are removed.
+    /// </summary>
+    public async Task<StoredSession> MergeSessionsAsync(IReadOnlyCollection<Guid> sessionIds, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(sessionIds);
+        await captureGate.WaitAsync(cancellationToken);
+        try
+        {
+            var sessions = sessionIds.Distinct().Select(Store.GetSession).OrderBy(session => session.CreatedUtc).ToArray();
+            if (sessions.Length < 2) throw new ArgumentException("Choose at least two sessions to merge.");
+            foreach (var session in sessions)
+            {
+                if (RecordingSessionId == session.Id)
+                    throw new InvalidOperationException($"Stop recording \"{session.Name}\" before merging it.");
+                if (mediaTasks.ContainsKey(session.Id) || session.State is not ("Recorded" or "Created" or "Faulted"))
+                    throw new InvalidOperationException(session.State == "Recoverable"
+                        ? $"\"{session.Name}\" has interrupted audio to recover. Resume it (Jobs → Resume) first, then merge."
+                        : $"\"{session.Name}\" is still {session.State.ToLowerInvariant()}. Wait for it to finish, then merge.");
+            }
+            var target = sessions[0];
+            foreach (var source in sessions.Skip(1)) await MergeIntoAsync(target.Id, source, cancellationToken);
+            wake.Release();
+            TranscriptChanged?.Invoke(target.Id);
+            Notify($"Merged {sessions.Length:N0} sessions into \"{target.Name}\"; later recordings follow the earlier ones on one timeline.");
+            return Store.GetSession(target.Id);
+        }
+        finally { captureGate.Release(); }
+    }
+
+    private async Task MergeIntoAsync(Guid targetId, StoredSession source, CancellationToken cancellationToken)
+    {
+        // No new claims for the source; merging invalidates leases, so a result still in flight is rejected and simply reruns.
+        Store.SetProcessingStateOnly(source.Id, "Paused");
+        try
+        {
+            for (var i = 0; i < 200 && new[] { speechLane, speakerLane }.Any(lane => lane.Session == source.Id); i++)
+            {
+                CancelActiveJobs(lane => lane.Session == source.Id);
+                await Task.Delay(50, cancellationToken);
+            }
+            // Speaker analysis replaces the registry after inference; it must not interleave with the combined registry.
+            await registryGate.WaitAsync(cancellationToken);
+            try
+            {
+                var plan = await Task.Run(() => PlanMerge(Store.GetSession(targetId), Store.GetSession(source.Id)), cancellationToken);
+                await Task.Run(() => Store.MergeSessions(plan), CancellationToken.None);
+            }
+            finally { registryGate.Release(); }
+        }
+        catch
+        {
+            try { Store.SetProcessingStateOnly(source.Id, source.ProcessingState); }
+            catch (Exception error) when (IsOperational(error)) { }
+            throw;
+        }
+    }
+
+    private SessionMerge PlanMerge(StoredSession target, StoredSession source)
+    {
+        var offset = AppendStartTicks(target);
+        var part = AudioParts(Store.GetTracks(target.Id));
+        var tracks = new List<(Guid, string, string?)>();
+        var archive = new List<(Guid, string)>();
+        var normalized = new List<(Guid, string)>();
+        foreach (var track in Store.GetTracks(source.Id))
+        {
+            if (track.Kind is "Loopback" or "Imported") part++;
+            var name = track.Kind == "Transcript" || part <= 1 ? track.Name
+                : System.Text.RegularExpressions.Regex.Replace(track.Name, @" \(part \d+\)$", "") + $" (part {part})";
+            var metadata = track.MetadataJson;
+            if (track.Kind == "Imported" && metadata is not null)
+            {
+                var checkpoint = ReadImport(track);
+                metadata = JsonSerializer.Serialize(checkpoint with { SessionOffsetTicks = checked(checkpoint.SessionOffsetTicks + offset) });
+            }
+            tracks.Add((track.Id, name, metadata));
+            foreach (var manifest in Store.GetArchiveManifests(track.Id))
+            {
+                var chunk = DeserializeNative(manifest);
+                archive.Add((chunk.Id, JsonSerializer.Serialize(chunk with { SessionStartTicks = checked(chunk.SessionStartTicks + offset) })));
+            }
+            foreach (var chunk in Store.GetChunks(track.Id))
+            {
+                var decoded = JsonSerializer.Deserialize<NormalizedChunk>(chunk.MetadataJson)
+                    ?? throw new InvalidDataException("Normalized source timing metadata is missing.");
+                normalized.Add((chunk.Id, JsonSerializer.Serialize(decoded with { SessionStartTicks = checked(decoded.SessionStartTicks + offset) })));
+            }
+        }
+        var (names, merges, registry) = PlanSpeakerMerge(target, source, offset);
+        return new(target.Id, source.Id, offset, tracks, archive, normalized, names, merges, registry);
+    }
+
+    /// <summary>
+    /// Automatic labels of the later session are renumbered after the earlier session's speakers; a name you gave
+    /// that the earlier session also has is the same person, so the two are combined. Voice profiles are carried over.
+    /// </summary>
+    private (Dictionary<string, string> Names, Dictionary<string, string> Merges, string? Registry) PlanSpeakerMerge(
+        StoredSession target, StoredSession source, long offset)
+    {
+        var names = new Dictionary<string, string>(StringComparer.Ordinal);
+        var merges = new Dictionary<string, string>(StringComparer.Ordinal);
+        SpeakerRegistrySnapshot? targetRegistry = null, sourceRegistry = null;
+        try
+        {
+            var targetJson = Store.GetSpeakerRegistry(target.Id);
+            var sourceJson = Store.GetSpeakerRegistry(source.Id);
+            targetRegistry = targetJson is null ? new(target.Id, 0, []) : CoreRegistrySerializer.Deserialize(targetJson);
+            sourceRegistry = sourceJson is null ? null : CoreRegistrySerializer.Deserialize(sourceJson);
+        }
+        catch (Exception error) when (error is InvalidDataException or JsonException)
+        {
+            Notify("Voice profiles could not be combined (" + error.Message + "); speaker labels are kept.", true);
+            targetRegistry = null;
+            sourceRegistry = null;
+        }
+        var entries = sourceRegistry?.Speakers ?? [];
+        var next = targetRegistry?.Speakers.Select(entry => entry.Identity.Number).DefaultIfEmpty(0).Max() ?? 0;
+        var numbers = entries.OrderBy(entry => entry.Identity.Number).ToDictionary(entry => entry.Identity.Id, _ => ++next);
+        var targetSpeakers = Store.GetSpeakers(target.Id);
+        var targetIds = targetSpeakers.Select(speaker => speaker.Id).ToHashSet(StringComparer.Ordinal);
+        var byName = targetSpeakers.GroupBy(speaker => speaker.Name.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First().Id, StringComparer.OrdinalIgnoreCase);
+        foreach (var speaker in Store.GetSpeakers(source.Id))
+        {
+            if (targetIds.Contains(speaker.Id)) continue;
+            var entry = entries.FirstOrDefault(item => item.Identity.Id.ToString("D") == speaker.Id);
+            if (entry is not null && speaker.Name.Trim() == $"Speaker {entry.Identity.Number}")
+                names[speaker.Id] = $"Speaker {numbers[entry.Identity.Id]}";
+            else if (byName.TryGetValue(speaker.Name.Trim(), out var into)) merges[speaker.Id] = into;
+        }
+        if (targetRegistry is null || sourceRegistry is null || entries.Length == 0) return (names, merges, null);
+
+        var ids = entries.ToDictionary(entry => entry.Identity.Id, entry => entry.Identity.Id);
+        var voiced = targetRegistry.Speakers.Select(entry => entry.Identity.Id).ToHashSet();
+        var tombstones = new Dictionary<Guid, Guid>();
+        foreach (var (from, into) in merges)
+        {
+            if (!Guid.TryParse(from, out var fromId) || !ids.ContainsKey(fromId) || !Guid.TryParse(into, out var intoId)) continue;
+            // Keep both voices under the earlier speaker; if that speaker has no voice yet, this one becomes theirs.
+            if (voiced.Contains(intoId)) tombstones[fromId] = intoId;
+            else ids[fromId] = intoId;
+        }
+        var moved = entries.Select(entry =>
+        {
+            var id = ids[entry.Identity.Id];
+            Guid? mergedInto = tombstones.TryGetValue(entry.Identity.Id, out var tombstone) ? tombstone
+                : entry.Identity.MergedIntoId is { } old ? (Guid?)ids.GetValueOrDefault(old, old) : null;
+            return entry with
+            {
+                Identity = entry.Identity with
+                {
+                    Id = id, SessionId = target.Id, Number = numbers[entry.Identity.Id], MergedIntoId = mergedInto,
+                    DisplayName = names.GetValueOrDefault(entry.Identity.Id.ToString("D"), entry.Identity.DisplayName)
+                },
+                Representatives = entry.Representatives.Select(item => item with
+                {
+                    SessionId = target.Id, SpeakerId = id,
+                    EvidenceStartTicks = checked(item.EvidenceStartTicks + offset), EvidenceEndTicks = checked(item.EvidenceEndTicks + offset)
+                }).ToImmutableArray()
+            };
+        });
+        var combined = new SpeakerRegistrySnapshot(target.Id, Math.Max(targetRegistry.Revision, sourceRegistry.Revision) + 1,
+            targetRegistry.Speakers.Concat(moved).OrderBy(entry => entry.Identity.Number).ToImmutableArray());
+        try { return (names, merges, CoreRegistrySerializer.Serialize(combined)); }
+        catch (InvalidDataException error)
+        {
+            Notify("Voice profiles could not be combined (" + error.Message + "); speaker labels are kept.", true);
+            return (names, merges, null);
+        }
     }
 
     private static async Task<bool> TryDeleteDirectoryAsync(string path)
@@ -927,11 +1166,11 @@ public sealed class AppController : IAppController
             if (timelinePlayer is not null)
             {
                 await timelinePlayer.PlayAsync(new AudioTranscriber.Audio.PlaybackRequest(sessionTicks,
-                    [new(trackId, Clips: [new(imported.ManagedOriginalPath, imported.AudioStreamIndex, 0,
+                    [new(trackId, Clips: [new(imported.ManagedOriginalPath, imported.AudioStreamIndex, checkpoint.SessionOffsetTicks,
                         format?.SampleRate ?? 16000, 0, null)])]), cancellationToken);
                 return;
             }
-            await playback.PlayAsync(new(new(trackId, imported.ManagedOriginalPath, format, 0,
+            await playback.PlayAsync(new(new(trackId, imported.ManagedOriginalPath, format, checkpoint.SessionOffsetTicks,
                 AudioStreamIndex: imported.AudioStreamIndex), sessionTicks, maximum), cancellationToken);
             return;
         }
@@ -1154,6 +1393,7 @@ public sealed class AppController : IAppController
             OnNativeChunk(chunk.ToCore());
         foreach (var track in Store.GetTracks(session.Id))
         {
+            if (IsMergedTrack(session, track)) continue;
             if (track.Kind == "Imported")
                 await NormalizeImportedTrackAsync(session, track, cancellationToken);
             else if (track.Kind is "Loopback" or "Microphone")
@@ -1162,6 +1402,15 @@ public sealed class AppController : IAppController
         }
         if (recovered.Diagnostics.Count > 0)
             throw new InvalidDataException("Original recovery reported gaps or untrusted files; see the retained archive diagnostics.");
+    }
+
+    // Merged-in tracks came from a finished session and keep their files in its folder; they never need recovery here.
+    private bool IsMergedTrack(StoredSession session, StoredTrack track)
+    {
+        var path = track.OriginalPath ?? Store.GetChunks(track.Id).FirstOrDefault()?.Path
+            ?? Store.GetArchiveManifests(track.Id).Select(DeserializeNative).FirstOrDefault()?.Path;
+        return path is not null && !Path.GetFullPath(path).StartsWith(
+            Path.GetFullPath(session.Directory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
     // Recorded tracks cut shards at capture-chunk boundaries (committed runs replay with their original layout).
@@ -1542,7 +1791,7 @@ public sealed class AppController : IAppController
         if (reference.Any(item => item.StartTicks + item.SampleCount * TimeSpan.TicksPerSecond / 16000L >= needed)) return true;
         if (!captureFeeds.ContainsKey(referenceTrackId) && !mediaTasks.ContainsKey(job.SessionId)) return true;
         // Loopback produces no packets while nothing plays, so speaker audio still missing long after is silence.
-        return RecordingSessionId == job.SessionId && recordingClock.Elapsed.Ticks > needed + TimeSpan.FromSeconds(90).Ticks;
+        return RecordingSessionId == job.SessionId && recordingOffsetTicks + recordingClock.Elapsed.Ticks > needed + TimeSpan.FromSeconds(90).Ticks;
     }
 
     private async Task<bool> ReduceEchoAsync(RecognitionWindow window, IReadOnlyList<StoredAudioChunk> microphone,
@@ -1868,7 +2117,8 @@ public sealed class AppController : IAppController
     private sealed record LocalSettings(string? WhisperModelPath, string? CloudBlockReason = null, double? FallbackBelowConfidence = null,
         bool? UseGpuParakeet = null);
     private sealed record MicrophoneOptions(Guid? EchoReferenceTrackId);
-    private sealed record MediaCheckpoint(string SourcePath, int StreamIndex, ImportedMedia? Imported);
+    // SessionOffsetTicks places an import that was merged into a later part of another session.
+    private sealed record MediaCheckpoint(string SourcePath, int StreamIndex, ImportedMedia? Imported, long SessionOffsetTicks = 0);
     private sealed class CaptureFeed
     {
         public Channel<byte> Signals { get; } = Channel.CreateBounded<byte>(1);

@@ -157,6 +157,10 @@
                                 ToolTip="Delete sessions… (pick old sessions to remove with their audio)" AutomationProperties.Name="Delete sessions">
                             <TextBlock Style="{StaticResource Glyph}" Text="&#xE74D;" FontSize="12" />
                         </Button>
+                        <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Command="{Binding MergeSessionsCommand}" Margin="6,0,0,0"
+                                ToolTip="Merge sessions… (stitch a recording that was split into several sessions back into one)" AutomationProperties.Name="Merge sessions">
+                            <TextBlock Style="{StaticResource Glyph}" Text="&#xE71B;" FontSize="12" />
+                        </Button>
                         <ContentControl Style="{StaticResource SectionHeader}" Content="Your sessions" Margin="0" />
                     </DockPanel>
                     <TextBlock DockPanel.Dock="Top" Text="Saved locally · right-click a session to delete it" Style="{StaticResource Caption}" Margin="14,2,14,8" TextTrimming="CharacterEllipsis"
@@ -214,7 +218,10 @@
                                         <ContentControl Style="{StaticResource SectionHeader}" Content="Start with your audio" />
                                         <TextBlock Style="{StaticResource Help}" Text="Just press Start recording: the defaults are ready (default output device, your microphone as a separate track, local Parakeet, English). It works without cloud consent or a key. Output and microphone are archived as separate tracks; originals survive slow or unavailable transcription." />
                                         <WrapPanel>
-                                            <Button Content="●  _Start recording" Style="{StaticResource PrimaryButton}" Command="{Binding StartRecordingCommand}" />
+                                            <Button Content="●  _Start recording" Style="{StaticResource PrimaryButton}" Command="{Binding StartRecordingCommand}"
+                                                    ToolTip="Starts a new session with the settings below." />
+                                            <Button Content="{Binding ContinueRecordingLabel}" Command="{Binding ContinueRecordingCommand}"
+                                                    ToolTip="Records more into the session selected on the left instead of starting a new one: new audio and text follow what it already has (for example after restarting the app). Uses that session's provider and language, and the devices below." />
                                             <Button Content="■  Stop recording" Style="{StaticResource StopButton}" Command="{Binding StopRecordingCommand}" />
                                             <Button Content="_Import audio / video…" Command="{Binding ImportAudioCommand}"
                                                     ToolTip="Bring an existing recording: an audio or audio-bearing video file. FFprobe inspects streams first: a single audio stream is selected automatically; multiple streams require your choice. A managed original is retained and progress appears in the status bar. No entire multi-hour recording is loaded into the UI." />
