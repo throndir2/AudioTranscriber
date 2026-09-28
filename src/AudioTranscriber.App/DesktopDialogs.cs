@@ -186,7 +186,7 @@ public sealed class DesktopDialogs(Func<Window> owner)
     }
 
     /// <summary>Lets the user check two or more sessions to stitch into the earliest one. Returns null when canceled.</summary>
-    public IReadOnlyList<Guid>? ChooseSessionsToMerge(IReadOnlyList<StoredSession> sessions, Guid? selectedId, Guid? recordingSessionId)
+    public IReadOnlyList<Guid>? ChooseSessionsToMerge(IReadOnlyList<StoredSession> sessions, IReadOnlyCollection<Guid> selectedIds, Guid? recordingSessionId)
     {
         var window = Dialog("Merge sessions", 640);
         static string? Blocked(StoredSession session, Guid? recording) =>
@@ -196,7 +196,7 @@ public sealed class DesktopDialogs(Func<Window> owner)
         var rows = sessions.OrderBy(session => session.CreatedUtc)
             .Select(session => new SessionDeletionRow(session, Blocked(session, recordingSessionId) is null, Blocked(session, recordingSessionId) ?? ""))
             .ToArray();
-        foreach (var row in rows) row.IsChecked = row.Session.Id == selectedId;
+        foreach (var row in rows) row.IsChecked = row.CanDelete && selectedIds.Contains(row.Session.Id);
         var panel = new DockPanel { Margin = new Thickness(22) };
         var intro = Help("Check the sessions that belong together, for example a meeting that was split when the app restarted. " +
             "They are joined in the order they were recorded: the earliest keeps its name, and each later session's audio, transcript " +
