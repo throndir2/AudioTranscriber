@@ -147,6 +147,11 @@ public sealed class MainViewModel : ObservableObject
         RenameSpeakerCommand = new AsyncCommand(() => RenameSpeakerAsync(ManagedSpeaker, SpeakerName),
             () => SelectedSession is not null && ManagedSpeaker is not null && !string.IsNullOrWhiteSpace(SpeakerName) && !closing);
         SetLineSpeakerCommand = new RelayCommand(SetLineSpeaker, () => SelectedRows.Count > 0 && !closing);
+        RecognizeVoicesCommand = new AsyncCommand(RecognizeVoicesAsync, () => CanWorkWithSession() && Voices.Count > 0);
+        RememberSessionVoicesCommand = new AsyncCommand(RememberSessionVoicesAsync, CanWorkWithSession);
+        RenameVoiceCommand = new RelayCommand(RenameVoice, () => SelectedVoice is not null && !closing);
+        ForgetVoiceCommand = new RelayCommand(ForgetVoice, () => SelectedVoice is not null && !closing);
+        ForgetAllVoicesCommand = new RelayCommand(ForgetAllVoices, () => Voices.Count > 0 && !closing);
         PlayRowCommand = new AsyncCommand(PlayRowAsync, () => SelectedRow is not null && !Busy && !closing);
         PlayTrackCommand = new AsyncCommand(PlayTrackAsync, () => SelectedSession is not null && SelectedTrack is not null && !Busy && !closing);
         StopPlaybackCommand = new RelayCommand(() => Guard(controller.StopPlayback), () => !closing);
@@ -267,6 +272,26 @@ public sealed class MainViewModel : ObservableObject
     public ObservableCollection<string> SpeakerNames { get; } = [];
     public TranscriptCollection Transcript { get; } = [];
     public ObservableCollection<StoredJob> Jobs { get; } = [];
+    // Remembered voices shared by all sessions.
+    public ObservableCollection<StoredVoice> Voices { get; } = [];
+    public StoredVoice? SelectedVoice { get => selectedVoice; set => Set(ref selectedVoice, value); }
+    private StoredVoice? selectedVoice;
+    private string voiceStamp = "";
+    public string VoiceLibrarySummary => Voices.Count == 0
+        ? "No voices remembered yet. Name a speaker in a session (rename, or label their lines) to remember them."
+        : $"{Voices.Count} remembered voice{(Voices.Count == 1 ? "" : "s")}.";
+    public bool RememberVoices
+    {
+        get => controller.RememberVoices;
+        set
+        {
+            Guard(() => controller.SetRememberVoices(value));
+            Changed();
+            SetStatus(controller.RememberVoices
+                ? "Voices you name are remembered, and later recordings name those speakers automatically."
+                : "Voice remembering is off: new names are not remembered and recordings are not matched to remembered voices. Existing voices are kept until you forget them.");
+        }
+    }
     public IReadOnlyList<ProviderOption> Providers { get; }
     public string DataRoot => controller.Store.RootDirectory;
     public bool IsRecording => controller.IsRecording;
@@ -469,6 +494,11 @@ public sealed class MainViewModel : ObservableObject
     public ICommand RestoreRawCommand { get; }
     public ICommand RenameSpeakerCommand { get; }
     public ICommand SetLineSpeakerCommand { get; }
+    public ICommand RecognizeVoicesCommand { get; }
+    public ICommand RememberSessionVoicesCommand { get; }
+    public ICommand RenameVoiceCommand { get; }
+    public ICommand ForgetVoiceCommand { get; }
+    public ICommand ForgetAllVoicesCommand { get; }
     public ICommand PlayRowCommand { get; }
     public ICommand PlayTrackCommand { get; }
     public ICommand StopPlaybackCommand { get; }
@@ -935,6 +965,7 @@ public sealed class MainViewModel : ObservableObject
         Changed(nameof(SelectedSession));
         if (reloaded && keep.Count > 1) SessionsReloaded?.Invoke(keep);
         RefreshSessionDetails();
+        RefreshVoices();
         Changed(nameof(IsRecording));
         Changed(nameof(CaptureState));
         Changed(nameof(RecordingSession));
@@ -1411,6 +1442,7 @@ public sealed class MainViewModel : ObservableObject
         {
             var kept = await controller.RenameSpeakerAsync(session.Id, speaker.Id, name);
             RefreshSessionDetails();
+            RefreshVoices();
             ManagedSpeaker = Speakers.FirstOrDefault(x => x.Id == kept);
             LoadTranscript();
             SetStatus(existing is null
@@ -1468,6 +1500,79 @@ public sealed class MainViewModel : ObservableObject
             $"New name for \"{speaker.Name}\" on every line of this session. Choosing another speaker's name merges the two.",
             speaker.Name, Speakers.Where(x => x.Id != speakerId).Select(x => x.Name).Distinct(StringComparer.OrdinalIgnoreCase), "Rename");
         return name is null || name == speaker.Name ? Task.CompletedTask : RenameSpeakerAsync(speaker, name);
+    }
+
+    private void RefreshVoices()
+    {
+        var voices = controller.GetVoiceLibrary();
+        var stamp = string.Join("|", voices.Select(voice => $"{voice.Id}:{voice.UpdatedUtc.UtcTicks}:{voice.Summary}"));
+        if (stamp == voiceStamp) return;
+        voiceStamp = stamp;
+        var selectedId = SelectedVoice?.Id;
+        Replace(Voices, voices);
+        SelectedVoice = Voices.FirstOrDefault(voice => voice.Id == selectedId);
+        Changed(nameof(VoiceLibrarySummary));
+        CommandManager.InvalidateRequerySuggested();
+    }
+
+    private Task RecognizeVoicesAsync() => RunForSessionAsync("Matching this session's speakers against remembered voices…", async (id, token) =>
+    {
+        var names = await controller.RecognizeKnownVoicesAsync(id, token);
+        SetStatus(names.Count > 0
+            ? $"Recognized {string.Join(", ", names)} by voice."
+            : "No unnamed speaker in this session matched a remembered voice closely enough, so nothing was renamed.");
+    });
+
+    private Task RememberSessionVoicesAsync() => RunForSessionAsync("Remembering this session's named voices…", async (id, token) =>
+    {
+        var names = await controller.RememberSessionVoicesAsync(id, token);
+        RefreshVoices();
+        SetStatus(names.Count > 0
+            ? $"Remembered {string.Join(", ", names)}. Future recordings name them automatically."
+            : "No named speaker in this session has a voice profile yet. Run speaker analysis, then name speakers or label a few of their lines.");
+    });
+
+    private void RenameVoice()
+    {
+        if (SelectedVoice is not { } voice) return;
+        var name = dialogs.PromptSpeakerName("Rename remembered voice",
+            $"New name for the remembered voice \"{voice.Name}\". Future recordings use it; past sessions keep their names. " +
+            "Choosing another remembered name combines the two voices.",
+            voice.Name, Voices.Where(item => item.Id != voice.Id).Select(item => item.Name), "Rename");
+        if (name is null || name == voice.Name) return;
+        Guard(() =>
+        {
+            controller.RenameVoice(voice.Id, name);
+            RefreshVoices();
+            SetStatus($"The remembered voice is now \"{name}\".");
+        });
+    }
+
+    private void ForgetVoice()
+    {
+        if (SelectedVoice is not { } voice) return;
+        if (!dialogs.Confirm("Forget this voice?",
+                $"Delete the remembered voice \"{voice.Name}\"?\n\nFuture recordings will no longer name them automatically. " +
+                "Past sessions keep their speaker names and their own in-session voice profiles.")) return;
+        Guard(() =>
+        {
+            controller.ForgetVoice(voice.Id);
+            RefreshVoices();
+            SetStatus($"Forgot \"{voice.Name}\"'s voice.");
+        });
+    }
+
+    private void ForgetAllVoices()
+    {
+        if (!dialogs.Confirm("Forget all voices?",
+                $"Delete all {Voices.Count} remembered voice{(Voices.Count == 1 ? "" : "s")}?\n\nFuture recordings will no longer name anyone automatically " +
+                "until you name speakers again. Past sessions keep their speaker names and their own in-session voice profiles.")) return;
+        Guard(() =>
+        {
+            var count = controller.ForgetAllVoices();
+            RefreshVoices();
+            SetStatus($"Forgot {count} remembered voice{(count == 1 ? "" : "s")}.");
+        });
     }
 
     public void PlaySelectedRow()

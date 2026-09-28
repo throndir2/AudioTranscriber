@@ -38,6 +38,8 @@ public sealed class AppController : IAppController
     private readonly CancellationTokenSource shutdown = new();
     private readonly SemaphoreSlim captureGate = new(1, 1);
     private readonly SemaphoreSlim registryGate = new(1, 1);
+    // Guards read-modify-write of the cross-session voice library. Lock order: registryGate, then voiceGate.
+    private readonly object voiceGate = new();
     private readonly ConcurrentDictionary<Guid, Task> backgroundTasks = new();
     private readonly WakeSignal wake = new();
     private readonly ConcurrentDictionary<Guid, Task> mediaTasks = new();
@@ -678,28 +680,182 @@ public sealed class AppController : IAppController
         name = name?.Trim() ?? "";
         if (name.Length == 0) throw new ArgumentException("A speaker name is required.");
         string keep;
-        StoredSpeaker existing;
+        StoredSpeaker? existing;
+        StoredVoice? remembered;
         await registryGate.WaitAsync(cancellationToken);
         try
         {
             var speakers = Store.GetSpeakers(sessionId);
             var source = speakers.FirstOrDefault(item => item.Id == speakerId) ?? throw new ArgumentException("Choose a speaker from this session.");
-            var match = speakers.FirstOrDefault(item => item.Id != speakerId && SameName(item.Name, name));
-            if (match is null)
+            existing = speakers.FirstOrDefault(item => item.Id != speakerId && SameName(item.Name, name));
+            if (existing is null)
             {
                 Store.RenameSpeaker(sessionId, speakerId, name);
-                TranscriptChanged?.Invoke(sessionId);
-                return speakerId;
+                keep = speakerId;
             }
-            existing = match;
-            keep = MergeLocked(sessionId, source, existing);
+            else keep = MergeLocked(sessionId, source, existing);
+            remembered = SyncVoiceLocked(sessionId, keep, renamed: true, force: false);
         }
         finally { registryGate.Release(); }
         TranscriptChanged?.Invoke(sessionId);
+        var memory = remembered is null ? "" : $" Remembered {remembered.Name}'s voice, so future recordings name them automatically.";
+        if (existing is null)
+        {
+            if (memory.Length > 0) Notify(memory.Trim());
+            return keep;
+        }
         var requeued = RequeueSpeakerWindows(sessionId, onlyUnresolved: true);
-        Notify($"Merged into \"{existing.Name.Trim()}\": their voice samples are combined, so future lines match either voice." +
+        Notify($"Merged into \"{existing.Name.Trim()}\": their voice samples are combined, so future lines match either voice." + memory +
             (requeued > 0 ? $" Re-checking {requeued} window(s) that still have unknown speakers." : ""));
         return keep;
+    }
+
+    public bool RememberVoices => settings.RememberVoices != false;
+
+    public void SetRememberVoices(bool enabled) => UpdateSettings(current => current with { RememberVoices = enabled });
+
+    public IReadOnlyList<StoredVoice> GetVoiceLibrary() => Store.GetVoices();
+
+    public async Task<IReadOnlyList<string>> RecognizeKnownVoicesAsync(Guid sessionId, CancellationToken cancellationToken = default)
+    {
+        List<string> recognized;
+        await registryGate.WaitAsync(cancellationToken);
+        try { recognized = RecognizeVoicesLocked(sessionId, force: true); }
+        finally { registryGate.Release(); }
+        if (recognized.Count > 0) TranscriptChanged?.Invoke(sessionId);
+        return recognized;
+    }
+
+    public async Task<IReadOnlyList<string>> RememberSessionVoicesAsync(Guid sessionId, CancellationToken cancellationToken = default)
+    {
+        var remembered = new List<string>();
+        await registryGate.WaitAsync(cancellationToken);
+        try
+        {
+            foreach (var speaker in Store.GetSpeakers(sessionId).Where(item => !IsAutomaticName(item.Name)))
+                if (SyncVoiceLocked(sessionId, speaker.Id, renamed: false, force: true) is { } voice && !remembered.Contains(voice.Name))
+                    remembered.Add(voice.Name);
+        }
+        finally { registryGate.Release(); }
+        return remembered;
+    }
+
+    public void RenameVoice(Guid voiceId, string name)
+    {
+        name = name?.Trim() ?? "";
+        if (name.Length == 0) throw new ArgumentException("A voice name is required.");
+        lock (voiceGate)
+        {
+            var voices = Store.GetVoices();
+            var voice = voices.FirstOrDefault(item => item.Id == voiceId) ?? throw new ArgumentException("Choose a remembered voice.");
+            var other = voices.FirstOrDefault(item => item.Id != voiceId && SameName(item.Name, name));
+            if (other is null)
+            {
+                Store.SaveVoice(voice with { Name = name, UpdatedUtc = DateTimeOffset.UtcNow });
+                return;
+            }
+            // Same name means same person: keep one voice with both sets of samples.
+            var samples = other.Samples.Concat(voice.ModelId == other.ModelId ? voice.Samples : []).ToArray();
+            Store.SaveVoice(other with { Samples = samples[Math.Max(0, samples.Length - VoiceLibrary.MaximumSamples)..], UpdatedUtc = DateTimeOffset.UtcNow });
+            Store.DeleteVoice(voiceId, relinkTo: other.Id);
+        }
+    }
+
+    public void ForgetVoice(Guid voiceId)
+    {
+        lock (voiceGate) Store.DeleteVoice(voiceId);
+    }
+
+    public int ForgetAllVoices()
+    {
+        lock (voiceGate) return Store.DeleteAllVoices();
+    }
+
+    private static string VoiceLink(Guid voiceId) => LibraryStore.VoiceLinkPrefix + voiceId.ToString("D");
+    // Marks a speaker the user deliberately left unnamed, so the library never renames it.
+    private const string ManualVoiceLink = LibraryStore.VoiceLinkPrefix + "manual";
+
+    // Keeps the voice library in step with a name the user gave a session speaker. Caller holds registryGate.
+    private StoredVoice? SyncVoiceLocked(Guid sessionId, string speakerId, bool renamed, bool force)
+    {
+        if (!force && !RememberVoices) return null;
+        lock (voiceGate)
+        {
+            var speaker = Store.GetSpeakers(sessionId).FirstOrDefault(item => item.Id == speakerId);
+            if (speaker is null) return null;
+            var name = speaker.Name.Trim();
+            var automatic = IsAutomaticName(name);
+            var now = DateTimeOffset.UtcNow;
+            var voices = Store.GetVoices();
+            bool Mine(StoredVoiceSample sample) => sample.SessionId == sessionId && sample.SpeakerId == speakerId;
+            // Samples this speaker gave under another name belong to someone else now.
+            foreach (var stale in voices.Where(voice => (automatic || !SameName(voice.Name, name)) && voice.Samples.Any(Mine)))
+            {
+                var rest = stale.Samples.Where(sample => !Mine(sample)).ToArray();
+                if (rest.Length == 0) Store.DeleteVoice(stale.Id);
+                else Store.SaveVoice(stale with { Samples = rest, UpdatedUtc = now });
+            }
+            if (automatic)
+            {
+                if (renamed) Store.SetSpeakerParticipant(sessionId, speakerId, ManualVoiceLink);
+                return null;
+            }
+            var json = Store.GetSpeakerRegistry(sessionId);
+            var print = json is null || !Guid.TryParse(speakerId, out var guid) ? null
+                : VoiceLibrary.FromSession(CoreRegistrySerializer.Deserialize(json), guid);
+            if (print is null) return null;
+            var existing = voices.FirstOrDefault(voice => SameName(voice.Name, name));
+            var samples = existing is null || existing.ModelId != DiarizationModels.EmbeddingSha256 ? []
+                : existing.Samples.Where(sample => !Mine(sample)).ToList();
+            samples.AddRange(VoiceLibrary.SelectSamples(print.Samples).Select(values => new StoredVoiceSample(sessionId, speakerId, values)));
+            var voice = new StoredVoice(existing?.Id ?? Guid.NewGuid(), existing?.Name ?? name, DiarizationModels.EmbeddingSha256,
+                samples[Math.Max(0, samples.Count - VoiceLibrary.MaximumSamples)..], existing?.CreatedUtc ?? now, now);
+            Store.SaveVoice(voice);
+            Store.SetSpeakerParticipant(sessionId, speakerId, VoiceLink(voice.Id));
+            return voice;
+        }
+    }
+
+    // Names this session's still-unnamed speakers whose voice matches a remembered one, using stored embeddings only.
+    // Caller holds registryGate.
+    private List<string> RecognizeVoicesLocked(Guid sessionId, bool force)
+    {
+        var recognized = new List<string>();
+        if (!force && !RememberVoices) return recognized;
+        if (!Store.GetSpeakers(sessionId).Any(item => IsAutomaticName(item.Name) && item.ParticipantId is null)) return recognized;
+        lock (voiceGate)
+        {
+            var voices = Store.GetVoices().Where(voice => voice.ModelId == DiarizationModels.EmbeddingSha256)
+                .Select(voice => (Voice: voice, Print: VoiceLibrary.FromSamples(voice.Samples.Select(sample => sample.Values))))
+                .Where(item => item.Print is not null).ToArray();
+            if (voices.Length == 0) return recognized;
+            var prints = voices.Select(item => item.Print!).ToArray();
+            var json = Store.GetSpeakerRegistry(sessionId);
+            if (json is null) return recognized;
+            var registry = CoreRegistrySerializer.Deserialize(json);
+            foreach (var candidate in Store.GetSpeakers(sessionId).Where(item => IsAutomaticName(item.Name) && item.ParticipantId is null))
+            {
+                var current = Store.GetSpeakers(sessionId);
+                if (!current.Any(item => item.Id == candidate.Id) || !Guid.TryParse(candidate.Id, out var guid)) continue;
+                if (VoiceLibrary.FromSession(registry, guid) is not { } print || VoiceLibrary.BestMatch(print, prints, out _) is not { } index) continue;
+                var voice = voices[index].Voice;
+                var named = current.FirstOrDefault(item => item.Id != candidate.Id && SameName(item.Name, voice.Name));
+                string keep;
+                if (named is null)
+                {
+                    Store.RenameSpeaker(sessionId, candidate.Id, voice.Name);
+                    keep = candidate.Id;
+                }
+                else
+                {
+                    keep = MergeLocked(sessionId, candidate, named);
+                    registry = CoreRegistrySerializer.Deserialize(Store.GetSpeakerRegistry(sessionId)!);
+                }
+                Store.SetSpeakerParticipant(sessionId, keep, VoiceLink(voice.Id));
+                if (!recognized.Contains(voice.Name)) recognized.Add(voice.Name);
+            }
+        }
+        return recognized;
     }
 
     // Same name means same person: fold both voice profiles together so future lines match either one.
@@ -994,6 +1150,7 @@ public sealed class AppController : IAppController
                 return;
             }
             string? absorbed = null, soundsLike = null;
+            StoredVoice? remembered = null;
             await registryGate.WaitAsync(token);
             try
             {
@@ -1019,6 +1176,7 @@ public sealed class AppController : IAppController
                     if (IsAutomaticName(similar.Name) && !IsAutomaticName(labeled.Name)) { MergeLocked(sessionId, similar, labeled); absorbed = similar.Name; }
                     else soundsLike = similar.Name;
                 }
+                remembered = SyncVoiceLocked(sessionId, speaker.Id, renamed: false, force: false);
             }
             finally { registryGate.Release(); }
             if (absorbed is not null) TranscriptChanged?.Invoke(sessionId);
@@ -1026,6 +1184,7 @@ public sealed class AppController : IAppController
             Notify($"Learned {speaker.Name}'s voice from {used} labeled line(s)." +
                 (absorbed is not null ? $" It matches {absorbed}, so {absorbed}'s lines are now {speaker.Name}." : "") +
                 (soundsLike is not null ? $" It sounds like {soundsLike}; if they are the same person, rename {soundsLike} to {speaker.Name} to merge them." : "") +
+                (remembered is not null ? " Remembered for future recordings." : "") +
                 (requeued > 0 ? $" Re-checking {requeued} window(s) that still have unknown speakers." : ""));
         }
         finally { if (File.Exists(workPath)) File.Delete(workPath); }
@@ -2111,7 +2270,11 @@ public sealed class AppController : IAppController
                 return;
             }
             RefreshSpeakerAssignments(job.SessionId, job.TrackId, startTicks, endTicks);
+            IReadOnlyList<string> recognized = [];
+            try { recognized = RecognizeVoicesLocked(job.SessionId, force: false); }
+            catch (Exception error) when (IsOperational(error)) { Notify("Matching remembered voices failed: " + error.Message, true); }
             TranscriptChanged?.Invoke(job.SessionId);
+            if (recognized.Count > 0) Notify($"Recognized {string.Join(", ", recognized)} by voice from the voice library.");
             // Routine markers (algorithm version, short-tail padding, silence) are kept in the raw attempt, not announced.
             var notable = (result.Diagnostics.IsDefault ? [] : result.Diagnostics).Where(item => item != SherpaDiarizationService.AlgorithmVersion &&
                 !item.StartsWith("ShortInputSilencePadded", StringComparison.Ordinal) && item != "NoSpeechDetected").ToArray();
@@ -2343,7 +2506,7 @@ public sealed class AppController : IAppController
     }
 
     private sealed record LocalSettings(string? WhisperModelPath, string? CloudBlockReason = null, double? FallbackBelowConfidence = null,
-        bool? UseGpuParakeet = null);
+        bool? UseGpuParakeet = null, bool? RememberVoices = null);
     private sealed record MicrophoneOptions(Guid? EchoReferenceTrackId);
     // SessionOffsetTicks places an import that was merged into a later part of another session.
     private sealed record MediaCheckpoint(string SourcePath, int StreamIndex, ImportedMedia? Imported, long SessionOffsetTicks = 0);

@@ -486,13 +486,19 @@
                                 <TabItem Header="Speaker names">
                                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                                         <StackPanel Margin="8,6">
-                                            <TextBlock Text="Rename a speaker on every line. Giving two speakers the same name merges them: their voice samples combine so future lines match better." TextWrapping="Wrap" Foreground="{StaticResource Muted}" Margin="0,0,0,4" />
+                                            <TextBlock Text="Rename a speaker on every line. Giving two speakers the same name merges them: their voice samples combine so future lines match better. Named speakers are remembered in the voice library, so later recordings name them automatically." TextWrapping="Wrap" Foreground="{StaticResource Muted}" Margin="0,0,0,4" />
                                             <WrapPanel>
                                                 <ComboBox Width="190" ItemsSource="{Binding Speakers}" SelectedItem="{Binding ManagedSpeaker}" DisplayMemberPath="Name" AutomationProperties.Name="Speaker to rename" />
                                                 <TextBox Width="220" Text="{Binding SpeakerName, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Speaker display name">
                                                     <TextBox.InputBindings><KeyBinding Key="Return" Command="{Binding RenameSpeakerCommand}" /></TextBox.InputBindings>
                                                 </TextBox>
                                                 <Button Content="Rename throughout session" Command="{Binding RenameSpeakerCommand}" />
+                                            </WrapPanel>
+                                            <WrapPanel Margin="0,4,0,0">
+                                                <Button Content="Match known voices" Command="{Binding RecognizeVoicesCommand}"
+                                                        ToolTip="Names this session's unnamed speakers (Speaker 1, 2…) whose voice matches a remembered voice. Uses saved voice profiles only; no audio is re-analyzed." />
+                                                <Button Content="Remember this session's named voices" Command="{Binding RememberSessionVoicesCommand}"
+                                                        ToolTip="Adds every named speaker in this session to the voice library, for sessions named before voices were remembered." />
                                             </WrapPanel>
                                             <TextBlock Text="The microphone track is usually one person (you). Name it once and every microphone line, including ones transcribed later, gets that speaker." TextWrapping="Wrap" Foreground="{StaticResource Muted}" Margin="0,10,0,4" />
                                             <WrapPanel>
@@ -649,6 +655,22 @@
                                                 <Button Content="Analyze selected session speakers" Command="{Binding DiarizeCommand}" />
                                             </WrapPanel>
                                             <TextBlock Style="{StaticResource Help}" Text="Automatic labels are not verified participant identities. Short turns, overlap, changing character voices, and crowded windows can remain uncertain. More session speakers are possible, but the segmentation model has local-window limits. Manual rename and assignment are available in Transcript." />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource Card}">
+                                        <StackPanel>
+                                            <ContentControl Style="{StaticResource SectionHeader}" Content="Voice library (remembered speakers)" />
+                                            <TextBlock Style="{StaticResource Help}" Text="When you name a speaker, by renaming them or labeling their lines, a few voice samples are saved here. Samples are 256-number voice embeddings, not audio. Later recordings, and Match known voices on older sessions, compare new speakers with these samples and name the matching person automatically. Only close, clear matches are named; the rest stay Speaker 1, 2… Voices are stored only on this PC and never exported or uploaded. Different mics, heavy compression, or character voices can prevent a match; naming someone in two or three sessions helps." />
+                                            <CheckBox IsChecked="{Binding RememberVoices}" Content="Remember speakers I name and recognize them in future recordings" />
+                                            <TextBlock Text="{Binding VoiceLibrarySummary}" TextWrapping="Wrap" FontWeight="SemiBold" Margin="0,4,0,4" />
+                                            <ListBox ItemsSource="{Binding Voices}" SelectedItem="{Binding SelectedVoice}" DisplayMemberPath="Summary" MinHeight="60" MaxHeight="180"
+                                                     AutomationProperties.Name="Remembered voices" />
+                                            <WrapPanel Margin="0,4,0,0">
+                                                <Button Content="Rename…" Command="{Binding RenameVoiceCommand}" />
+                                                <Button Content="Forget selected voice" Command="{Binding ForgetVoiceCommand}" />
+                                                <Button Content="Forget all voices…" Command="{Binding ForgetAllVoicesCommand}" />
+                                            </WrapPanel>
+                                            <TextBlock Style="{StaticResource Help}" Text="Forgetting deletes the remembered samples at once. Past sessions keep their speaker names and their own in-session voice profiles." />
                                         </StackPanel>
                                     </Border>
                                     <Border Style="{StaticResource Card}">

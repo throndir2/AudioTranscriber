@@ -210,6 +210,30 @@ The app never infers identity from names, but user actions feed the registry:
   unattributed turn are re-queued; **Analyze speakers** re-queues every window.
   Registry reads/writes by analysis, enrollment and merges are serialized.
 
+## Cross-session voice library
+
+`LibraryStore` keeps a `voices` table shared by all sessions: a user-given name,
+the embedding model SHA256, and up to 15 normalized 256-dimensional samples. Each
+sample is tagged with the session and session speaker it came from.
+`AppController.SyncVoiceLocked` adds up to three diverse representatives of a
+session speaker, including those of speakers merged into it. It runs only when the
+user names that speaker, by renaming or by line-label enrollment. When a speaker is
+renamed, the samples it gave under its old name are withdrawn. Automatic matches
+never add samples.
+
+After each speaker job commits, `RecognizeVoicesLocked` compares every session
+speaker that still has an automatic "Speaker N" name and no library link against
+the library. It uses `VoiceLibrary.BestMatch`: the same 0.70 score and 0.08
+runner-up margin as in-session matching. The score is centroid cosine averaged
+with the best sample-pair cosine. A match renames the speaker, or merges it with
+the session speaker that already has the name, and stores `voice:<id>` in
+`speakers.participant_id`. `voice:manual` marks a speaker the user renamed back to
+"Speaker N", so the library never renames it. Voices from a different embedding
+model are ignored. Deleting a voice clears its links; session registries are
+untouched. The preference `RememberVoices` (on by default) gates both remembering
+and automatic recognition. The explicit **Match known voices** and **Remember this
+session's named voices** actions ignore it.
+
 Short interjections, overlap-only speech, crowding, noise, roleplayed voices,
 similar voices and recording changes can remain Unknown or split one person.
 Thresholds are conservative defaults, not calibrated D&D operating points.
@@ -227,9 +251,11 @@ each redirected output channel is capped at 65,536 characters. Output is not
 forwarded as private native error text. App crashes can leave a job directory;
 application recovery should clean its own abandoned directories.
 
-Registry embeddings and request files are local biometric-like voice data.
-Store them in the session's private user-data directory, not a shared/export
-folder, and delete them with the session according to the app's retention policy.
+Registry embeddings, voice-library samples and request files are local
+biometric-like voice data. Store them in the private user-data directory, not a
+shared/export folder. Delete session data with the session according to the app's
+retention policy; voice-library entries are deleted from **Privacy / models →
+Voice library**. Exports never include embeddings.
 Installing models makes public model-download requests; inference makes none.
 
 ## Verification performed, not a quality benchmark

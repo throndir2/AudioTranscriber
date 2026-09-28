@@ -73,6 +73,19 @@ public interface IAppController : IAsyncDisposable
     void AssignSpeaker(Guid sessionId, IReadOnlyCollection<string> segmentIds, string? speakerId);
     // Renames a speaker; a name another speaker already has merges the two. Returns the surviving speaker ID.
     Task<string> RenameSpeakerAsync(Guid sessionId, string speakerId, string name, CancellationToken cancellationToken = default);
+    // Voice library shared by all sessions. Naming a speaker remembers their voice (embeddings only, never audio);
+    // later sessions' unnamed speakers whose voice matches are named automatically.
+    bool RememberVoices { get; }
+    void SetRememberVoices(bool enabled);
+    IReadOnlyList<StoredVoice> GetVoiceLibrary();
+    // Names the session's unnamed speakers from the voice library now; returns the names applied.
+    Task<IReadOnlyList<string>> RecognizeKnownVoicesAsync(Guid sessionId, CancellationToken cancellationToken = default);
+    // Adds every named speaker of the session to the voice library; returns the names remembered.
+    Task<IReadOnlyList<string>> RememberSessionVoicesAsync(Guid sessionId, CancellationToken cancellationToken = default);
+    // Renaming to another remembered name combines the two voices.
+    void RenameVoice(Guid voiceId, string name);
+    void ForgetVoice(Guid voiceId);
+    int ForgetAllVoices();
     void PauseTranscription(Guid sessionId);
     void ResumeTranscription(Guid sessionId);
     void CancelTranscription(Guid sessionId);
