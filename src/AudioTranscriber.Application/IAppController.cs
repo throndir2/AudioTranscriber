@@ -82,6 +82,9 @@ public interface IAppController : IAsyncDisposable
     Task<IReadOnlyList<string>> RecognizeKnownVoicesAsync(Guid sessionId, CancellationToken cancellationToken = default);
     // Adds every named speaker of the session to the voice library; returns the names remembered.
     Task<IReadOnlyList<string>> RememberSessionVoicesAsync(Guid sessionId, CancellationToken cancellationToken = default);
+    // Same for every session, oldest first. firstRunOnly runs once per library (with the library on), to learn
+    // speakers named before the voice library existed.
+    Task<IReadOnlyList<string>> RememberAllSessionVoicesAsync(bool firstRunOnly = false, CancellationToken cancellationToken = default);
     // Renaming to another remembered name combines the two voices.
     void RenameVoice(Guid voiceId, string name);
     void ForgetVoice(Guid voiceId);

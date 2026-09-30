@@ -667,6 +667,8 @@
                                             <ListBox ItemsSource="{Binding Voices}" SelectedItem="{Binding SelectedVoice}" DisplayMemberPath="Summary" MinHeight="60" MaxHeight="180"
                                                      AutomationProperties.Name="Remembered voices" />
                                             <WrapPanel Margin="0,4,0,0">
+                                                <Button Content="Learn from past sessions" Command="{Binding RememberAllVoicesCommand}"
+                                                        ToolTip="Remember every speaker you named in any session that has a voice profile. Runs once automatically; use it again any time." />
                                                 <Button Content="Rename…" Command="{Binding RenameVoiceCommand}" />
                                                 <Button Content="Forget selected voice" Command="{Binding ForgetVoiceCommand}" />
                                                 <Button Content="Forget all voices…" Command="{Binding ForgetAllVoicesCommand}" />

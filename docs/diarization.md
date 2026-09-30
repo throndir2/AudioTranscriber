@@ -231,8 +231,12 @@ the session speaker that already has the name, and stores `voice:<id>` in
 "Speaker N", so the library never renames it. Voices from a different embedding
 model are ignored. Deleting a voice clears its links; session registries are
 untouched. The preference `RememberVoices` (on by default) gates both remembering
-and automatic recognition. The explicit **Match known voices** and **Remember this
-session's named voices** actions ignore it.
+and automatic recognition. The explicit **Match known voices**, **Remember this
+session's named voices** and **Learn from past sessions** actions ignore it.
+`RememberAllSessionVoicesAsync` runs `SyncVoiceLocked` for every named speaker of
+every session, oldest first; with `firstRunOnly` it runs once per library (when
+remembering is on) and then sets the `VoiceLibraryBackfilled` preference, so
+speakers named before the library existed are learned on the first start.
 
 Short interjections, overlap-only speech, crowding, noise, roleplayed voices,
 similar voices and recording changes can remain Unknown or split one person.
