@@ -400,6 +400,36 @@ public sealed class ControllerTests
         Assert.Equal("Speaker 1", Assert.Single(fixture.App.Store.GetSpeakers(third.Id)).Name);
     }
 
+    [Fact]
+    public async Task SpeakersNamedBeforeTheVoiceLibraryAreLearnedOnce()
+    {
+        await using var fixture = new Fixture();
+        fixture.Provider.Release.TrySetResult();
+        fixture.App.SetRememberVoices(false);
+        var session = await fixture.App.StartRecordingAsync("Older synthetic session", "synthetic-output", null, "local-whisper", "en", false);
+        fixture.Capture.Emit(32000);
+        await fixture.App.StopRecordingAsync();
+        await UntilAsync(() => fixture.App.Store.GetSpeakers(session.Id).Count == 1 &&
+            fixture.App.Store.GetProgress(session.Id) is { Succeeded: 3, Pending: 0, Running: 0 });
+        var speaker = Assert.Single(fixture.App.Store.GetSpeakers(session.Id));
+        await fixture.App.RenameSpeakerAsync(session.Id, speaker.Id, "Alice");
+        Assert.Empty(fixture.App.GetVoiceLibrary());
+
+        // The first-run backfill waits for remembering to be on.
+        Assert.Empty(await fixture.App.RememberAllSessionVoicesAsync(firstRunOnly: true));
+        fixture.App.SetRememberVoices(true);
+        Assert.Equal(["Alice"], await fixture.App.RememberAllSessionVoicesAsync(firstRunOnly: true));
+        var voice = Assert.Single(fixture.App.GetVoiceLibrary());
+        Assert.Equal("Alice", voice.Name);
+        Assert.All(voice.Samples, sample => Assert.Equal(session.Id, sample.SessionId));
+
+        fixture.App.ForgetAllVoices();
+        Assert.Empty(await fixture.App.RememberAllSessionVoicesAsync(firstRunOnly: true));
+        Assert.Empty(fixture.App.GetVoiceLibrary());
+        Assert.Equal(["Alice"], await fixture.App.RememberAllSessionVoicesAsync());
+        Assert.Single(fixture.App.GetVoiceLibrary());
+    }
+
     private static async Task UntilAsync(Func<bool> condition, int seconds = 15)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(seconds));

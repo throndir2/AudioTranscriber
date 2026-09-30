@@ -219,8 +219,12 @@ profiles that speaker analysis already stores, so it is instant.
 - Renaming a remembered speaker to a different name moves that session's samples
   to the new name. Renaming a speaker back to "Speaker N" keeps it unnamed for good.
 - **Speaker names → Match known voices** applies the library to an older session.
-  **Remember this session's named voices** adds a session you named before this
-  feature existed.
+  **Remember this session's named voices** adds one session's named speakers.
+- Speakers you named before the voice library existed are learned automatically
+  the first time the app starts with remembering on (oldest session first, so
+  each voice keeps its newest samples). **Privacy / models → Voice library →
+  Learn from past sessions** does the same again at any time. Only speakers with
+  a voice profile (from speaker analysis or labeled lines) can be remembered.
 - **Privacy / models → Voice library** lists remembered voices. From there you can
   **Rename…** a voice (choosing another remembered name combines the two),
   **Forget selected voice**, **Forget all voices…**, or turn remembering off.

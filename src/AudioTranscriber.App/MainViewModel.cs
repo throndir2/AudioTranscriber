@@ -149,6 +149,7 @@ public sealed class MainViewModel : ObservableObject
         SetLineSpeakerCommand = new RelayCommand(SetLineSpeaker, () => SelectedRows.Count > 0 && !closing);
         RecognizeVoicesCommand = new AsyncCommand(RecognizeVoicesAsync, () => CanWorkWithSession() && Voices.Count > 0);
         RememberSessionVoicesCommand = new AsyncCommand(RememberSessionVoicesAsync, CanWorkWithSession);
+        RememberAllVoicesCommand = new AsyncCommand(RememberAllVoicesAsync, () => !Busy && !closing);
         RenameVoiceCommand = new RelayCommand(RenameVoice, () => SelectedVoice is not null && !closing);
         ForgetVoiceCommand = new RelayCommand(ForgetVoice, () => SelectedVoice is not null && !closing);
         ForgetAllVoicesCommand = new RelayCommand(ForgetAllVoices, () => Voices.Count > 0 && !closing);
@@ -278,7 +279,7 @@ public sealed class MainViewModel : ObservableObject
     private StoredVoice? selectedVoice;
     private string voiceStamp = "";
     public string VoiceLibrarySummary => Voices.Count == 0
-        ? "No voices remembered yet. Name a speaker in a session (rename, or label their lines) to remember them."
+        ? "No voices remembered yet. Name a speaker in a session (rename, or label their lines) to remember them, or use Learn from past sessions."
         : $"{Voices.Count} remembered voice{(Voices.Count == 1 ? "" : "s")}.";
     public bool RememberVoices
     {
@@ -290,6 +291,7 @@ public sealed class MainViewModel : ObservableObject
             SetStatus(controller.RememberVoices
                 ? "Voices you name are remembered, and later recordings name those speakers automatically."
                 : "Voice remembering is off: new names are not remembered and recordings are not matched to remembered voices. Existing voices are kept until you forget them.");
+            if (controller.RememberVoices) _ = BackfillVoicesOnceAsync();
         }
     }
     public IReadOnlyList<ProviderOption> Providers { get; }
@@ -504,6 +506,7 @@ public sealed class MainViewModel : ObservableObject
     public ICommand SetLineSpeakerCommand { get; }
     public ICommand RecognizeVoicesCommand { get; }
     public ICommand RememberSessionVoicesCommand { get; }
+    public ICommand RememberAllVoicesCommand { get; }
     public ICommand RenameVoiceCommand { get; }
     public ICommand ForgetVoiceCommand { get; }
     public ICommand ForgetAllVoicesCommand { get; }
@@ -893,6 +896,7 @@ public sealed class MainViewModel : ObservableObject
     {
         if (closing) return Task.CompletedTask;
         _ = controller.EnsureDefaultModelsAsync();
+        _ = BackfillVoicesOnceAsync();
         Guard(RefreshSetup);
         CommandManager.InvalidateRequerySuggested();
         return prerequisites.VcRuntimeReady ? Task.CompletedTask : AutoInstallVcRuntimeAsync();
@@ -1539,6 +1543,22 @@ public sealed class MainViewModel : ObservableObject
             ? $"Remembered {string.Join(", ", names)}. Future recordings name them automatically."
             : "No named speaker in this session has a voice profile yet. Run speaker analysis, then name speakers or label a few of their lines.");
     });
+
+    private Task RememberAllVoicesAsync() => RunAsync("Remembering the named voices from every session…", async token =>
+    {
+        var names = await controller.RememberAllSessionVoicesAsync(false, token);
+        RefreshVoices();
+        SetStatus(names.Count > 0
+            ? $"Remembered {string.Join(", ", names)} from past sessions. Future recordings name them automatically."
+            : "No named speaker in any session has a voice profile yet. Run speaker analysis, then name speakers or label a few of their lines.");
+    });
+
+    // Once per library: learns speakers named before the voice library existed. Runs quietly in the background.
+    private async Task BackfillVoicesOnceAsync()
+    {
+        try { await Task.Run(() => controller.RememberAllSessionVoicesAsync(true)); }
+        catch (Exception error) when (error is not OutOfMemoryException) { if (!closing) SetStatus("Could not learn voices from past sessions: " + error.Message, true); }
+    }
 
     private void RenameVoice()
     {

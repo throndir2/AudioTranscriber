@@ -735,14 +735,39 @@ public sealed class AppController : IAppController
     {
         var remembered = new List<string>();
         await registryGate.WaitAsync(cancellationToken);
-        try
-        {
-            foreach (var speaker in Store.GetSpeakers(sessionId).Where(item => !IsAutomaticName(item.Name)))
-                if (SyncVoiceLocked(sessionId, speaker.Id, renamed: false, force: true) is { } voice && !remembered.Contains(voice.Name))
-                    remembered.Add(voice.Name);
-        }
+        try { RememberSessionVoicesLocked(sessionId, remembered); }
         finally { registryGate.Release(); }
         return remembered;
+    }
+
+    public async Task<IReadOnlyList<string>> RememberAllSessionVoicesAsync(bool firstRunOnly = false, CancellationToken cancellationToken = default)
+    {
+        if (firstRunOnly && (settings.VoiceLibraryBackfilled == true || !RememberVoices)) return [];
+        var remembered = new List<string>();
+        // Oldest first, so each voice keeps the samples from its newest sessions.
+        foreach (var session in Store.GetSessions(2000).Reverse())
+        {
+            await registryGate.WaitAsync(cancellationToken);
+            try { RememberSessionVoicesLocked(session.Id, remembered); }
+            catch (InvalidOperationException) { } // Deleted while the library was being read.
+            finally { registryGate.Release(); }
+        }
+        if (firstRunOnly)
+        {
+            UpdateSettings(current => current with { VoiceLibraryBackfilled = true });
+            if (remembered.Count > 0)
+                Notify($"Voice library: remembered {string.Join(", ", remembered)} from speakers you named in earlier sessions.");
+        }
+        return remembered;
+    }
+
+    // Caller holds registryGate.
+    private void RememberSessionVoicesLocked(Guid sessionId, List<string> remembered)
+    {
+        foreach (var speaker in Store.GetSpeakers(sessionId).Where(item => !IsAutomaticName(item.Name)))
+            if (SyncVoiceLocked(sessionId, speaker.Id, renamed: false, force: true) is { } voice &&
+                !remembered.Any(name => SameName(name, voice.Name)))
+                remembered.Add(voice.Name);
     }
 
     public void RenameVoice(Guid voiceId, string name)
@@ -2511,7 +2536,7 @@ public sealed class AppController : IAppController
     }
 
     private sealed record LocalSettings(string? WhisperModelPath, string? CloudBlockReason = null, double? FallbackBelowConfidence = null,
-        bool? UseGpuParakeet = null, bool? RememberVoices = null);
+        bool? UseGpuParakeet = null, bool? RememberVoices = null, bool? VoiceLibraryBackfilled = null);
     private sealed record MicrophoneOptions(Guid? EchoReferenceTrackId);
     // SessionOffsetTicks places an import that was merged into a later part of another session.
     private sealed record MediaCheckpoint(string SourcePath, int StreamIndex, ImportedMedia? Imported, long SessionOffsetTicks = 0);
