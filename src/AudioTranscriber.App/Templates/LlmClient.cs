@@ -1,0 +1,165 @@
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
+
+namespace AudioTranscriber.App.Templates;
+
+public interface ILlmToolHost
+{
+    JsonArray Definitions { get; }
+    Task<string> InvokeAsync(string name, string arguments, CancellationToken cancellationToken);
+}
+
+/// <summary>Calls any OpenAI-compatible /chat/completions endpoint (OpenRouter, NVIDIA Build, Ollama, OpenAI, LM Studio…).</summary>
+public static partial class LlmClient
+{
+    private const int MaxToolRounds = 10;
+    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromMinutes(10) };
+
+    public static string ChatUrl(string baseUrl) => Endpoint(baseUrl, "chat/completions");
+
+    private static string Endpoint(string baseUrl, string path)
+    {
+        var trimmed = (baseUrl ?? "").Trim().TrimEnd('/');
+        if (trimmed.Length == 0) throw new LlmException("The connection has no base URL.");
+        if (trimmed.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
+            trimmed = trimmed[..^"/chat/completions".Length];
+        return trimmed + "/" + path;
+    }
+
+    private static HttpRequestMessage Request(HttpMethod method, string url, string? apiKey)
+    {
+        var request = new HttpRequestMessage(method, url);
+        if (!string.IsNullOrWhiteSpace(apiKey)) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey.Trim());
+        // OpenRouter shows these in its dashboard; other servers ignore them.
+        request.Headers.TryAddWithoutValidation("HTTP-Referer", "https://github.com/throndir2/AudioTranscriber");
+        request.Headers.TryAddWithoutValidation("X-Title", "AudioTranscriber");
+        return request;
+    }
+
+    public static async Task<IReadOnlyList<string>> ListModelsAsync(string baseUrl, string? apiKey, CancellationToken cancellationToken)
+    {
+        using var request = Request(HttpMethod.Get, Endpoint(baseUrl, "models"), apiKey);
+        using var response = await Http.SendAsync(request, cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode) throw new LlmException(Describe(response, body));
+        JsonNode? json;
+        try { json = JsonNode.Parse(body); }
+        catch (JsonException) { throw new LlmException("The endpoint did not return JSON. Check the base URL (it usually ends in /v1)."); }
+        var items = json?["data"] as JsonArray ?? json?["models"] as JsonArray ?? json as JsonArray ?? [];
+        return items.Select(item => (string?)(item?["id"] ?? item?["name"] ?? item?["model"]))
+            .Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id!)
+            .Distinct().OrderBy(id => id, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    /// <summary>Runs a chat with optional tools until the model returns a final answer.</summary>
+    public static async Task<string> CompleteAsync(string baseUrl, string? apiKey, string model, string system, string user,
+        ILlmToolHost? tools, IProgress<string>? progress, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(model)) throw new LlmException("The connection has no model. Choose or type a model name.");
+        var messages = new JsonArray
+        {
+            new JsonObject { ["role"] = "system", ["content"] = system },
+            new JsonObject { ["role"] = "user", ["content"] = user }
+        };
+        var useTools = tools is not null;
+        for (var round = 0; ; round++)
+        {
+            var lastRound = round >= MaxToolRounds;
+            var payload = new JsonObject
+            {
+                ["model"] = model.Trim(),
+                ["messages"] = messages.DeepClone(),
+                ["stream"] = false
+            };
+            if (useTools && !lastRound) payload["tools"] = tools!.Definitions.DeepClone();
+            progress?.Report(round == 0 ? "Asking the model…" : $"Asking the model (step {round + 1})…");
+            using var request = Request(HttpMethod.Post, ChatUrl(baseUrl), apiKey);
+            request.Content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json");
+            using var response = await Http.SendAsync(request, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                // Many local models reject the tools field; carry on without file access rather than failing.
+                if (useTools && round == 0 && (int)response.StatusCode is 400 or 404 or 422 &&
+                    body.Contains("tool", StringComparison.OrdinalIgnoreCase))
+                {
+                    progress?.Report("This model does not support tools; continuing without file access.");
+                    useTools = false;
+                    round = -1;
+                    continue;
+                }
+                throw new LlmException(Describe(response, body));
+            }
+            JsonNode? json;
+            try { json = JsonNode.Parse(body); }
+            catch (JsonException) { throw new LlmException("The endpoint did not return JSON. Check the base URL (it usually ends in /v1)."); }
+            if (json?["error"] is { } error)
+                throw new LlmException("The endpoint returned an error: " + Trim(error["message"]?.ToString() ?? error.ToJsonString()));
+            var message = json?["choices"]?[0]?["message"] as JsonObject
+                ?? throw new LlmException("The endpoint returned no message. Check the base URL and model.");
+            if (useTools && !lastRound && message["tool_calls"] is JsonArray { Count: > 0 } calls)
+            {
+                messages.Add(new JsonObject
+                {
+                    ["role"] = "assistant",
+                    ["content"] = message["content"]?.DeepClone() ?? "",
+                    ["tool_calls"] = calls.DeepClone()
+                });
+                foreach (var call in calls)
+                {
+                    var name = call?["function"]?["name"]?.ToString() ?? "";
+                    var arguments = call?["function"]?["arguments"] is JsonValue value && value.TryGetValue<string>(out var text)
+                        ? text : call?["function"]?["arguments"]?.ToJsonString() ?? "{}";
+                    progress?.Report($"Model is using {name}…");
+                    string result;
+                    try { result = await tools!.InvokeAsync(name, arguments, cancellationToken); }
+                    catch (Exception ex) when (ex is not OperationCanceledException) { result = "Error: " + ex.Message; }
+                    var reply = new JsonObject { ["role"] = "tool", ["content"] = result, ["name"] = name };
+                    if (call?["id"]?.ToString() is { Length: > 0 } id) reply["tool_call_id"] = id;
+                    messages.Add(reply);
+                }
+                continue;
+            }
+            var content = message["content"] switch
+            {
+                JsonValue v when v.TryGetValue<string>(out var s) => s,
+                JsonArray parts => string.Concat(parts.Select(p => p?["text"]?.ToString())),
+                _ => ""
+            };
+            return StripThinking(content).Trim();
+        }
+    }
+
+    public static string StripThinking(string text) => ThinkBlock().Replace(text ?? "", "");
+
+    [GeneratedRegex(@"<think>.*?(</think>|$)", RegexOptions.Singleline | RegexOptions.IgnoreCase)]
+    private static partial Regex ThinkBlock();
+
+    private static string Describe(HttpResponseMessage response, string body)
+    {
+        string? detail = null;
+        try { detail = JsonNode.Parse(body)?["error"] is { } e ? e["message"]?.ToString() ?? e.ToString() : null; }
+        catch (JsonException) { }
+        detail ??= body;
+        var hint = (int)response.StatusCode switch
+        {
+            401 or 403 => " Check the API key.",
+            404 => " Check the base URL and model name.",
+            429 => " The service is rate limiting; the next update tries again.",
+            _ => ""
+        };
+        return $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}: {Trim(detail)}{hint}";
+    }
+
+    private static string Trim(string text)
+    {
+        text = (text ?? "").ReplaceLineEndings(" ").Trim();
+        return text.Length > 300 ? text[..300] + "…" : text;
+    }
+}
+
+public sealed class LlmException(string message) : Exception(message);

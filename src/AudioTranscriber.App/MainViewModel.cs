@@ -173,6 +173,8 @@ public sealed class MainViewModel : ObservableObject
             catch (System.Runtime.InteropServices.ExternalException) { SetStatus("The clipboard is busy; try Copy again.", true); }
         }, () => ActivityLog.Count > 0);
         LoadLiveSettings();
+        Templates = new TemplatesViewModel(controller, dialogs, dispatcher, () => controller.RecordingSessionId ?? SelectedSession?.Id,
+            (text, error) => Log(text, error ? ActivityKind.Error : ActivityKind.Info));
         if (liveFileEnabled) liveFileStatus = ArmedLiveStatus();
         controller.Notification += OnNotification;
         controller.LevelsChanged += OnLevelsChanged;
@@ -195,6 +197,7 @@ public sealed class MainViewModel : ObservableObject
     }
 
     public ICommand CheckForUpdatesCommand { get; }
+    public TemplatesViewModel Templates { get; }
     public ICommand RestartToUpdateCommand { get; }
     public string CurrentVersionText => updater.IsSupported
         ? $"Installed version: {updater.CurrentTag} · updates come from the latest GitHub release of {AppUpdater.Repository}"
@@ -868,6 +871,7 @@ public sealed class MainViewModel : ObservableObject
         RefreshPrerequisites(announce: false);
         initialized = true;
         refreshTimer.Start();
+        Templates.Start();
     }
 
     private void RefreshPrerequisites(bool announce)
@@ -1730,6 +1734,7 @@ public sealed class MainViewModel : ObservableObject
         refreshTimer.Stop();
         updateTimer.Stop();
         updateCancellation.Cancel();
+        Templates.Shutdown();
         SetStatus("Closing: waiting for operations and original audio tails to finish…");
         try
         {

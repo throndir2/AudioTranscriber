@@ -20,5 +20,7 @@
     <ProjectReference Include="..\AudioTranscriber.Application\AudioTranscriber.Application.csproj" />
     <!-- Native GPU runtime ships via build/ targets, which do not flow transitively. -->
     <PackageReference Include="Whisper.net.Runtime.Vulkan" Version="1.9.1" />
+    <!-- Apache-2.0 PDF text extraction for output-template reference files. -->
+    <PackageReference Include="PdfPig" Version="0.1.16" />
   </ItemGroup>
 </Project>

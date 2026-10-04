@@ -16,6 +16,7 @@ leaves the original recording on disk.
 | Speakers | Local segmentation plus clean-turn embeddings and persistent IDs; editable names; overlap/short-turn uncertainty |
 | Transcript | SQLite FTS, bounded pages, speaker filtering, corrections separate from source text, timestamp seek and playback |
 | Exchange | Text, JSON, SRT, WebVTT; local voice-tag VTT import; configured delegated Teams transcript retrieval |
+| Output templates | Your own prompts (DM guidance, session summary, NPC/item lists…) kept up to date from the live transcript by any OpenAI-compatible LLM: OpenRouter, NVIDIA Build, OpenAI, Ollama/LM Studio on this or another PC; can read a folder of PDFs/notes; shown in the app and optionally written to an unlocked file |
 
 New sessions do not upload audio unless explicitly permitted. NVIDIA's current
 terms and finite trial quota apply; personal or confidential material may not be

@@ -525,6 +525,170 @@
                         </Grid>
                     </TabItem>
 
+                    <TabItem Header="Te_mplates" Tag="&#xE99A;">
+                        <Grid Margin="16,14,16,4" DataContext="{Binding Templates}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" MinWidth="420" />
+                                <ColumnDefinition Width="16" />
+                                <ColumnDefinition Width="*" MinWidth="320" />
+                            </Grid.ColumnDefinitions>
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel Margin="0,0,6,0">
+                                    <Border Style="{StaticResource HeroCard}">
+                                        <StackPanel>
+                                            <ContentControl Style="{StaticResource SectionHeader}" Content="Output templates" />
+                                            <TextBlock Style="{StaticResource Help}" Text="Write a prompt once and an AI model keeps turning the transcript into what you need: DM guidance for the current scene, a running summary, a list of NPCs or items. Templates set to keep updating re-run whenever new lines arrive (at most once per interval) on the session being recorded, or the session selected on the left." />
+                                            <TextBlock Text="{Binding TargetDescription}" Foreground="{StaticResource Accent}" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,6" />
+                                            <ListBox ItemsSource="{Binding Templates}" SelectedItem="{Binding SelectedTemplate}" MinHeight="90" MaxHeight="200"
+                                                     Background="{StaticResource InputBg}" AutomationProperties.Name="Output templates">
+                                                <ListBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <DockPanel>
+                                                            <TextBlock DockPanel.Dock="Right" Text="{Binding Summary}" Foreground="{StaticResource Dim}" Margin="12,0,0,0" />
+                                                            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                                        </DockPanel>
+                                                    </DataTemplate>
+                                                </ListBox.ItemTemplate>
+                                            </ListBox>
+                                            <WrapPanel Margin="0,6,0,0">
+                                                <Button Content="New template" Command="{Binding AddTemplateCommand}" />
+                                                <Button Content="Duplicate" Command="{Binding DuplicateTemplateCommand}" />
+                                                <Button Content="Delete…" Command="{Binding DeleteTemplateCommand}" />
+                                                <Button Content="Add starter templates" Command="{Binding AddStartersCommand}" ToolTip="Adds DM guidance, session summary, NPCs and items templates." />
+                                            </WrapPanel>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource Card}" IsEnabled="{Binding HasTemplate}">
+                                        <StackPanel>
+                                            <ContentControl Style="{StaticResource SectionHeader}" Content="Selected template" />
+                                            <Label Content="Name" Target="{Binding ElementName=TemplateNameInput}" />
+                                            <TextBox x:Name="TemplateNameInput" Text="{Binding SelectedTemplate.Name, UpdateSourceTrigger=PropertyChanged}" Margin="0,3,0,8" AutomationProperties.Name="Template name" />
+                                            <Label Content="Prompt: what should the model produce?" Target="{Binding ElementName=TemplatePromptInput}" />
+                                            <TextBox x:Name="TemplatePromptInput" Text="{Binding SelectedTemplate.Prompt, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap"
+                                                     MinHeight="110" MaxHeight="260" VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top" Margin="0,3,0,8" AutomationProperties.Name="Template prompt" />
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="12" />
+                                                    <ColumnDefinition Width="110" />
+                                                    <ColumnDefinition Width="12" />
+                                                    <ColumnDefinition Width="140" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel>
+                                                    <Label Content="LLM connection" Target="{Binding ElementName=TemplateConnectionInput}" />
+                                                    <ComboBox x:Name="TemplateConnectionInput" ItemsSource="{Binding Connections}" DisplayMemberPath="Name" SelectedValuePath="Id"
+                                                              SelectedValue="{Binding SelectedTemplate.ConnectionId}" Margin="0,3,0,8" AutomationProperties.Name="LLM connection for this template"
+                                                              ToolTip="When none is chosen, the first connection below is used." />
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="2">
+                                                    <Label Content="Every (seconds)" Target="{Binding ElementName=TemplateIntervalInput}" />
+                                                    <TextBox x:Name="TemplateIntervalInput" Text="{Binding SelectedTemplate.IntervalSeconds, UpdateSourceTrigger=LostFocus}" Margin="0,3,0,8"
+                                                             AutomationProperties.Name="Minimum seconds between automatic updates" ToolTip="Minimum time between automatic updates (10 or more). Updates only happen when the transcript changed." />
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="4">
+                                                    <Label Content="Transcript characters" Target="{Binding ElementName=TemplateCharsInput}" />
+                                                    <TextBox x:Name="TemplateCharsInput" Text="{Binding SelectedTemplate.MaxTranscriptChars, UpdateSourceTrigger=LostFocus}" Margin="0,3,0,8"
+                                                             AutomationProperties.Name="Maximum transcript characters sent" ToolTip="Only the most recent part of a long transcript is sent (about 4 characters per token). Lower it for small local models." />
+                                                </StackPanel>
+                                            </Grid>
+                                            <CheckBox IsChecked="{Binding SelectedTemplate.AutoUpdate}" FontWeight="SemiBold" Content="Keep updating as the transcript grows" />
+                                            <CheckBox IsChecked="{Binding SelectedTemplate.IncludePrevious}" Content="Build on the previous output (update it instead of starting over)" />
+                                            <CheckBox IsChecked="{Binding SelectedTemplate.UseReferences}" Content="Use the reference files below" ToolTip="Sends the always-included files and lets the model search and read the context folder." />
+                                            <CheckBox IsChecked="{Binding SelectedTemplate.WriteToFile}" Content="Also write the output to a file" Margin="0,6,0,2" />
+                                            <DockPanel IsEnabled="{Binding SelectedTemplate.WriteToFile}">
+                                                <Button DockPanel.Dock="Right" Content="Browse…" Command="{Binding BrowseOutputCommand}" Margin="0,3,0,8" />
+                                                <TextBox Text="{Binding SelectedTemplate.OutputPath, UpdateSourceTrigger=LostFocus}" VerticalContentAlignment="Center" AutomationProperties.Name="Template output file path" />
+                                            </DockPanel>
+                                            <TextBlock Style="{StaticResource Caption}" Text="The file is rewritten on every update and never locked, so VS Code, Obsidian or a browser can keep it open. Edits made in other apps are overwritten." />
+                                            <WrapPanel Margin="0,8,0,0">
+                                                <Button Content="▶  Update now" Style="{StaticResource PrimaryButton}" Command="{Binding RunTemplateCommand}" />
+                                                <Button Content="■  Stop" Command="{Binding StopTemplateCommand}" />
+                                            </WrapPanel>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource Card}">
+                                        <StackPanel>
+                                            <ContentControl Style="{StaticResource SectionHeader}" Content="Reference files (shared by all templates)" />
+                                            <TextBlock Style="{StaticResource Help}" Text="Context folder: the model can list, search and read the PDFs, Word documents, Markdown and text files in it (and its subfolders) when it needs them, for example adventure books, rules or campaign notes. It cannot read anything outside it, and it never changes files." />
+                                            <DockPanel>
+                                                <Button DockPanel.Dock="Right" Content="Browse…" Command="{Binding BrowseFolderCommand}" Margin="0,3,0,8" />
+                                                <TextBox Text="{Binding ContextFolder, UpdateSourceTrigger=LostFocus}" VerticalContentAlignment="Center" AutomationProperties.Name="Context folder" />
+                                            </DockPanel>
+                                            <DockPanel Margin="0,4,0,0">
+                                                <Button DockPanel.Dock="Right" Content="Add files…" Command="{Binding AddPinnedFilesCommand}" Margin="0,0,0,4" />
+                                                <Label Content="Always-included files (one path per line)" Target="{Binding ElementName=PinnedFilesInput}" />
+                                            </DockPanel>
+                                            <TextBox x:Name="PinnedFilesInput" Text="{Binding PinnedFiles, UpdateSourceTrigger=LostFocus}" AcceptsReturn="True" TextWrapping="NoWrap" MinHeight="60" MaxHeight="140"
+                                                     VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" VerticalContentAlignment="Top" Margin="0,3,0,8" AutomationProperties.Name="Always-included reference files" />
+                                            <TextBlock Style="{StaticResource Caption}" Text="Always-included files are sent in full with every update (up to about 60,000 characters in total), so keep them short: a campaign summary, party roster or cheat sheet. Put big books in the context folder instead. Files are read without locking them." />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource Card}">
+                                        <StackPanel>
+                                            <ContentControl Style="{StaticResource SectionHeader}" Content="LLM connections" />
+                                            <TextBlock Style="{StaticResource Help}" Text="Templates run on any OpenAI-compatible endpoint: OpenRouter, NVIDIA Build, OpenAI, Ollama or LM Studio on this PC or another machine, or your own server. Running a template sends the transcript text, and any reference text the model reads, to that endpoint; Ollama and LM Studio keep everything on your machines." />
+                                            <DockPanel>
+                                                <Button DockPanel.Dock="Right" Content="Add" Command="{Binding AddConnectionCommand}" Margin="0,3,0,8" />
+                                                <ComboBox ItemsSource="{Binding Presets}" DisplayMemberPath="Name" SelectedItem="{Binding SelectedPreset}" Margin="0,3,8,8" AutomationProperties.Name="Type of connection to add" />
+                                            </DockPanel>
+                                            <TextBlock Style="{StaticResource Caption}" Text="{Binding PresetHelp}" Margin="0,0,0,8" />
+                                            <DockPanel>
+                                                <Button DockPanel.Dock="Right" Content="Remove…" Command="{Binding RemoveConnectionCommand}" Margin="0,3,0,8" />
+                                                <ComboBox ItemsSource="{Binding Connections}" DisplayMemberPath="Name" SelectedItem="{Binding SelectedConnection}" Margin="0,3,8,8" AutomationProperties.Name="Connection to edit" />
+                                            </DockPanel>
+                                            <StackPanel IsEnabled="{Binding HasConnection}">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="12" />
+                                                        <ColumnDefinition Width="2*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel>
+                                                        <Label Content="Connection name" Target="{Binding ElementName=ConnectionNameInput}" />
+                                                        <TextBox x:Name="ConnectionNameInput" Text="{Binding SelectedConnection.Name, UpdateSourceTrigger=LostFocus}" Margin="0,3,0,8" AutomationProperties.Name="Connection name" />
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="2">
+                                                        <Label Content="Base URL" Target="{Binding ElementName=ConnectionUrlInput}" />
+                                                        <TextBox x:Name="ConnectionUrlInput" Text="{Binding SelectedConnection.BaseUrl, UpdateSourceTrigger=LostFocus}" Margin="0,3,0,8" AutomationProperties.Name="Connection base URL"
+                                                                 ToolTip="The OpenAI-compatible API root, usually ending in /v1. For Ollama on another machine: http://that-pc:11434/v1" />
+                                                    </StackPanel>
+                                                </Grid>
+                                                <Label Content="Model" Target="{Binding ElementName=ConnectionModelInput}" />
+                                                <DockPanel>
+                                                    <Button DockPanel.Dock="Right" Content="Load models" Command="{Binding LoadModelsCommand}" Margin="0,3,0,8" />
+                                                    <ComboBox DockPanel.Dock="Right" Width="200" ItemsSource="{Binding Models}" SelectedItem="{Binding PickedModel}" Margin="8,3,8,8"
+                                                              AutomationProperties.Name="Models offered by the server" ToolTip="Choose Load models, then pick a model here." />
+                                                    <TextBox x:Name="ConnectionModelInput" Text="{Binding SelectedConnection.Model, UpdateSourceTrigger=PropertyChanged}" VerticalContentAlignment="Center" Margin="0,3,0,8" AutomationProperties.Name="Model name" />
+                                                </DockPanel>
+                                                <TextBlock Text="{Binding SelectedConnection.KeyStatus}" Style="{StaticResource Caption}" />
+                                                <WrapPanel>
+                                                    <PasswordBox x:Name="LlmKeyInput" Width="300" Padding="8" Margin="0,4,10,4" AutomationProperties.Name="API key for this connection, password input" />
+                                                    <Button Content="Save key" Click="SaveLlmKeyClick" />
+                                                    <Button Content="Remove key" Click="ClearLlmKeyClick" />
+                                                    <Button Content="Test" Command="{Binding TestConnectionCommand}" />
+                                                </WrapPanel>
+                                                <TextBlock Text="{Binding ConnectionStatus}" TextWrapping="Wrap" FontWeight="SemiBold" Foreground="{StaticResource Accent}" AutomationProperties.LiveSetting="Polite" />
+                                                <TextBlock Style="{StaticResource Caption}" Text="Keys are encrypted for your Windows account (DPAPI) in the library folder and only sent to this connection's URL. Models must support tool calling to read the context folder; others still get the transcript and always-included files." />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </ScrollViewer>
+
+                            <Border Grid.Column="2" Style="{StaticResource Card}">
+                                <DockPanel>
+                                    <DockPanel DockPanel.Dock="Top">
+                                        <Button DockPanel.Dock="Right" Content="Copy" Command="{Binding CopyOutputCommand}" Padding="10,3" MinHeight="28" Margin="0,0,0,6" />
+                                        <ContentControl Style="{StaticResource SectionHeader}" Content="{Binding SelectedTemplate.Name}" Margin="0,0,12,6" />
+                                    </DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Text="{Binding SelectedTemplate.Status}" Style="{StaticResource Caption}" Margin="0,0,0,8" AutomationProperties.LiveSetting="Polite" />
+                                    <TextBox Text="{Binding SelectedTemplate.Output, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True"
+                                             VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top" FontSize="14" AutomationProperties.Name="Template output" />
+                                </DockPanel>
+                            </Border>
+                        </Grid>
+                    </TabItem>
+
                     <TabItem Header="_Jobs" Tag="&#xE9D5;">
                         <Grid Margin="16,14">
                             <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>

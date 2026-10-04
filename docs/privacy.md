@@ -78,6 +78,18 @@ NVIDIA credentials are attached only to the explicitly approved NVIDIA transport
 authority. Microsoft Graph uses its own Microsoft sign-in token and fixed Graph
 authority. Endpoint overrides must not redirect credentials to arbitrary servers.
 
+## Output templates (LLM connections)
+
+Output templates never run until you choose **Update now** or tick **Keep updating**
+for a template. A run sends the transcript text (not audio), the always-included
+reference files, and any reference text the model asks to read to that template's
+LLM connection. Hosted services (OpenRouter, NVIDIA Build, OpenAI) apply their own
+terms, logging and quotas; Ollama or LM Studio on your own machines keep the text
+local. Template API keys are saved only when you choose **Save key**, encrypted with
+DPAPI for the current Windows user in `templates.json`, and sent only to the
+connection's own base URL. The model's file tools are read-only and limited to the
+chosen context folder and always-included files.
+
 ## Participant metadata
 
 `Speaker 1` is an acoustic cluster, not an authenticated person. A renamed speaker

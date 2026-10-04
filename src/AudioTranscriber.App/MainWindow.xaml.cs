@@ -73,6 +73,19 @@ public partial class MainWindow : Window
         viewModel.ClearKeyCommand.Execute(null);
     }
 
+    private void SaveLlmKeyClick(object sender, RoutedEventArgs e)
+    {
+        if (LlmKeyInput.Password.Length == 0) return;
+        viewModel.Templates.SetKey(LlmKeyInput.Password);
+        LlmKeyInput.Clear();
+    }
+
+    private void ClearLlmKeyClick(object sender, RoutedEventArgs e)
+    {
+        LlmKeyInput.Clear();
+        viewModel.Templates.SetKey("");
+    }
+
     private void TranscriptDoubleClick(object sender, MouseButtonEventArgs e)
     {
         var source = e.OriginalSource as DependencyObject;
