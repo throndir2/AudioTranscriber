@@ -30,6 +30,13 @@ public sealed class AppController : IAppController
     private volatile bool whisperSetupFailed;
     private const int LiveChunkMaxSeconds = 6;
     private const int LivePauseSplitAfterMilliseconds = 1500;
+    public const int DefaultPhrasePauseMilliseconds = 800, MinPhrasePauseMilliseconds = 200, MaxPhrasePauseMilliseconds = 3000;
+    private volatile int phrasePauseMilliseconds = DefaultPhrasePauseMilliseconds;
+    public int PhrasePauseMilliseconds
+    {
+        get => phrasePauseMilliseconds;
+        set => phrasePauseMilliseconds = Math.Clamp(value, MinPhrasePauseMilliseconds, MaxPhrasePauseMilliseconds);
+    }
     private readonly IAudioCaptureService capture;
     private readonly IMediaNormalizer media;
     private readonly IAudioPlaybackService playback;
@@ -490,7 +497,8 @@ public sealed class AppController : IAppController
             // Short, pause-aligned chunks keep speech-to-text latency near one phrase instead of 30 seconds.
             await capture.StartAsync(new(session.Id, Path.Combine(session.Directory, "originals"), outputDeviceId,
                 microphoneDeviceId, outputId, microphoneTrackId, ChunkDurationSeconds: LiveChunkMaxSeconds,
-                PauseSplitAfterMilliseconds: LivePauseSplitAfterMilliseconds, SessionOffsetTicks: offsetTicks), cancellationToken);
+                PauseSplitAfterMilliseconds: LivePauseSplitAfterMilliseconds, SessionOffsetTicks: offsetTicks,
+                PauseMilliseconds: PhrasePauseMilliseconds), cancellationToken);
             Store.SetSessionState(session.Id, "Recording");
             Notify((offsetTicks > 0 ? $"Continuing \"{session.Name}\" at {Clock(offsetTicks)}: recording" : "Recording") +
                 " selected Windows output" + (microphoneDeviceId is null ? ". Local microphone is not captured." : " and a separate microphone track."));

@@ -88,8 +88,11 @@ Chunks rotate at both the configured duration (at most 30 seconds) and total WAV
 file size (at most 64 MiB, including header/padding). Offsets, frame counts and
 QPC values are 64-bit; rational conversion uses Int128 intermediates. Live
 recordings use 6-second chunks with `PauseSplitAfterMilliseconds` = 1500: once a
-chunk holds 1.5 seconds it also seals after 400 ms of quiet (RMS below about
--42 dBFS), and speech starting after a quiet stretch begins a fresh chunk.
+chunk holds 1.5 seconds it also seals after a pause of quiet (RMS below about
+-42 dBFS), and speech starting after a quiet stretch begins a fresh chunk. The
+pause length is the **Pause that ends a phrase** recording setting (default
+800 ms, 200–3000 ms, saved in `recording-defaults.json`); longer pauses give
+fewer, longer phrases.
 
 Active chunks have a `.wav.partial` and atomically replaced `.wav.journal.json`.
 The writer fsyncs data before updating the journal, at a default **one-second

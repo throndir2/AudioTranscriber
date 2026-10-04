@@ -48,6 +48,8 @@ public interface IAppController : IAsyncDisposable
     Task InstallRecommendedWhisperModelAsync(IProgress<string>? progress = null, CancellationToken cancellationToken = default);
     Task InstallDiarizationModelsAsync(IProgress<string>? progress = null, CancellationToken cancellationToken = default);
     Task<MediaProbeSummary> ProbeMediaAsync(string path, CancellationToken cancellationToken = default);
+    // Silence (ms) that ends a live phrase chunk; longer values give fewer, longer chunks. Applies to the next recording.
+    int PhrasePauseMilliseconds { get; set; }
     Task<StoredSession> StartRecordingAsync(string name, string outputDeviceId, string? microphoneDeviceId,
         string providerId, string language, bool cloudConsent, bool reduceEcho = true, CancellationToken cancellationToken = default);
     // Records more audio into an existing session, placed after everything it already holds.

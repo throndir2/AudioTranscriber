@@ -80,7 +80,7 @@ public sealed record CaptureOptions(
     Guid? OutputTrackId = null, Guid? MicrophoneTrackId = null,
     int ChunkDurationSeconds = 30, long MaximumChunkBytes = 64L * 1024 * 1024,
     long QueueCapacityBytes = 128L * 1024 * 1024, long MinimumFreeBytes = 512L * 1024 * 1024,
-    int PauseSplitAfterMilliseconds = 0, long SessionOffsetTicks = 0);
+    int PauseSplitAfterMilliseconds = 0, long SessionOffsetTicks = 0, int PauseMilliseconds = 800);
 
 public sealed record CaptureSession(
     Guid SessionId, long QpcOrigin100Nanoseconds, ImmutableArray<TrackRecord> Tracks);
