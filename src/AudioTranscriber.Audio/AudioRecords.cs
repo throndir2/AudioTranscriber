@@ -89,4 +89,4 @@ public sealed record ArchiveOptions(string RootDirectory, Guid SessionId, Guid T
     long MinimumFreeBytes = 128 * 1024 * 1024,
     // When > 0, a chunk also seals at the end of a pause once it holds at least this much audio,
     // so live recognition gets whole phrases as soon as the speaker stops.
-    int PauseSplitAfterMilliseconds = 0, int PauseMilliseconds = 400, float PauseRms = 0.008f);
+    int PauseSplitAfterMilliseconds = 0, int PauseMilliseconds = 800, float PauseRms = 0.008f);

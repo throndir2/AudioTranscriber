@@ -277,6 +277,15 @@
                                                         <ComboBox x:Name="OutputInput" Margin="0,3,0,8" ItemsSource="{Binding OutputDevices}" DisplayMemberPath="Name" SelectedItem="{Binding OutputDevice}" AutomationProperties.Name="Selected Windows output device" />
                                                         <ProgressBar Value="{Binding OutputLevel, Mode=OneWay}" Minimum="0" Maximum="1" Height="10" AutomationProperties.Name="Output capture peak level" />
                                                         <TextBlock Text="Output level · active only during recording" Style="{StaticResource Caption}" Margin="0,5,0,0" />
+                                                        <Label Content="_Pause that ends a phrase" Target="{Binding ElementName=PhrasePauseInput}" Margin="0,8,0,0" />
+                                                        <DockPanel Margin="0,3,0,0">
+                                                            <TextBlock DockPanel.Dock="Right" Width="60" TextAlignment="Right" VerticalAlignment="Center" Text="{Binding PhrasePauseMilliseconds, StringFormat={}{0} ms}" />
+                                                            <Slider x:Name="PhrasePauseInput" Minimum="200" Maximum="3000" TickFrequency="100" IsSnapToTickEnabled="True" SmallChange="100" LargeChange="500"
+                                                                    Value="{Binding PhrasePauseMilliseconds}" VerticalAlignment="Center"
+                                                                    AutomationProperties.Name="Silence in milliseconds that ends a live transcript phrase"
+                                                                    ToolTip="How long the speaker must be silent before live audio is cut into a new phrase for transcription. Raise it if lines are split into too many short pieces; lower it for faster live text. Applies to the next recording." />
+                                                        </DockPanel>
+                                                        <TextBlock Text="Longer pauses give fewer, longer lines; shorter pauses give faster live text." Style="{StaticResource Caption}" Margin="0,5,0,0" TextWrapping="Wrap" />
                                                     </StackPanel>
                                                     <StackPanel Grid.Column="2">
                                                         <CheckBox Content="Include a separate _microphone track" IsChecked="{Binding MicrophoneEnabled}" Margin="0,0,0,2" />

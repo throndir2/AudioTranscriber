@@ -9,7 +9,7 @@ public sealed record CaptureTrackOptions(Guid TrackId, string DeviceId, bool Loo
 public sealed record CaptureOptions(string RootDirectory, Guid SessionId, CaptureTrackOptions Output,
     CaptureTrackOptions? Microphone = null, long QueueByteLimit = 16 * 1024 * 1024,
     long MinimumFreeBytes = 128 * 1024 * 1024, int MaxChunkSeconds = 30, long MaxChunkBytes = 64 * 1024 * 1024,
-    int PauseSplitAfterMilliseconds = 0, long SessionOffsetTicks = 0);
+    int PauseSplitAfterMilliseconds = 0, long SessionOffsetTicks = 0, int PauseMilliseconds = 800);
 public sealed record TrackLevel(Guid TrackId, float Peak, float Rms);
 public sealed record CapturedTrack(Guid TrackId, string Name, string DeviceId, bool IsLoopback, NativeWaveFormat Format);
 
@@ -184,7 +184,7 @@ public sealed class CaptureSession : IAsyncDisposable
                 archive = new(new(options.RootDirectory, options.SessionId, choice.TrackId, format, origin,
                     choice.DeviceId, choice.Loopback, options.QueueByteLimit, options.MaxChunkBytes,
                     options.MaxChunkSeconds, MinimumFreeBytes: options.MinimumFreeBytes,
-                    PauseSplitAfterMilliseconds: options.PauseSplitAfterMilliseconds));
+                    PauseSplitAfterMilliseconds: options.PauseSplitAfterMilliseconds, PauseMilliseconds: options.PauseMilliseconds));
                 archive.ChunkSealed += sealedChunk;
                 archive.Gap += gap;
                 writer = Task.Run(WritePacketsAsync);

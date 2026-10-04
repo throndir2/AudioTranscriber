@@ -349,6 +349,19 @@ public sealed class MainViewModel : ObservableObject
         set { if (Set(ref microphoneName, value ?? "")) SaveRecordingPreferences(); }
     }
     private string microphoneName = "";
+    // Silence that ends a live phrase chunk; higher means fewer, longer lines.
+    public int PhrasePauseMilliseconds
+    {
+        get => controller.PhrasePauseMilliseconds;
+        set
+        {
+            var rounded = (int)Math.Round(value / 100.0) * 100;
+            if (rounded == controller.PhrasePauseMilliseconds) return;
+            controller.PhrasePauseMilliseconds = rounded;
+            Changed(nameof(PhrasePauseMilliseconds));
+            SaveRecordingPreferences();
+        }
+    }
     public DeviceChoice? OutputDevice { get => outputDevice; set => Set(ref outputDevice, value); }
     public DeviceChoice? MicrophoneDevice { get => microphoneDevice; set => Set(ref microphoneDevice, value); }
     public double OutputLevel { get => outputLevel; private set => Set(ref outputLevel, value); }
@@ -780,7 +793,7 @@ public sealed class MainViewModel : ObservableObject
     private sealed record LiveFileSettings(string Path, bool Enabled);
 
     private sealed record RecordingPreferences(bool? MicrophoneEnabled, string? ProviderId, string? Language, bool? ReduceEcho = null,
-        int? Version = null, string? MicrophoneName = null);
+        int? Version = null, string? MicrophoneName = null, int? PhrasePauseMilliseconds = null);
 
     private string RecordingPreferencesPath => Path.Combine(controller.Store.RootDirectory, "recording-defaults.json");
 
@@ -799,6 +812,7 @@ public sealed class MainViewModel : ObservableObject
             savedMicrophoneEnabled = saved.MicrophoneEnabled;
             reduceEcho = saved.ReduceEcho ?? true;
             microphoneName = saved.MicrophoneName?.Trim() ?? "";
+            if (saved.PhrasePauseMilliseconds is { } pause) controller.PhrasePauseMilliseconds = pause;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Text.Json.JsonException) { }
     }
@@ -809,7 +823,7 @@ public sealed class MainViewModel : ObservableObject
         {
             File.WriteAllText(RecordingPreferencesPath, System.Text.Json.JsonSerializer.Serialize(
                 new RecordingPreferences(MicrophoneEnabled, SelectedProvider?.Id, Language.Trim(), ReduceEcho, Version: 2,
-                    MicrophoneName: MicrophoneName.Trim())));
+                    MicrophoneName: MicrophoneName.Trim(), PhrasePauseMilliseconds: PhrasePauseMilliseconds)));
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
     }

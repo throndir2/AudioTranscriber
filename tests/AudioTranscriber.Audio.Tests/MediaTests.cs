@@ -82,7 +82,7 @@ public sealed class MediaTests
         var format = NativeWaveFormat.FromWaveFormat(WaveFormat.CreateIeeeFloatWaveFormat(rate, 2));
         var chunks = new List<OriginalChunk>();
         using (var archive = new NativeArchiveWriter(new(files.Root, Guid.NewGuid(), Guid.NewGuid(), format, 0,
-            "synthetic", true, MaxChunkSeconds: 6, MinimumFreeBytes: 0, PauseSplitAfterMilliseconds: 1500)))
+            "synthetic", true, MaxChunkSeconds: 6, MinimumFreeBytes: 0, PauseSplitAfterMilliseconds: 1500, PauseMilliseconds: 400)))
         {
             archive.ChunkSealed += chunks.Add;
             using var queue = new PooledPacketQueue(1024 * 1024);
