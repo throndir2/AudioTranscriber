@@ -279,6 +279,46 @@ each chunk as it starts and finishes transcribing (including "no speech detected
 every new transcript line, errors and waits (for example a model still downloading),
 and every live file write. **Copy** puts the log on the clipboard.
 
+## Output templates (AI notes from the transcript)
+
+The **Templates** tab turns the transcript into documents you define with a prompt,
+for example "Give me DM guidance for the current scene based on the PDFs", a running
+session summary, or a list of NPCs, places or items. Four starter templates are
+included (**Add starter templates** brings them back).
+
+- **Which session:** templates run on the session being recorded, otherwise on the
+  session selected on the left.
+- **Keep updating as the transcript grows:** the template re-runs whenever new or
+  corrected lines arrive, at most once per **Every (seconds)**. Nothing runs while
+  the transcript is unchanged. **Update now** runs it once; **Stop** cancels.
+- **Build on the previous output:** the model gets its last answer for the same
+  session and updates it, which keeps lists and summaries stable.
+- **Transcript characters:** only the most recent part of a long transcript is sent
+  (about 4 characters per token); lower it for small local models.
+- **Output:** always shown on the right (with **Copy**). **Also write the output to
+  a file** rewrites a `.md`/`.txt` file on every update without locking it, so VS
+  Code, Obsidian or a browser can keep it open.
+
+**Reference files** are shared by all templates (untick **Use the reference files
+below** per template). The **context folder** is browsable by the model through
+read-only tools (list, search, read) covering PDF, DOCX, Markdown, text, JSON, CSV
+and similar files in it and its subfolders; it cannot reach anything outside the
+folder. **Always-included files** are sent in full with every update (about 60,000
+characters in total), so keep them short: a campaign summary, roster or cheat sheet.
+Files are read without locking them. The folder tools need a model with tool
+(function) calling; other models still get the transcript and always-included files.
+
+**LLM connections** use the OpenAI-compatible `/v1/chat/completions` API. Pick a
+type and choose **Add**: OpenRouter (`https://openrouter.ai/api/v1`), NVIDIA Build
+(`https://integrate.api.nvidia.com/v1`), OpenAI, Ollama (`http://localhost:11434/v1`,
+or `http://other-pc:11434/v1` for Ollama on another machine started with
+`OLLAMA_HOST=0.0.0.0`), LM Studio, or any custom server. **Load models** lists what
+the server offers; **Test** sends a one-line check. API keys are encrypted with
+Windows DPAPI for your account in the library's `templates.json` and sent only to
+that connection's URL. Running a template sends the transcript text, and any
+reference text the model reads, to that endpoint; Ollama and LM Studio keep it on
+your machines.
+
 ## Processing and privacy
 
 **Jobs** displays all-job aggregate counts and the newest 100 job details/errors.

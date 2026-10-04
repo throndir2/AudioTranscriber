@@ -72,6 +72,45 @@ public sealed class DesktopDialogs(Func<Window> owner)
         return dialog.ShowDialog(owner()) == true ? dialog.FileName : null;
     }
 
+    public string? ChooseFolder(string currentFolder)
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "Choose the folder of reference files (PDFs, notes…) templates may read",
+            InitialDirectory = Directory.Exists(currentFolder) ? currentFolder : ""
+        };
+        return dialog.ShowDialog(owner()) == true ? dialog.FolderName : null;
+    }
+
+    public IReadOnlyList<string> ChooseReferenceFiles(string folder)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Choose files to always include with every template",
+            Filter = "Reference files|*.pdf;*.docx;*.txt;*.md;*.markdown;*.json;*.csv;*.yaml;*.yml;*.html;*.htm|All files|*.*",
+            InitialDirectory = Directory.Exists(folder) ? folder : "",
+            CheckFileExists = true,
+            Multiselect = true
+        };
+        return dialog.ShowDialog(owner()) == true ? dialog.FileNames : [];
+    }
+
+    public string? SaveTemplateOutput(string currentPath, string templateName)
+    {
+        var safeName = string.Join("_", templateName.Split(Path.GetInvalidFileNameChars())).Trim();
+        var dialog = new SaveFileDialog
+        {
+            Title = "Choose the file this template keeps updated (kept unlocked so other apps can read it)",
+            FileName = string.IsNullOrWhiteSpace(currentPath) ? (safeName.Length > 0 ? safeName : "template") + ".md" : Path.GetFileName(currentPath),
+            InitialDirectory = Path.GetDirectoryName(currentPath) is { Length: > 0 } folder && Directory.Exists(folder) ? folder : "",
+            Filter = "Markdown|*.md|Plain text|*.txt|All files|*.*",
+            DefaultExt = ".md",
+            AddExtension = true,
+            OverwritePrompt = false
+        };
+        return dialog.ShowDialog(owner()) == true ? dialog.FileName : null;
+    }
+
     public bool Confirm(string title, string message) =>
         MessageBox.Show(owner(), message, title, MessageBoxButton.YesNo, MessageBoxImage.Question,
             MessageBoxResult.No) == MessageBoxResult.Yes;
