@@ -94,6 +94,17 @@ pause length is the **Pause that ends a phrase** recording setting (default
 800 ms, 200–3000 ms, saved in `recording-defaults.json`); longer pauses give
 fewer, longer phrases.
 
+**Re-transcribe…** (Transcript tab) applies the current pause to an existing
+recorded or imported session. It streams each track's normalized 16 kHz audio
+twice (loudness per 10 ms, then copy), so multi-hour sessions need little
+memory, and re-cuts it with the same rule (1.5 s minimum, pause-aligned) but a
+20-second maximum: speech with no long-enough pause is cut at its quietest
+moment. The new chunks replace the old ones in one transaction, their jobs and
+recognized lines are dropped, and recognition plus speaker analysis are queued
+again. Lines whose speaker was set by hand are kept as time-ranged hints
+(`speaker_hints`) that label the new lines they cover by at least half; text
+edits are discarded. Originals are untouched.
+
 Active chunks have a `.wav.partial` and atomically replaced `.wav.journal.json`.
 The writer fsyncs data before updating the journal, at a default **one-second
 durability checkpoint**, including periods with no new packets. Seal repairs the

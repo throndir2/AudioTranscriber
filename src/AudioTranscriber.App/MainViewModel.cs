@@ -115,6 +115,7 @@ public sealed class MainViewModel : ObservableObject
             try { await controller.FillSpeakersFromLabelsAsync(id, new Progress<string>(message => SetStatus(message)), token); }
             catch (InvalidOperationException error) { SetStatus(error.Message, true); }
         }), () => CanWorkWithSession() && controller.DiarizationModelsReady);
+        ResplitCommand = new AsyncCommand(ResplitAsync, () => CanWorkWithSession() && SelectedSession?.Id != controller.RecordingSessionId);
         NameMicrophoneLinesCommand = new AsyncCommand(NameMicrophoneLinesAsync, CanWorkWithSession);
         PauseCommand = new RelayCommand(() => SessionAction(controller.PauseTranscription,
             "Transcription paused; recording, if active, continues."), () => SelectedSession is not null && !closing);
@@ -504,6 +505,7 @@ public sealed class MainViewModel : ObservableObject
     public ICommand RecheckPrerequisitesCommand { get; }
     public ICommand DiarizeCommand { get; }
     public ICommand FillSpeakersCommand { get; }
+    public ICommand ResplitCommand { get; }
     public ICommand NameMicrophoneLinesCommand { get; }
     public ICommand PauseCommand { get; }
     public ICommand ResumeCommand { get; }
@@ -1154,6 +1156,25 @@ public sealed class MainViewModel : ObservableObject
                 $"Together they run {TranscriptPresentation.Duration(chosen.Sum(s => s.DurationTicks))}. They stop being separate sessions. This cannot be undone."))
             return Task.CompletedTask;
         return MergeSessionsAsync(chosen.Select(session => session.Id).ToArray());
+    }
+
+    private Task ResplitAsync()
+    {
+        if (SelectedSession is not { } session) return Task.CompletedTask;
+        if (!dialogs.Confirm("Re-transcribe this session?",
+                $"Re-transcribe \"{session.Name}\" ({TranscriptPresentation.Duration(session.DurationTicks)})?\n\n" +
+                $"Its audio is cut again into phrases using the current pause setting ({PhrasePauseMilliseconds:N0} ms, on Record / import) " +
+                "and transcribed again from scratch. Speaker analysis then runs again.\n\n" +
+                "  • Speakers you set by hand carry over to the new lines covering the same time.\n" +
+                "  • Text edits you made to lines are discarded.\n" +
+                "  • Long recordings take a while; lines come back as each phrase is done (see Jobs).\n\n" +
+                "When it finishes, press \"Fill speakers from my labels\" to relabel everything else."))
+            return Task.CompletedTask;
+        return RunForSessionAsync("Re-cutting the audio into phrases…", async (id, token) =>
+        {
+            try { await controller.ResplitSessionAsync(id, new Progress<string>(message => SetStatus(message)), token); }
+            catch (InvalidOperationException error) { SetStatus(error.Message, true); }
+        });
     }
 
     public Task MergeSessionsAsync(IReadOnlyCollection<Guid> ids) =>
