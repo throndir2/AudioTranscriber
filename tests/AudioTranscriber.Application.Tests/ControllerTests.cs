@@ -430,6 +430,50 @@ public sealed class ControllerTests
         Assert.Single(fixture.App.GetVoiceLibrary());
     }
 
+    [Fact]
+    public async Task RetranscribeRecutsAudioAtTheCurrentPauseAndKeepsHandSetSpeakers()
+    {
+        await using var fixture = new Fixture();
+        fixture.Provider.Release.TrySetResult();
+        var session = await fixture.App.StartRecordingAsync("Synthetic re-cut", "synthetic-output", null, "local-whisper", "en", false);
+        float[] Voice(int samples) => Enumerable.Range(0, samples).Select(i => (float)(0.3 * Math.Sin(2 * Math.PI * 300 * i / 16000.0))).ToArray();
+        var track = fixture.Capture.TrackId;
+        fixture.Capture.EmitAudio(track, Voice(32000));
+        fixture.Capture.EmitAudio(track, Voice(32000));
+        fixture.Capture.EmitAudio(track, new float[48000]);
+        fixture.Capture.EmitAudio(track, Voice(32000));
+        await fixture.App.StopRecordingAsync();
+        await UntilAsync(() => fixture.App.Store.GetProgress(session.Id) is { Pending: 0, Running: 0, Succeeded: > 0 }, 30);
+        var oldChunks = fixture.App.Store.GetChunks(track);
+        Assert.Equal(5, oldChunks.Count);
+        var rows = fixture.App.Store.GetTranscriptPage(session.Id);
+        Assert.Equal(0, rows[0].StartTicks / TimeSpan.TicksPerSecond);
+        fixture.App.AssignSpeaker(session.Id, [rows[0].Id], fixture.App.GetOrCreateSpeaker(session.Id, "Alice").Id);
+
+        await fixture.App.ResplitSessionAsync(session.Id);
+
+        var chunks = fixture.App.Store.GetChunks(track);
+        Assert.Equal([4.2, 2.6, 2.575], chunks.Select(chunk => chunk.SampleCount / 16000.0));
+        Assert.Equal(oldChunks.Sum(chunk => (long)chunk.SampleCount), chunks.Sum(chunk => (long)chunk.SampleCount));
+        Assert.Equal([0L, 4_2000_000L, 6_8000_000L], chunks.Select(chunk => chunk.StartTicks));
+        Assert.All(oldChunks, chunk => Assert.False(File.Exists(chunk.Path)));
+        await UntilAsync(() => fixture.App.Store.GetProgress(session.Id) is { Pending: 0, Running: 0 } &&
+                               fixture.App.Store.GetTranscriptPage(session.Id).Count == 2, 30);
+        var recut = fixture.App.Store.GetTranscriptPage(session.Id);
+        Assert.True(recut[0].SpeakerName == "Alice" && recut[0].ManualSpeaker);
+        Assert.False(recut[1].ManualSpeaker);
+        Assert.Equal(6_9000_000L, recut[1].StartTicks);
+    }
+
+    [Fact]
+    public void PhraseSplitterCutsLongSpeechAtItsQuietestMoment()
+    {
+        var loudness = Enumerable.Repeat(0.1f, 3000).ToArray();
+        loudness[1234] = 0.02f;
+        var ends = PhraseSplitter.Plan(loudness, 3000 * 160, 800, 1500, 20_000);
+        Assert.Equal([1234L * 160, 3000L * 160], ends);
+    }
+
     private static async Task UntilAsync(Func<bool> condition, int seconds = 15)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(seconds));

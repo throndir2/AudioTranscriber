@@ -64,6 +64,8 @@ public interface IAppController : IAsyncDisposable
     Task FetchTeamsTranscriptAsync(Guid sessionId, TeamsTranscriptRequest request,
         Func<DeviceSignInPrompt, Task> showSignIn, CancellationToken cancellationToken = default);
     Task DiarizeSessionAsync(Guid sessionId, CancellationToken cancellationToken = default);
+    // Re-cuts the session's audio into phrases with PhrasePauseMilliseconds and transcribes it again; hand-set speakers carry over.
+    Task ResplitSessionAsync(Guid sessionId, IProgress<string>? progress = null, CancellationToken cancellationToken = default);
     // Gives every line you didn't label the labeled speaker it sounds closest to; your own labels are never changed.
     Task<SpeakerFillSummary> FillSpeakersFromLabelsAsync(Guid sessionId, IProgress<string>? progress = null,
         CancellationToken cancellationToken = default);

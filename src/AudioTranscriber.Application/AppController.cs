@@ -30,6 +30,8 @@ public sealed class AppController : IAppController
     private volatile bool whisperSetupFailed;
     private const int LiveChunkMaxSeconds = 6;
     private const int LivePauseSplitAfterMilliseconds = 1500;
+    // Re-cut phrases may run longer than live ones: there is no latency to keep low, and longer context recognizes better.
+    private const int ResplitMaxChunkMilliseconds = 20_000;
     public const int DefaultPhrasePauseMilliseconds = 800, MinPhrasePauseMilliseconds = 200, MaxPhrasePauseMilliseconds = 3000;
     private volatile int phrasePauseMilliseconds = DefaultPhrasePauseMilliseconds;
     public int PhrasePauseMilliseconds
@@ -1433,6 +1435,194 @@ public sealed class AppController : IAppController
             catch (Exception error) when (IsOperational(error)) { }
             throw;
         }
+    }
+
+    /// <summary>
+    /// Cuts the session's retained 16 kHz audio again into phrases with the current pause setting and transcribes it from
+    /// scratch, then re-runs speaker analysis. Lines the user labeled by hand pass their speaker to the new lines by time;
+    /// text edits are discarded. Streams the audio, so multi-hour sessions need little memory.
+    /// </summary>
+    public async Task ResplitSessionAsync(Guid sessionId, IProgress<string>? progress = null, CancellationToken cancellationToken = default)
+    {
+        await captureGate.WaitAsync(cancellationToken);
+        try
+        {
+            var session = Store.GetSession(sessionId);
+            if (RecordingSessionId == sessionId) throw new InvalidOperationException("Stop the recording before re-transcribing it.");
+            if (mediaTasks.ContainsKey(sessionId) || session.State is not ("Recorded" or "Created" or "Faulted"))
+                throw new InvalidOperationException(session.State == "Recoverable"
+                    ? $"\"{session.Name}\" has interrupted audio to recover. Resume it (Jobs → Resume) first, then re-transcribe."
+                    : $"\"{session.Name}\" is still {session.State.ToLowerInvariant()}. Wait for it to finish, then re-transcribe.");
+            RequireProvider(session.ProviderId);
+            var tracks = Store.GetTracks(sessionId).Select(track => (Track: track, Chunks: Store.GetChunks(track.Id)))
+                .Where(item => item.Chunks.Count > 0).ToArray();
+            if (tracks.Length == 0) throw new InvalidOperationException("This session has no recorded or imported audio to re-transcribe.");
+            var pause = PhrasePauseMilliseconds;
+            var stamp = "resplit-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture);
+            var directories = new List<string>();
+            var replaced = false;
+            // No new claims for this session; a result still in flight is rejected once its job is gone.
+            Store.SetProcessingStateOnly(sessionId, "Paused");
+            try
+            {
+                for (var i = 0; i < 200 && new[] { speechLane, speakerLane }.Any(lane => lane.Session == sessionId); i++)
+                {
+                    CancelActiveJobs(lane => lane.Session == sessionId);
+                    await Task.Delay(50, cancellationToken);
+                }
+                var planned = new Dictionary<Guid, IReadOnlyList<StoredAudioChunk>>();
+                foreach (var (track, chunks) in tracks)
+                {
+                    var directory = Path.Combine(session.Directory, "normalized", track.Id.ToString("N"), stamp);
+                    directories.Add(directory);
+                    planned[track.Id] = await Task.Run(() => ResplitTrack(session.Id, track, chunks, directory, pause, progress, cancellationToken),
+                        cancellationToken);
+                }
+                await Task.Run(() => Store.ReplaceTrackChunks(planned), CancellationToken.None);
+                replaced = true;
+                Store.SetProcessingStateOnly(sessionId, "Running");
+                foreach (var chunk in planned.Values.SelectMany(list => list).OrderBy(chunk => chunk.StartTicks)) QueueAsr(chunk, session);
+                if (DiarizationModelsReady) QueueDiarization(sessionId);
+                wake.Release();
+                TranscriptChanged?.Invoke(sessionId);
+                foreach (var (_, chunks) in tracks)
+                    foreach (var chunk in chunks)
+                        try { File.Delete(chunk.Path); }
+                        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+                var before = tracks.Sum(item => item.Chunks.Count);
+                var after = planned.Values.Sum(list => list.Count);
+                Notify($"Re-cut \"{session.Name}\" with a {pause:N0} ms pause: {before:N0} chunks became {after:N0} phrases. " +
+                       "They are being transcribed again" + (DiarizationModelsReady ? " and speakers re-analyzed" : "") +
+                       "; lines you labeled keep their speaker. When it finishes, use Fill speakers from my labels.");
+            }
+            finally
+            {
+                if (!replaced)
+                {
+                    try { Store.SetProcessingStateOnly(sessionId, session.ProcessingState); }
+                    catch (Exception error) when (IsOperational(error)) { }
+                    foreach (var directory in directories)
+                        try { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+                        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+                }
+            }
+        }
+        finally { captureGate.Release(); }
+    }
+
+    private static List<StoredAudioChunk> ResplitTrack(Guid sessionId, StoredTrack track, IReadOnlyList<StoredAudioChunk> chunks,
+        string directory, int pauseMilliseconds, IProgress<string>? progress, CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(directory);
+        var result = new List<StoredAudioChunk>();
+        var runs = new List<List<StoredAudioChunk>>();
+        foreach (var chunk in chunks)
+        {
+            if (runs.Count > 0 && RecognitionWindowBuilder.Adjacent(runs[^1][^1], chunk)) runs[^1].Add(chunk);
+            else runs.Add([chunk]);
+        }
+        var totalSamples = chunks.Sum(chunk => (long)chunk.SampleCount);
+        long done = 0;
+        var lastPercent = -1;
+        void Report(long samples)
+        {
+            var percent = totalSamples == 0 ? 100 : (int)(samples * 50 / totalSamples);
+            if (percent / 5 == lastPercent / 5) return;
+            lastPercent = percent;
+            progress?.Report($"Re-cutting {track.Name} into phrases… {percent}%");
+        }
+        var frame = new byte[PhraseSplitter.FrameSamples * 2];
+        foreach (var run in runs)
+        {
+            var runSamples = run.Sum(chunk => (long)chunk.SampleCount);
+            var loudness = new List<float>((int)(runSamples / PhraseSplitter.FrameSamples + 1));
+            using (var reader = new ChunkRunReader(run))
+            {
+                int read;
+                while ((read = reader.Read(frame)) > 0)
+                {
+                    loudness.Add(PhraseSplitter.FrameRms(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, short>(frame.AsSpan(0, read & ~1))));
+                    if (loudness.Count % 6000 == 0)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        Report(2 * done + reader.Position / 2);
+                    }
+                }
+            }
+            var ends = PhraseSplitter.Plan(loudness, runSamples, pauseMilliseconds, LivePauseSplitAfterMilliseconds, ResplitMaxChunkMilliseconds);
+            var offsets = new long[run.Count];
+            for (var i = 1; i < run.Count; i++) offsets[i] = offsets[i - 1] + run[i - 1].SampleCount;
+            using (var reader = new ChunkRunReader(run))
+            {
+                long position = 0;
+                var buffer = new byte[65_536];
+                foreach (var end in ends)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var count = checked((int)(end - position));
+                    var index = Array.FindLastIndex(offsets, offset => offset <= position);
+                    var owner = run[index];
+                    var within = position - offsets[index];
+                    var source = JsonSerializer.Deserialize<NormalizedChunk>(owner.MetadataJson)
+                        ?? throw new InvalidDataException("Normalized source timing metadata is missing.");
+                    var id = Guid.NewGuid();
+                    var path = Path.Combine(directory, id.ToString("N") + ".pcm16");
+                    using (var output = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65_536))
+                    {
+                        var remaining = count * 2L;
+                        while (remaining > 0)
+                        {
+                            var read = reader.Read(buffer.AsSpan(0, (int)Math.Min(buffer.Length, remaining)));
+                            if (read == 0) throw new EndOfStreamException("A normalized chunk ended before its committed sample count.");
+                            output.Write(buffer, 0, read);
+                            remaining -= read;
+                        }
+                        output.Flush(true);
+                    }
+                    var startTicks = checked(owner.StartTicks + within * TimeSpan.TicksPerSecond / 16000L);
+                    var rate = source.SourceFormat.SampleRate;
+                    var normalized = new NormalizedChunk(id, track.Id, path, checked(owner.StartSample + within), count,
+                        checked(source.SourceFrameOffset + Core.AudioTime.Scale(within, rate, 16000)), Core.AudioTime.Scale(count, rate, 16000),
+                        source.SourceFormat, startTicks, source.ContinuityId, source.NativeChunkId);
+                    result.Add(new(id, sessionId, track.Id, path, normalized.NormalizedStartSample, count, startTicks,
+                        JsonSerializer.Serialize(normalized)));
+                    position = end;
+                    Report(2 * done + runSamples + position);
+                }
+            }
+            done += runSamples;
+        }
+        return result;
+    }
+
+    // Reads consecutive normalized chunk files as one PCM16 stream.
+    private sealed class ChunkRunReader(IReadOnlyList<StoredAudioChunk> chunks) : IDisposable
+    {
+        private int index = -1;
+        private FileStream? current;
+        public long Position { get; private set; }
+
+        public int Read(Span<byte> destination)
+        {
+            var total = 0;
+            while (total < destination.Length)
+            {
+                if (current is null)
+                {
+                    if (++index >= chunks.Count) break;
+                    current = new FileStream(chunks[index].Path, FileMode.Open, FileAccess.Read, FileShare.Read, 65_536);
+                    if (current.Length != chunks[index].SampleCount * 2L)
+                        throw new InvalidDataException("A normalized chunk does not match its committed PCM16 sample count.");
+                }
+                var read = current.Read(destination[total..]);
+                if (read == 0) { current.Dispose(); current = null; continue; }
+                total += read;
+            }
+            Position += total;
+            return total;
+        }
+
+        public void Dispose() => current?.Dispose();
     }
 
     private SessionMerge PlanMerge(StoredSession target, StoredSession source)

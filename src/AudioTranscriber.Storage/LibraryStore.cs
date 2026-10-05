@@ -124,6 +124,7 @@ public sealed class LibraryStore
                          $"DELETE FROM results WHERE job_id IN ({jobs})",
                          "DELETE FROM segments WHERE session_id=$session",
                          $"DELETE FROM turns WHERE track_id IN ({tracks})",
+                         $"DELETE FROM speaker_hints WHERE track_id IN ({tracks})",
                          "DELETE FROM speakers WHERE session_id=$session",
                          "DELETE FROM jobs WHERE session_id=$session",
                          "DELETE FROM normalized_chunks WHERE session_id=$session",
@@ -177,6 +178,7 @@ public sealed class LibraryStore
             {
                 Execute(connection, "UPDATE segments SET speaker_id=$into WHERE session_id=$source AND speaker_id=$from", ("$into", into), ("$from", from), source);
                 Execute(connection, $"UPDATE turns SET speaker_id=$into WHERE speaker_id=$from AND track_id IN ({sourceTracks})", ("$into", into), ("$from", from), source);
+                Execute(connection, $"UPDATE speaker_hints SET speaker_id=$into WHERE speaker_id=$from AND track_id IN ({sourceTracks})", ("$into", into), ("$from", from), source);
                 Execute(connection, "DELETE FROM speakers WHERE session_id=$source AND id=$from", ("$from", from), source);
             }
             foreach (var (id, name) in merge.SpeakerNames)
@@ -185,6 +187,7 @@ public sealed class LibraryStore
             Execute(connection, "DELETE FROM speakers WHERE session_id=$source AND id IN (SELECT id FROM speakers WHERE session_id=$target)", source, target);
             Execute(connection, "UPDATE speakers SET session_id=$target WHERE session_id=$source", source, target);
             Execute(connection, $"UPDATE turns SET start_ticks=start_ticks+$offset,end_ticks=end_ticks+$offset WHERE track_id IN ({sourceTracks})", source, offset);
+            Execute(connection, $"UPDATE speaker_hints SET start_ticks=start_ticks+$offset,end_ticks=end_ticks+$offset WHERE track_id IN ({sourceTracks})", source, offset);
             foreach (var (id, metadata) in merge.ArchiveChunks)
                 Execute(connection, "UPDATE archive_chunks SET start_ticks=start_ticks+$offset,metadata=$metadata WHERE id=$id",
                     ("$id", id), ("$metadata", metadata), offset);
@@ -364,8 +367,78 @@ public sealed class LibraryStore
                 WHERE job_id=$id AND (SELECT mic_speaker FROM sessions WHERE id=$session) IS NOT NULL
                 AND (SELECT kind FROM tracks WHERE id=$track)='Microphone'
                 """, ("$id", job.Id), ("$session", job.SessionId), ("$track", job.TrackId));
+            ApplySpeakerHints(connection, job.Id, job.TrackId);
             transaction.Commit();
             return true;
+        }
+    }
+
+    // Speakers the user set by hand before the track was re-cut into new chunks carry over to the new lines by time.
+    private static void ApplySpeakerHints(SqliteConnection connection, Guid jobId, Guid trackId)
+    {
+        var rows = new List<(string Id, long Start, long End)>();
+        using (var command = Command(connection, "SELECT id,start_ticks,end_ticks FROM segments WHERE job_id=$job AND manual_speaker=0", ("$job", jobId)))
+        using (var reader = command.ExecuteReader())
+            while (reader.Read()) rows.Add((reader.GetString(0), reader.GetInt64(1), reader.GetInt64(2)));
+        if (rows.Count == 0) return;
+        var hints = new List<(long Start, long End, string? Speaker)>();
+        using (var command = Command(connection,
+                   "SELECT start_ticks,end_ticks,speaker_id FROM speaker_hints WHERE track_id=$track AND start_ticks<=$end AND end_ticks>=$start",
+                   ("$track", trackId), ("$start", rows.Min(row => row.Start)), ("$end", rows.Max(row => row.End))))
+        using (var reader = command.ExecuteReader())
+            while (reader.Read()) hints.Add((reader.GetInt64(0), reader.GetInt64(1), reader.IsDBNull(2) ? null : reader.GetString(2)));
+        if (hints.Count == 0) return;
+        foreach (var row in rows)
+        {
+            var best = hints.Select(hint => (hint.Speaker, Overlap: Math.Min(row.End, hint.End) - Math.Max(row.Start, hint.Start),
+                Contains: hint.Start <= row.Start && row.Start <= hint.End)).MaxBy(item => item.Overlap);
+            var matched = row.End > row.Start ? best.Overlap * 2 >= row.End - row.Start : best.Contains;
+            if (!matched) continue;
+            Execute(connection, "UPDATE segments SET speaker_id=$speaker,uncertain=0,manual_speaker=1,voice_fill=0 WHERE id=$id",
+                ("$speaker", best.Speaker), ("$id", row.Id));
+        }
+    }
+
+    /// <summary>
+    /// Replaces each track's normalized chunks with a new cut of the same audio, dropping their jobs and recognized lines.
+    /// Lines whose speaker the user set by hand are kept as hints that label the new lines covering the same time.
+    /// </summary>
+    public void ReplaceTrackChunks(IReadOnlyDictionary<Guid, IReadOnlyList<StoredAudioChunk>> chunksByTrack)
+    {
+        ArgumentNullException.ThrowIfNull(chunksByTrack);
+        lock (gate)
+        {
+            using var connection = Open();
+            using var transaction = connection.BeginTransaction();
+            foreach (var (trackId, chunks) in chunksByTrack)
+            {
+                (string, object?) track = ("$track", trackId);
+                const string jobs = "SELECT id FROM jobs WHERE track_id=$track";
+                // Hints already turned into lines are refreshed from the lines' current speakers; pending ones are kept.
+                Execute(connection, """
+                    DELETE FROM speaker_hints WHERE track_id=$track AND EXISTS(SELECT 1 FROM segments s WHERE s.track_id=$track
+                        AND s.job_id IS NOT NULL AND s.start_ticks<speaker_hints.end_ticks AND s.end_ticks>speaker_hints.start_ticks)
+                    """, track);
+                Execute(connection, """
+                    INSERT INTO speaker_hints(track_id,start_ticks,end_ticks,speaker_id)
+                    SELECT track_id,start_ticks,end_ticks,speaker_id FROM segments WHERE track_id=$track AND job_id IS NOT NULL AND manual_speaker=1
+                    """, track);
+                Execute(connection, $"DELETE FROM job_attempts WHERE job_id IN ({jobs})", track);
+                Execute(connection, $"DELETE FROM results WHERE job_id IN ({jobs})", track);
+                Execute(connection, $"DELETE FROM segments WHERE job_id IN ({jobs})", track);
+                Execute(connection, "DELETE FROM jobs WHERE track_id=$track", track);
+                Execute(connection, "DELETE FROM normalized_chunks WHERE track_id=$track", track);
+                foreach (var chunk in chunks)
+                {
+                    if (chunk.TrackId != trackId) throw new ArgumentException("A replacement chunk belongs to another track.");
+                    Execute(connection, """
+                        INSERT INTO normalized_chunks(id,session_id,track_id,path,start_sample,sample_count,start_ticks,metadata)
+                        VALUES($id,$session,$track,$path,$start,$count,$ticks,$metadata)
+                        """, ("$id", chunk.Id), ("$session", chunk.SessionId), track, ("$path", chunk.Path),
+                        ("$start", chunk.StartSample), ("$count", chunk.SampleCount), ("$ticks", chunk.StartTicks), ("$metadata", chunk.MetadataJson));
+                }
+            }
+            transaction.Commit();
         }
     }
 
@@ -611,6 +684,8 @@ public sealed class LibraryStore
             Execute(connection, "UPDATE segments SET speaker_id=$into WHERE session_id=$session AND speaker_id=$from",
                 ("$into", intoSpeakerId), ("$from", fromSpeakerId), ("$session", sessionId));
             Execute(connection, "UPDATE turns SET speaker_id=$into WHERE speaker_id=$from AND track_id IN (SELECT id FROM tracks WHERE session_id=$session)",
+                ("$into", intoSpeakerId), ("$from", fromSpeakerId), ("$session", sessionId));
+            Execute(connection, "UPDATE speaker_hints SET speaker_id=$into WHERE speaker_id=$from AND track_id IN (SELECT id FROM tracks WHERE session_id=$session)",
                 ("$into", intoSpeakerId), ("$from", fromSpeakerId), ("$session", sessionId));
             Execute(connection, "DELETE FROM speakers WHERE session_id=$session AND id=$from", ("$from", fromSpeakerId), ("$session", sessionId));
             if (Execute(connection, "UPDATE speakers SET name=$name WHERE session_id=$session AND id=$into",
@@ -934,6 +1009,9 @@ public sealed class LibraryStore
             speaker_id TEXT,overlap INTEGER NOT NULL,uncertain INTEGER NOT NULL);
         CREATE INDEX IF NOT EXISTS turn_time ON turns(track_id,start_ticks,end_ticks);
         CREATE TABLE IF NOT EXISTS merged_folders(session_id TEXT NOT NULL REFERENCES sessions(id),directory TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS speaker_hints(
+            track_id TEXT NOT NULL REFERENCES tracks(id),start_ticks INTEGER NOT NULL,end_ticks INTEGER NOT NULL,speaker_id TEXT);
+        CREATE INDEX IF NOT EXISTS speaker_hint_time ON speaker_hints(track_id,start_ticks);
         CREATE TABLE IF NOT EXISTS voices(
             id TEXT PRIMARY KEY,name TEXT NOT NULL,model TEXT NOT NULL,samples TEXT NOT NULL,created TEXT NOT NULL,updated TEXT NOT NULL);
         """;
