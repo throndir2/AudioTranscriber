@@ -32,5 +32,5 @@ Graph integration is configuration-required and is retrieval of an existing tran
 not live Teams audio. Live Teams audio needs a separate Azure media-bot deployment and
 policies.
 
-Discord live receive is deferred pending an authorized visible guild bot and validated
-DAVE-compatible receive behavior. No user-token or selfbot integration is provided.
+Discord server voice channels are recorded live on the **Discord** tab; see
+[Discord](Discord).

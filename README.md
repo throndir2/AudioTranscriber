@@ -49,9 +49,11 @@ The speech model downloads by itself the first time you start the app.
 
 ## 💡 Made for
 
-> 🎲 **Tabletop game night.** Record the whole session, ask an AI for *"DM guidance for the current scene"* from your own adventure PDFs, and get a list of NPCs and loot that updates as you play.
+> 🎲 **Tabletop game night.** Record the whole session, ask an AI for *"DM guidance for the current scene"* from your own adventure PDFs, and get a list of NPCs and loot that updates as you play. Running Roll20 or Foundry? The **VTT assistant** reads the turn order and battle map from a screenshot and reminds you whose turn it is, what the monsters should do, and which clues you haven't revealed yet.
 
 > 💼 **Meetings and calls.** Teams, Zoom, Discord, whatever your PC plays. Your microphone is its own track and echo reduction means no headset is needed.
+
+> 🎮 **Discord servers.** Invite your own bot to a voice channel and every line is named after the Discord user who said it, no speaker guessing needed.
 
 > 🎓 **Lectures and long recordings.** Import hours of audio or video and come back to a timestamped, searchable transcript. Click any line to hear it.
 
@@ -80,6 +82,7 @@ The speech model downloads by itself the first time you start the app.
 - **NVIDIA Parakeet TDT v3** on your CPU by default: 25 European languages, detected automatically.
 - In testing it made **about a third fewer word errors** than Whisper large-v3-turbo and used far less CPU.
 - Have an **NVIDIA GPU**? The app offers to run Parakeet on it instead.
+- **Recommended setup for this PC** reads your CPU, RAM and graphics card and fits the speech models and a local AI model to them.
 - **Local Whisper** for any other language.
 - Optional **NVIDIA cloud** models, only when you allow it for a session.
 
@@ -114,7 +117,7 @@ The speech model downloads by itself the first time you start the app.
 - **Output templates**: write a prompt once (*session summary*, *DM guidance*, *NPCs*, *action items*) and an AI keeps the answer current as the transcript grows.
 - Works with **OpenRouter, NVIDIA Build, OpenAI**, or a model on your own PC with **Ollama or LM Studio**.
 - Point it at a folder of **PDFs and notes** to use as reference.
-- **Chain templates** together, and let vision models see a **screenshot of your virtual tabletop** (Roll20, Foundry or any window).
+- **Chain templates** together, and let vision models see a **screenshot of your virtual tabletop** (Roll20, Foundry or any window). A ready-made **VTT assistant** turns it into live DM reminders.
 - Results show up in the app and can be written to a file.
 
 </td>
@@ -133,7 +136,8 @@ The speech model downloads by itself the first time you start the app.
 **Plus the small things:** automatic updates from GitHub releases (checked
 against SHA-256 before installing), a live activity log that shows what's
 happening, a jobs view with pause, resume and cancel, bulk-deleting old sessions,
-safe recovery after a crash, and a dark gold theme.
+safe recovery after a crash, a one-click **diagnostics ZIP** for bug reports (with
+your user name scrubbed), and a dark gold theme.
 
 ## 📸 Take a look
 

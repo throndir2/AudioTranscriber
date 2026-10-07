@@ -11,6 +11,7 @@
 - [Output Templates](Output-Templates)
 - [Transcription Providers](Transcription-Providers)
 - [Teams and WebVTT](Teams-and-WebVTT)
+- [Discord](Discord)
 - [Privacy and Uploads](Privacy-and-Uploads)
 - [Data and Recovery](Data-and-Recovery)
 - [Updates and Closing](Updates-and-Closing)

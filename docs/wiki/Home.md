@@ -38,10 +38,11 @@ are unsigned Windows x64 builds and update themselves from GitHub.
 | [Output Templates](Output-Templates) | LLM-generated notes, summaries, file context, and output files. |
 | [Transcription Providers](Transcription-Providers) | Local Parakeet/Whisper, NVIDIA cloud routes, GPU Parakeet, and CUDA downloads. |
 | [Teams and WebVTT](Teams-and-WebVTT) | Importing WebVTT and retrieving configured Teams transcripts. |
+| [Discord](Discord) | Recording Discord server voice channels with your own bot, speakers named per user. |
 | [Privacy and Uploads](Privacy-and-Uploads) | Upload consent, credentials, local models, output templates, and participant metadata. |
 | [Data and Recovery](Data-and-Recovery) | Data root contents, backups, originals, recovery, and isolated libraries. |
 | [Updates and Closing](Updates-and-Closing) | Self-updates, restart-to-update, and safe shutdown. |
-| [Limits and Known Gaps](Limits-and-Known-Gaps) | Documented limits around timing, diarization, Teams, Discord, and validation. |
+| [Limits and Known Gaps](Limits-and-Known-Gaps) | Documented limits around timing, diarization, Teams, and validation. |
 | [Troubleshooting / FAQ](Troubleshooting-FAQ) | Common fixes from the shipped docs. |
 
 ## For developers

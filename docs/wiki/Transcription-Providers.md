@@ -3,6 +3,25 @@
 AudioTranscriber is source-language ASR only. It does not translate, use chat prompts
 for ASR, or silently fall back to a cloud provider on errors.
 
+## Recommended setup for this PC
+
+**Privacy / models > Recommended setup for this PC** reads the CPU, RAM and each
+graphics card's memory (integrated GPUs don't count) and plans what fits, like a
+self-hosting calculator:
+
+1. Keep 10% of the card (at least 0.8 GB) for Windows.
+2. If templates use an LLM on this PC (Ollama or LM Studio), it gets the GPU first: the
+   largest Gemma 4 (26B, 12B, E4B, E2B) that fits. With no room it falls back to E2B on
+   the CPU (16 GB+ RAM, slow) or a hosted connection.
+3. Parakeet moves to an NVIDIA CUDA 12 GPU only if about 3 GB is still free; otherwise
+   it stays on the CPU, which already runs ~15× real time.
+4. Whisper gets the leftover: large-v3-turbo on the GPU if 2.5 GB is free, on the CPU
+   with 12+ threads, otherwise small or base. A checkbox runs Whisper on the GPU or CPU.
+
+The figures are planning estimates. Until you change a setting, the plan is the default.
+**Apply recommended settings** applies all of it (GPU downloads still ask first);
+**Re-check hardware** probes again.
+
 ## Local Parakeet, the default
 
 New sessions default to `local-parakeet`: NVIDIA Parakeet TDT 0.6B v3 through

@@ -43,6 +43,16 @@ your machines.
 Template file tools are read-only and limited to the chosen context folder and
 always-included files.
 
+## Discord recordings
+
+Discord voice channels are recorded through your own visible bot, never a user token or
+selfbot. Everyone in the channel sees the bot join; get their consent. The bot token is
+encrypted for your Windows account (DPAPI) in `discord.json` and sent only to Discord.
+Discord display names become speaker names, and with **Remember voices** on their voice
+prints (embeddings, never audio) are saved in the local voice library. Optional network
+help adds a Windows Firewall rule (UAC) and a router UPnP mapping for the voice UDP port
+only. See [Discord](Discord).
+
 ## Diagnostic logs
 
 The app keeps a local log in the data root's `logs` folder. It is never uploaded. It
