@@ -149,6 +149,56 @@ public sealed class OutputTemplate : ObservableObject
             Prompt = "Maintain an inventory of items, loot, money and other notable objects mentioned in this session: what it is, who has it now, where it came from, and its properties (look up item details in the reference files when available). Mark items that were used up, sold, given away or lost. Use Markdown bullets grouped by owner."
         }
     ];
+
+    /// <summary>
+    /// Virtual tabletop (DM assistant) chain: two narrow screenshot readers feed one reminders template.
+    /// Each call does one small job so small vision models (e.g. gemma4:e4b) stay accurate. The last item is the reminders template.
+    /// </summary>
+    public static IReadOnlyList<OutputTemplate> TableStarters()
+    {
+        var turnOrder = new OutputTemplate
+        {
+            Name = "Table: turn order",
+            UseScreenshot = true, UseTranscript = false, UseReferences = false, IncludePrevious = false,
+            AutoUpdate = true, IntervalSeconds = 20,
+            Prompt = "Look ONLY at the turn order / initiative tracker in this virtual tabletop screenshot. Ignore everything else.\n" +
+                     "If a turn order is visible: list every combatant from top to bottom, one per line, as \"Name - initiative number\". " +
+                     "Mark whose turn it is (the highlighted entry, or the top entry if nothing is highlighted) with \"<- current turn\".\n" +
+                     "Only list entries you can actually read. Do not guess hidden or cut-off entries.\n" +
+                     "If no turn order is visible, reply exactly: No turn order visible.\n" +
+                     "Reply with the list only, nothing else."
+        };
+        var tokens = new OutputTemplate
+        {
+            Name = "Table: token positions",
+            UseScreenshot = true, UseTranscript = false, UseReferences = false, IncludePrevious = false,
+            AutoUpdate = true, IntervalSeconds = 20,
+            Prompt = "Look ONLY at the battle map in this virtual tabletop screenshot. Ignore chat, menus and sidebars.\n" +
+                     "For each visible token write one line: name or label (if shown, otherwise a short description), PC or monster/NPC, and approximate location " +
+                     "(grid coordinate if the grid has labels, otherwise a map region like \"north-west, near the door\").\n" +
+                     "Then add a line \"Close together:\" listing which tokens are adjacent or very close to each other.\n" +
+                     "Do not guess tokens you cannot see.\n" +
+                     "If no battle map is visible, reply exactly: No battle map visible.\n" +
+                     "Reply with the list only, nothing else."
+        };
+        var reminders = new OutputTemplate
+        {
+            Name = "Table: DM reminders",
+            UseScreenshot = false, UseTranscript = true, UseReferences = true, IncludePrevious = false,
+            MaxTranscriptChars = 12000, AutoUpdate = true, IntervalSeconds = 45,
+            InputTemplateIds = [turnOrder.Id, tokens.Id],
+            Prompt = "I am the GM running this game right now. You get: the turn order and token positions read from my virtual tabletop, " +
+                     "the recent transcript of the table talk, and my notes / adventure (reference files).\n" +
+                     "Give short real-time reminders as Markdown bullets, most urgent first, at most 8 bullets:\n" +
+                     "- Whose turn it is now and who is next.\n" +
+                     "- For monsters acting soon: one tactical suggestion based on the token positions.\n" +
+                     "- Rules reminders that apply right now (conditions, opportunity attacks, concentration, etc.).\n" +
+                     "- Story beats, clues or NPC moments from my notes for the current scene that have NOT been presented yet in the transcript, " +
+                     "phrased like \"Don't forget to present …\".\n" +
+                     "Each bullet one short line. Only use facts from the inputs; skip a point if there is nothing for it. No introduction or closing text."
+        };
+        return [turnOrder, tokens, reminders];
+    }
 }
 
 /// <summary>One row of the "outputs of other templates" checklist for the selected template.</summary>

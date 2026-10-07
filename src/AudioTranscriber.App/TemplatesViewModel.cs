@@ -53,6 +53,7 @@ public sealed class TemplatesViewModel : ObservableObject
         DuplicateTemplateCommand = new RelayCommand(DuplicateTemplate, () => SelectedTemplate is not null);
         DeleteTemplateCommand = new RelayCommand(DeleteTemplate, () => SelectedTemplate is not null);
         AddStartersCommand = new RelayCommand(() => { foreach (var t in OutputTemplate.Starters()) AddTemplate(t); });
+        AddTableStartersCommand = new RelayCommand(AddTableStarters);
         RunTemplateCommand = new RelayCommand(() => { if (SelectedTemplate is { } t) _ = RunAsync(t, manual: true); },
             () => SelectedTemplate is { IsRunning: false });
         StopTemplateCommand = new RelayCommand(() => { if (SelectedTemplate is { } t && running.TryGetValue(t.Id, out var c)) c.Cancel(); },
@@ -96,6 +97,7 @@ public sealed class TemplatesViewModel : ObservableObject
     public ICommand DuplicateTemplateCommand { get; }
     public ICommand DeleteTemplateCommand { get; }
     public ICommand AddStartersCommand { get; }
+    public ICommand AddTableStartersCommand { get; }
     public ICommand RunTemplateCommand { get; }
     public ICommand StopTemplateCommand { get; }
     public ICommand BrowseOutputCommand { get; }
@@ -396,6 +398,16 @@ public sealed class TemplatesViewModel : ObservableObject
         AssignDefaultConnection();
         SelectedTemplate = template;
         dirty = true;
+    }
+
+    private void AddTableStarters()
+    {
+        var added = OutputTemplate.TableStarters();
+        foreach (var t in added) AddTemplate(t);
+        var reminders = added[^1];
+        SelectedTemplate = reminders;
+        if (string.IsNullOrWhiteSpace(CaptureTarget))
+            reminders.Status = "Pick your virtual tabletop window (e.g. the Roll20 browser window) in the Table screenshot card so the turn order and token templates can read it.";
     }
 
     private void DuplicateTemplate()
