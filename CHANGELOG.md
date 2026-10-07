@@ -8,14 +8,17 @@ Format: newest first; each version is `## vX.Y.Z - YYYY-MM-DD` with `### Added`,
 
 ## Unreleased
 
+## v0.2.0 - 2026-10-06
+
 ### Added
 
 - **Linux support** (x64): the same app runs on Ubuntu, Debian, Fedora and other distributions, recording the output device and microphone through PulseAudio/PipeWire. (#47)
 - **Installers**: a per-user Windows setup (Start menu shortcut, uninstaller, Visual C++ runtime check), Linux `.deb` and `.rpm` packages that install their prerequisites automatically, and a Linux `.tar.gz` with `install.sh`; Linux installs add a desktop entry, icons and software-center metadata. (#47)
 - Record Discord server voice channels with your own bot (Discord tab): guided app setup with Developer Portal and invite links, every line named after the Discord user speaking, their voice prints learned into the voice library, and Windows Firewall, UPnP and port-forwarding help. (#45)
 - Diagnostic logging, plus **Save diagnostics ZIP…** and **Open log folder** on the Privacy / models tab for bug reports. (#43)
-- **Recommended setup for this PC** (Privacy / models) reads the CPU, RAM and graphics card memory and fits the engines to them, like a self-hosting calculator: a local template LLM (Ollama) gets the GPU first with the largest Gemma 4 that fits; Parakeet moves to the GPU only when there is room left (otherwise it stays on the fast CPU path); Whisper gets the biggest size the leftover GPU memory or CPU can keep up with, and a new checkbox runs Whisper on the GPU or CPU. **Apply recommended settings** applies it; these are also the defaults until you change a setting.
+- **Recommended setup for this PC** (Privacy / models) reads the CPU, RAM and graphics card memory and fits the engines to them, like a self-hosting calculator: a local template LLM (Ollama) gets the GPU first with the largest Gemma 4 that fits; Parakeet moves to the GPU only when there is room left (otherwise it stays on the fast CPU path); Whisper gets the biggest size the leftover GPU memory or CPU can keep up with, and a new checkbox runs Whisper on the GPU or CPU. **Apply recommended settings** applies it; these are also the defaults until you change a setting. (#44)
 - **Add table (VTT) templates** adds a ready-made virtual tabletop assistant: turn order and token positions read from your table screenshot feed live DM reminders (whose turn, monster tactics, rules, story beats not presented yet). (#42)
+- Templates can use other templates' outputs, reference files and their own previous output as context, and re-run automatically when those inputs change. (#39)
 - Templates can include a screenshot of your virtual tabletop (Roll20, Foundry or any window or screen) for vision models, set up in the new **Table screenshot** card. (#40)
 - Output template connections can check whether the selected model accepts images (**Check image support**, also run by **Test**). (#37)
 
