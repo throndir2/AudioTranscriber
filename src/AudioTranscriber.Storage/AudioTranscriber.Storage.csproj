@@ -8,10 +8,10 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.12" />
     <PackageReference Include="SQLitePCLRaw.config.e_sqlite3" Version="3.0.5" />
-    <!-- Vendored natives (see NativeSqlite\README.md); a RID-specific publish ships only its own platform's library. -->
-    <None Update="NativeSqlite\e_sqlite3.dll" Link="e_sqlite3.dll" Condition="'$(RuntimeIdentifier)' == '' Or $(RuntimeIdentifier.StartsWith('win'))"
+    <!-- Vendored natives (see NativeSqlite\README.md); scripts\Publish.ps1 keeps only the target platform's library. -->
+    <None Update="NativeSqlite\e_sqlite3.dll" Link="e_sqlite3.dll"
           CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <None Update="NativeSqlite\libe_sqlite3.so" Link="libe_sqlite3.so" Condition="'$(RuntimeIdentifier)' == '' Or $(RuntimeIdentifier.StartsWith('linux'))"
+    <None Update="NativeSqlite\libe_sqlite3.so" Link="libe_sqlite3.so"
           CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

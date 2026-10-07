@@ -184,7 +184,8 @@ function New-WindowsSetupPackage([object]$Version, [string]$SourceDirectory, [st
     $names = Get-AssetNames $Version.Tag; $installer = Join-Path $Destination $names.WinSetup; $nsis = Get-NsisPath (Join-Path $PSScriptRoot '..\.tools')
     $source = [IO.Path]::GetFullPath($SourceDirectory); $sizeKb = [math]::Max(1, [math]::Ceiling(((Get-ChildItem -LiteralPath $source -Recurse -File | Measure-Object Length -Sum).Sum) / 1kb))
     $script = Join-Path $PSScriptRoot '..\installer\windows\AudioTranscriber.nsi'
-    & $nsis /V2 "/DAPP_VERSION=$($Version.SemVer)" "/DSOURCE_DIR=$source" "/DOUT_FILE=$installer" "/DICON_FILE=$(Join-Path $PSScriptRoot '..\src\AudioTranscriber.App\Assets\AppIcon.ico')" "/DEST_SIZE_KB=$sizeKb" $script
+    # makensis on Linux only accepts "-" switches ("/" is read as a path); Windows accepts both.
+    & $nsis -V2 "-DAPP_VERSION=$($Version.SemVer)" "-DSOURCE_DIR=$source" "-DOUT_FILE=$installer" "-DICON_FILE=$(Join-Path $PSScriptRoot '..\src\AudioTranscriber.App\Assets\AppIcon.ico')" "-DEST_SIZE_KB=$sizeKb" $script
     if ($LASTEXITCODE -ne 0) { throw 'NSIS failed to build the Windows setup executable.' }
     (Get-Item -LiteralPath $installer).LastWriteTimeUtc = $Timestamp.UtcDateTime; [void](Add-Checksum $installer); $installer
 }
