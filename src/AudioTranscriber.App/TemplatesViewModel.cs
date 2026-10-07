@@ -64,10 +64,14 @@ public sealed class TemplatesViewModel : ObservableObject
         }, () => !string.IsNullOrEmpty(SelectedTemplate?.Output));
         timer = new DispatcherTimer(TimeSpan.FromSeconds(4), DispatcherPriority.Background, (_, _) => _ = TickAsync(), dispatcher);
         timer.Stop();
+        Templates.CollectionChanged += (_, _) => RebuildInputOptions();
+        RebuildInputOptions();
     }
 
     public ObservableCollection<LlmConnection> Connections { get; } = [];
     public ObservableCollection<OutputTemplate> Templates { get; } = [];
+    /// <summary>Checklist of the other templates the selected template can use as inputs.</summary>
+    public ObservableCollection<TemplateInputOption> TemplateInputs { get; } = [];
     public ObservableCollection<string> Models { get; } = [];
     public IReadOnlyList<LlmPreset> Presets => LlmPreset.All;
 
@@ -113,9 +117,45 @@ public sealed class TemplatesViewModel : ObservableObject
     public OutputTemplate? SelectedTemplate
     {
         get => selectedTemplate;
-        set { if (Set(ref selectedTemplate, value)) Changed(nameof(HasTemplate)); }
+        set { if (Set(ref selectedTemplate, value)) { Changed(nameof(HasTemplate)); RebuildInputOptions(); } }
     }
     public bool HasTemplate => SelectedTemplate is not null;
+
+    private void RebuildInputOptions()
+    {
+        TemplateInputs.Clear();
+        if (SelectedTemplate is not { } selected) return;
+        foreach (var template in Templates.Where(t => t != selected))
+            TemplateInputs.Add(new TemplateInputOption(template, selected.InputTemplateIds.Contains(template.Id), true, "", ToggleInput));
+        RefreshInputOptions();
+    }
+
+    // A template that already (transitively) uses the selected one can't become its input: that would loop forever.
+    private void RefreshInputOptions()
+    {
+        if (SelectedTemplate is not { } selected) return;
+        foreach (var option in TemplateInputs)
+        {
+            var loops = TemplateGraph.DependsOn(option.Template, selected, Templates);
+            option.IsEnabled = option.IsSelected || !loops;
+            option.Hint = loops
+                ? $"\"{option.Template.Name}\" already uses this template's output, so it can't also be an input (that would loop)."
+                : "Feed this template's latest output in. With automatic updates on, this template re-runs when it changes.";
+        }
+    }
+
+    private void ToggleInput(TemplateInputOption option)
+    {
+        if (SelectedTemplate is not { } selected) return;
+        if (option.IsSelected && TemplateGraph.DependsOn(option.Template, selected, Templates))
+        {
+            selected.Status = $"\"{option.Template.Name}\" already uses this template, so it can't be an input.";
+            option.IsSelected = false;
+            return;
+        }
+        selected.InputTemplateIds = TemplateInputs.Where(o => o.IsSelected).Select(o => o.Template.Id).ToList();
+        RefreshInputOptions();
+    }
 
     public string ContextFolder { get => contextFolder; set { if (Set(ref contextFolder, value?.Trim() ?? "")) dirty = true; } }
     public string PinnedFiles { get => pinnedFiles; set { if (Set(ref pinnedFiles, value ?? "")) dirty = true; } }
@@ -313,7 +353,8 @@ public sealed class TemplatesViewModel : ObservableObject
         AddTemplate(new OutputTemplate
         {
             Name = source.Name + " (copy)", Prompt = source.Prompt, ConnectionId = source.ConnectionId, IntervalSeconds = source.IntervalSeconds,
-            IncludePrevious = source.IncludePrevious, UseReferences = source.UseReferences, MaxTranscriptChars = source.MaxTranscriptChars
+            IncludePrevious = source.IncludePrevious, UseReferences = source.UseReferences, MaxTranscriptChars = source.MaxTranscriptChars,
+            UseTranscript = source.UseTranscript, InputTemplateIds = [.. source.InputTemplateIds]
         });
     }
 
@@ -322,6 +363,8 @@ public sealed class TemplatesViewModel : ObservableObject
         if (SelectedTemplate is not { } template) return;
         if (!dialogs.Confirm("Delete template", $"Delete the template \"{template.Name}\"? Its output file, if any, is left in place.")) return;
         if (running.TryGetValue(template.Id, out var cancellation)) cancellation.Cancel();
+        foreach (var other in Templates.Where(t => t.InputTemplateIds.Contains(template.Id)))
+            other.InputTemplateIds = other.InputTemplateIds.Where(id => id != template.Id).ToList();
         Templates.Remove(template);
         SelectedTemplate = Templates.FirstOrDefault();
         Save();
@@ -357,36 +400,51 @@ public sealed class TemplatesViewModel : ObservableObject
         try
         {
             if (dirty) Save();
-            var target = targetSession();
-            if (target is not { } id) { TargetDescription = "No session selected. Templates run on the session being recorded, or the session selected on the left."; return; }
             var store = controller.Store;
-            string name;
-            try { name = store.GetSession(id).Name; }
-            catch (InvalidOperationException) { return; }
-            var recording = controller.RecordingSessionId == id;
-            TargetDescription = recording ? $"Following the recording: \"{name}\"" : $"Using the selected session: \"{name}\"";
-            var due = Templates.Where(t => t.AutoUpdate && !t.IsRunning &&
+            Guid? session = null;
+            if (targetSession() is not { } id)
+                TargetDescription = "No session selected. Templates that use the transcript run on the session being recorded, or the session selected on the left.";
+            else
+            {
+                try
+                {
+                    var name = store.GetSession(id).Name;
+                    session = id;
+                    TargetDescription = controller.RecordingSessionId == id ? $"Following the recording: \"{name}\"" : $"Using the selected session: \"{name}\"";
+                }
+                catch (InvalidOperationException) { }
+            }
+            var due = TemplateGraph.RunOrder(Templates).Where(t => t.AutoUpdate && !t.IsRunning &&
                 DateTime.UtcNow - t.LastRunUtc >= TimeSpan.FromSeconds(t.IntervalSeconds)).ToArray();
             if (due.Length == 0) return;
-            var (transcript, rows) = await Task.Run(() => (LiveTranscriptFile.Render(store, id, out var count), count));
-            if (rows == 0 || closing) return;
-            var fingerprint = Fingerprint(id, transcript);
+            string? transcript = null;
+            var rows = 0;
+            if (session is { } sessionId && due.Any(t => t.UseTranscript))
+                (transcript, rows) = await Task.Run(() => (LiveTranscriptFile.Render(store, sessionId, out var count), count));
+            if (closing) return;
+            // Upstream first: a template started here is already IsRunning, so its downstream waits for the fresh output.
             foreach (var template in due)
-                if (template.LastFingerprint != fingerprint) _ = RunAsync(template, manual: false, id, transcript, fingerprint);
+            {
+                var inputs = TemplateGraph.Inputs(template, Templates);
+                if (template.IsRunning || inputs.Any(i => i.IsRunning)) continue;
+                if (template.UseTranscript && rows == 0) continue;
+                if (template.LastFingerprint != TemplateGraph.Fingerprint(template, session, transcript, inputs.Select(i => (i.Id, i.Output)), ExtraFingerprint(template)))
+                    _ = RunAsync(template, manual: false, session, transcript);
+            }
         }
         catch (Exception error) when (error is IOException or InvalidOperationException or UnauthorizedAccessException) { }
         finally { ticking = false; }
     }
 
-    private static string Fingerprint(Guid session, string transcript) =>
-        session.ToString("N") + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(transcript)));
+    /// <summary>Extension point for extra per-template inputs (e.g. a screenshot hash) that should trigger re-runs.</summary>
+    private static string? ExtraFingerprint(OutputTemplate template) => null;
 
-    private async Task RunAsync(OutputTemplate template, bool manual, Guid? sessionId = null, string? transcript = null, string? fingerprint = null)
+    private async Task RunAsync(OutputTemplate template, bool manual, Guid? sessionId = null, string? transcript = null)
     {
         if (template.IsRunning || closing) return;
         if (ConnectionFor(template) is not { } connection) { template.Status = "Add an LLM connection below first."; return; }
-        var id = sessionId ?? targetSession();
-        if (id is not { } session) { template.Status = "Select or record a session first."; return; }
+        var session = sessionId ?? targetSession();
+        if (template.UseTranscript && session is null) { template.Status = "Select or record a session first (or untick Transcript in this template's inputs)."; return; }
         var cancellation = new CancellationTokenSource();
         running[template.Id] = cancellation;
         template.IsRunning = true;
@@ -395,24 +453,26 @@ public sealed class TemplatesViewModel : ObservableObject
         var started = DateTime.Now;
         try
         {
-            if (transcript is null)
+            if (template.UseTranscript && transcript is null)
             {
                 var store = controller.Store;
-                transcript = await Task.Run(() => LiveTranscriptFile.Render(store, session));
-                fingerprint = Fingerprint(session, transcript);
+                var id = session!.Value;
+                transcript = await Task.Run(() => LiveTranscriptFile.Render(store, id));
             }
-            var previous = template.IncludePrevious && template.OutputSessionId == session ? template.Output : "";
+            var inputs = TemplateGraph.Inputs(template, Templates).Select(t => (t.Id, t.Name, t.Output)).ToArray();
+            var fingerprint = TemplateGraph.Fingerprint(template, session, transcript, inputs.Select(i => (i.Id, i.Output)), ExtraFingerprint(template));
+            var previous = template.IncludePrevious && (!template.UseTranscript || template.OutputSessionId == session) ? template.Output : "";
             var library = template.UseReferences ? new ReferenceLibrary(ContextFolder, PinnedList()) : null;
             var references = library is null ? "" : await Task.Run(() => library.PinnedText(MaxReferenceChars), cancellation.Token);
             var tools = library is { HasFolder: true } ? library : null;
             var system = BuildSystem(tools is not null);
-            var user = BuildUser(template, transcript, references, previous);
+            var user = BuildUser(template, template.UseTranscript ? transcript : null, inputs.Select(i => (i.Name, i.Output)).ToArray(), references, previous);
             var progress = new Progress<string>(message => template.Status = message);
             var key = connection.GetKey();
             var result = await Task.Run(() => LlmClient.CompleteAsync(connection.BaseUrl, key, connection.Model, system, user, tools, progress, cancellation.Token));
             if (string.IsNullOrWhiteSpace(result)) throw new LlmException("The model returned an empty answer.");
             template.Output = result;
-            template.OutputSessionId = session;
+            template.OutputSessionId = template.UseTranscript ? session : null;
             template.LastFingerprint = fingerprint;
             var seconds = (DateTime.Now - started).TotalSeconds;
             var status = $"Updated {DateTime.Now:HH:mm:ss} in {seconds:0.#} s · {connection.Name} · {connection.Model}";
@@ -449,19 +509,22 @@ public sealed class TemplatesViewModel : ObservableObject
         text.AppendLine("You are an assistant built into AudioTranscriber, a live transcription app. You receive the transcript of a conversation that may still be in progress.");
         text.AppendLine("The transcript comes from speech recognition: expect misheard words, especially names, and generic speaker labels such as 'Speaker 1'. Infer sensibly and do not invent facts.");
         text.AppendLine("Follow the user's template instructions and reply with only the requested document (Markdown is fine). No preamble, no closing remarks, no questions back.");
+        text.AppendLine("Sections titled 'Output of \"…\"' are the latest results of other templates (other focused assistants); treat them as inputs.");
         if (tools)
             text.AppendLine("You can call list_files, read_file and search_files to consult the user's reference files (rules, adventure books, notes). Search for names, places and topics from the transcript and use what you find; cite file and page when helpful. Keep tool use focused.");
         return text.ToString();
     }
 
-    private static string BuildUser(OutputTemplate template, string transcript, string references, string previous)
+    private static string BuildUser(OutputTemplate template, string? transcript, IReadOnlyList<(string Name, string Output)> inputs, string references, string previous)
     {
         var text = new StringBuilder();
         text.AppendLine($"Current local time: {DateTime.Now:yyyy-MM-dd HH:mm}").AppendLine();
         if (references.Length > 0) text.AppendLine("## Reference files (always included)").AppendLine(references).AppendLine();
-        text.AppendLine("## Transcript so far").AppendLine(Tail(transcript, template.MaxTranscriptChars)).AppendLine();
+        if (transcript is not null) text.AppendLine("## Transcript so far").AppendLine(Tail(transcript, template.MaxTranscriptChars)).AppendLine();
+        foreach (var (name, output) in inputs)
+            text.AppendLine($"## Output of \"{name}\"").AppendLine(string.IsNullOrWhiteSpace(output) ? "(no output yet)" : output.Trim()).AppendLine();
         if (previous.Length > 0)
-            text.AppendLine("## Your previous output").AppendLine("Update it with what is new in the transcript; keep what is still correct.")
+            text.AppendLine("## Your previous output").AppendLine("Update it with what is new in the inputs above; keep what is still correct.")
                 .AppendLine(previous).AppendLine();
         text.AppendLine("## Template instructions").AppendLine(template.Prompt.Trim());
         return text.ToString();

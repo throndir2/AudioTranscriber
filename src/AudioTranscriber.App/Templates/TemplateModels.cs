@@ -96,8 +96,9 @@ public sealed class OutputTemplate : ObservableObject
 {
     private string name = "", prompt = "", outputPath = "", output = "", status = "Not run yet.";
     private Guid? connectionId;
-    private bool autoUpdate, writeToFile, includePrevious = true, useReferences = true, running;
+    private bool autoUpdate, writeToFile, includePrevious = true, useReferences = true, useTranscript = true, running;
     private int intervalSeconds = 60, maxTranscriptChars = 60000;
+    private List<Guid> inputTemplateIds = [];
 
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get => name; set => Set(ref name, value ?? ""); }
@@ -107,6 +108,9 @@ public sealed class OutputTemplate : ObservableObject
     public int IntervalSeconds { get => intervalSeconds; set => Set(ref intervalSeconds, Math.Clamp(value, 10, 24 * 3600)); }
     public bool IncludePrevious { get => includePrevious; set => Set(ref includePrevious, value); }
     public bool UseReferences { get => useReferences; set => Set(ref useReferences, value); }
+    public bool UseTranscript { get => useTranscript; set => Set(ref useTranscript, value); }
+    /// <summary>Other templates whose latest output is fed into this one; a change in any of them triggers an automatic update.</summary>
+    public List<Guid> InputTemplateIds { get => inputTemplateIds; set { if (Set(ref inputTemplateIds, value ?? [])) Changed(nameof(Summary)); } }
     public int MaxTranscriptChars { get => maxTranscriptChars; set => Set(ref maxTranscriptChars, Math.Clamp(value, 1000, 2_000_000)); }
     public bool WriteToFile { get => writeToFile; set => Set(ref writeToFile, value); }
     public string OutputPath { get => outputPath; set => Set(ref outputPath, value ?? ""); }
@@ -117,7 +121,8 @@ public sealed class OutputTemplate : ObservableObject
     [JsonIgnore] public bool IsRunning { get => running; set { if (Set(ref running, value)) Changed(nameof(Summary)); } }
     [JsonIgnore] public DateTime LastRunUtc { get; set; } = DateTime.MinValue;
     [JsonIgnore] public string? LastFingerprint { get; set; }
-    [JsonIgnore] public string Summary => IsRunning ? "updating…" : AutoUpdate ? "live" : "manual";
+    [JsonIgnore] public string Summary => (IsRunning ? "updating…" : AutoUpdate ? "live" : "manual") +
+        (InputTemplateIds.Count > 0 ? $" · uses {InputTemplateIds.Count}" : "");
 
     public static IEnumerable<OutputTemplate> Starters() =>
     [
@@ -142,6 +147,71 @@ public sealed class OutputTemplate : ObservableObject
             Prompt = "Maintain an inventory of items, loot, money and other notable objects mentioned in this session: what it is, who has it now, where it came from, and its properties (look up item details in the reference files when available). Mark items that were used up, sold, given away or lost. Use Markdown bullets grouped by owner."
         }
     ];
+}
+
+/// <summary>One row of the "outputs of other templates" checklist for the selected template.</summary>
+public sealed class TemplateInputOption(OutputTemplate template, bool selected, bool enabled, string hint, Action<TemplateInputOption> toggled) : ObservableObject
+{
+    private bool isSelected = selected, isEnabled = enabled;
+    private string hint = hint;
+
+    public OutputTemplate Template { get; } = template;
+    public bool IsSelected { get => isSelected; set { if (Set(ref isSelected, value)) toggled(this); } }
+    public bool IsEnabled { get => isEnabled; set => Set(ref isEnabled, value); }
+    public string Hint { get => hint; set => Set(ref hint, value); }
+}
+
+/// <summary>Chaining helpers: which templates feed which, cycle checks, run order and change detection.</summary>
+public static class TemplateGraph
+{
+    public static IReadOnlyList<OutputTemplate> Inputs(OutputTemplate template, IEnumerable<OutputTemplate> all) =>
+        template.InputTemplateIds.Distinct().Select(id => all.FirstOrDefault(t => t.Id == id)).OfType<OutputTemplate>()
+            .Where(t => t != template).ToArray();
+
+    /// <summary>True when <paramref name="from"/> uses <paramref name="target"/> as an input, directly or through other templates.</summary>
+    public static bool DependsOn(OutputTemplate from, OutputTemplate target, IReadOnlyCollection<OutputTemplate> all)
+    {
+        var seen = new HashSet<Guid>();
+        var stack = new Stack<OutputTemplate>([from]);
+        while (stack.TryPop(out var current))
+        {
+            if (!seen.Add(current.Id)) continue;
+            foreach (var input in Inputs(current, all))
+            {
+                if (input == target) return true;
+                stack.Push(input);
+            }
+        }
+        return false;
+    }
+
+    /// <summary>Templates ordered so each comes after its inputs (upstream first).</summary>
+    public static IReadOnlyList<OutputTemplate> RunOrder(IReadOnlyCollection<OutputTemplate> all)
+    {
+        var order = new List<OutputTemplate>();
+        var seen = new HashSet<Guid>();
+        void Visit(OutputTemplate t)
+        {
+            if (!seen.Add(t.Id)) return;
+            foreach (var input in Inputs(t, all)) Visit(input);
+            order.Add(t);
+        }
+        foreach (var t in all) Visit(t);
+        return order;
+    }
+
+    /// <summary>
+    /// Hash of everything that feeds a template: session + transcript (when used) and each input template's output.
+    /// <paramref name="extra"/> is the extension point for further inputs (e.g. a screenshot hash).
+    /// </summary>
+    public static string Fingerprint(OutputTemplate template, Guid? session, string? transcript, IEnumerable<(Guid Id, string Output)> inputs, string? extra = null)
+    {
+        var text = new StringBuilder();
+        if (template.UseTranscript) text.Append("T:").Append(session?.ToString("N")).Append('\n').Append(transcript).Append('\0');
+        foreach (var (id, output) in inputs) text.Append("I:").Append(id.ToString("N")).Append('\n').Append(output).Append('\0');
+        if (!string.IsNullOrEmpty(extra)) text.Append("X:").Append(extra);
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString())));
+    }
 }
 
 public sealed class TemplateSettings
