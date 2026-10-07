@@ -10,6 +10,7 @@ Format: newest first; each version is `## vX.Y.Z - YYYY-MM-DD` with `### Added`,
 
 ### Added
 
+- Record Discord server voice channels with your own bot (Discord tab): guided app setup with Developer Portal and invite links, every line named after the Discord user speaking, their voice prints learned into the voice library, and Windows Firewall, UPnP and port-forwarding help. (#45)
 - Diagnostic logging, plus **Save diagnostics ZIP…** and **Open log folder** on the Privacy / models tab for bug reports. (#43)
 - **Recommended setup for this PC** (Privacy / models) reads the CPU, RAM and graphics card memory and fits the engines to them, like a self-hosting calculator: a local template LLM (Ollama) gets the GPU first with the largest Gemma 4 that fits; Parakeet moves to the GPU only when there is room left (otherwise it stays on the fast CPU path); Whisper gets the biggest size the leftover GPU memory or CPU can keep up with, and a new checkbox runs Whisper on the GPU or CPU. **Apply recommended settings** applies it; these are also the defaults until you change a setting.
 - **Add table (VTT) templates** adds a ready-made virtual tabletop assistant: turn order and token positions read from your table screenshot feed live DM reminders (whose turn, monster tactics, rules, story beats not presented yet). (#42)

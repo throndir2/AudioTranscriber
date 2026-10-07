@@ -56,6 +56,9 @@ public sealed class AppController : IAppController
     private readonly ConcurrentDictionary<Guid, Task> mediaTasks = new();
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> mediaCancellation = new();
     private readonly ConcurrentDictionary<Guid, CaptureFeed> captureFeeds = new();
+    // Speakers named by their source (Discord users) per track, and how many of their lines their voice was last learned from.
+    private readonly ConcurrentDictionary<(Guid Session, Guid Track, string Speaker), int> namedVoiceProgress = new();
+    private static readonly int[] NamedVoiceSteps = [3, 10, 30];
     private readonly Dictionary<string, ITranscriptionProvider> providerCache = new();
     private readonly System.Diagnostics.Stopwatch recordingClock = new();
     // A continued recording starts at this point of its session's timeline.
@@ -524,8 +527,9 @@ public sealed class AppController : IAppController
         if (session.ProviderId == "local-whisper") StartWhisperDownload();
         var suffix = part > 1 ? $" (part {part})" : "";
         var outputId = Guid.NewGuid();
+        var external = ExternalAudioSources.TryGet(outputDeviceId, out var source) ? source.Name : null;
         microphoneTrackId = microphoneDeviceId is null ? null : Guid.NewGuid();
-        Store.AddTrack(new(outputId, session.Id, "Loopback", "Windows output" + suffix, null, 0, null));
+        Store.AddTrack(new(outputId, session.Id, "Loopback", (external ?? "Windows output") + suffix, null, 0, null));
         if (microphoneTrackId is { } mic)
             Store.AddTrack(new(mic, session.Id, "Microphone", "Local microphone" + suffix, null, 0,
                 reduceEcho ? JsonSerializer.Serialize(new MicrophoneOptions(outputId)) : null));
@@ -548,7 +552,8 @@ public sealed class AppController : IAppController
                 PauseMilliseconds: PhrasePauseMilliseconds), cancellationToken);
             Store.SetSessionState(session.Id, "Recording");
             Notify((offsetTicks > 0 ? $"Continuing \"{session.Name}\" at {Clock(offsetTicks)}: recording" : "Recording") +
-                " selected Windows output" + (microphoneDeviceId is null ? ". Local microphone is not captured." : " and a separate microphone track."));
+                (external is null ? " selected Windows output" : " " + external) +
+                (microphoneDeviceId is null ? ". Local microphone is not captured." : " and a separate microphone track."));
         }
         catch
         {
@@ -721,11 +726,37 @@ public sealed class AppController : IAppController
         return count;
     }
 
+    public void LabelTrackSpeech(Guid sessionId, Guid trackId, string name, long startTicks, long endTicks)
+    {
+        if (string.IsNullOrWhiteSpace(name) || endTicks <= startTicks) return;
+        var speaker = GetOrCreateSpeaker(sessionId, name);
+        var labeled = Store.AddSpeakerHint(trackId, startTicks, endTicks, speaker.Id);
+        namedVoiceProgress.TryAdd((sessionId, trackId, speaker.Id), 0);
+        if (labeled.Count > 0) TranscriptChanged?.Invoke(sessionId);
+        LearnNamedVoices(sessionId);
+    }
+
+    // Learns each named speaker's voice print from their own lines once they have a few, then again as more arrive.
+    private void LearnNamedVoices(Guid sessionId)
+    {
+        if (!DiarizationModelsReady) return;
+        foreach (var key in namedVoiceProgress.Keys.Where(item => item.Session == sessionId))
+        {
+            var ids = Store.GetLabeledSegmentIds(key.Track, key.Speaker);
+            var learned = namedVoiceProgress.GetValueOrDefault(key);
+            var step = NamedVoiceSteps.LastOrDefault(value => ids.Count >= value);
+            if (step <= learned || !namedVoiceProgress.TryUpdate(key, step, learned)) continue;
+            if (Store.GetSpeakers(sessionId).FirstOrDefault(item => item.Id == key.Speaker) is not { } speaker ||
+                !Guid.TryParse(speaker.Id, out var guid)) continue;
+            var recent = ids.TakeLast(40).ToArray();
+            StartBackground(token => LearnVoiceAsync(sessionId, speaker, guid, recent, token));
+        }
+    }
+
     public void AssignSpeaker(Guid sessionId, IReadOnlyCollection<string> segmentIds, string? speakerId)
     {
         ArgumentNullException.ThrowIfNull(segmentIds);
-        if (segmentIds.Count == 0) return;
-        var speaker = speakerId is null ? null : Store.GetSpeakers(sessionId).FirstOrDefault(item => item.Id == speakerId)
+        if (segmentIds.Count == 0) return;        var speaker = speakerId is null ? null : Store.GetSpeakers(sessionId).FirstOrDefault(item => item.Id == speakerId)
             ?? throw new ArgumentException("Choose a speaker from this session.");
         Store.AssignSpeaker(sessionId, segmentIds, speakerId);
         TranscriptChanged?.Invoke(sessionId);
@@ -2337,6 +2368,7 @@ public sealed class AppController : IAppController
                         segment.EndMilliseconds ?? (window.SampleCount * 1000L / 16000), segment.Timing.ToString())), turns, provenance);
             }
             Store.CompleteJob(job, rows, evidence, modelIdentity);
+            if (!namedVoiceProgress.IsEmpty) LearnNamedVoices(job.SessionId);
             // Speaker analysis runs in its own lane; re-apply any turns it stored meanwhile to the new rows.
             RefreshSpeakerAssignments(job.SessionId, job.TrackId, chunk.StartTicks,
                 chunk.StartTicks + chunk.SampleCount * TimeSpan.TicksPerSecond / 16000L);

@@ -26,6 +26,10 @@ public partial class MainWindow : Window
         viewModel.TranscriptReloading += () => followTranscriptEnd = TranscriptAtEnd();
         viewModel.TranscriptReloaded += RestoreTranscriptSelection;
         viewModel.SessionsReloaded += RestoreSessionSelection;
+        viewModel.Discord.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(DiscordViewModel.TokenInput) && viewModel.Discord.TokenInput.Length == 0) DiscordTokenInput.Clear();
+        };
         viewModel.ActivityLog.CollectionChanged += (_, e) =>
         {
             // Defer until the ListBox has processed the change; scrolling inside the event corrupts its generator.
@@ -46,6 +50,8 @@ public partial class MainWindow : Window
     }
 
     private void CloseClick(object sender, RoutedEventArgs e) => Close();
+
+    private void DiscordTokenChanged(object sender, RoutedEventArgs e) => viewModel.Discord.TokenInput = DiscordTokenInput.Password;
 
     // A maximized custom-chrome window overhangs the screen by its resize frame; inset the content to match.
     private void ApplyWindowState()

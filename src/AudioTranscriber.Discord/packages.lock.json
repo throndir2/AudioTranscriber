@@ -2,9 +2,20 @@
   "version": 1,
   "dependencies": {
     "net10.0-windows7.0": {
-      "NAudio": {
+      "Concentus": {
         "type": "Direct",
-        "requested": "[2.2.1, )",
+        "requested": "[2.2.2, )",
+        "resolved": "2.2.2",
+        "contentHash": "2B9YmHPKO+k7YpAAnqmiXwiMJnfjfj1C868RszOll2iZWLnGTAiC1q21L/d7CvTan7T+hyqU8dR0Dcy3cpjVfQ=="
+      },
+      "NetCord": {
+        "type": "Direct",
+        "requested": "[1.0.0-beta.28, )",
+        "resolved": "1.0.0-beta.28",
+        "contentHash": "yTNehgXwYrSYAt4PbQsnnEVUiupSm27MsHZ9T18QfrUv0SJEma7QzI4239JQ77+kZbla/19x0jcaeJ63YuxSJA=="
+      },
+      "NAudio": {
+        "type": "Transitive",
         "resolved": "2.2.1",
         "contentHash": "c0DzwiyyklM0TP39Y7RObwO3QkWecgM6H60ikiEnsV/aEAJPbj5MFCLaD8BSfKuZe0HGuh9GRGWWlJmSxDc9MA==",
         "dependencies": {
@@ -59,6 +70,13 @@
         "contentHash": "xFHRFwH4x6aq3IxRbewvO33ugJRvZFEOfO62i7uQJRUNW2cnu6BeBTHUS0JD5KBucZbHZaYqxQG8dwZ47ezQuQ==",
         "dependencies": {
           "NAudio.Core": "2.2.1"
+        }
+      },
+      "audiotranscriber.audio": {
+        "type": "Project",
+        "dependencies": {
+          "AudioTranscriber.Core": "[1.0.0, )",
+          "NAudio": "[2.2.1, )"
         }
       },
       "audiotranscriber.core": {
