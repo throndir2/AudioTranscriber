@@ -2,7 +2,7 @@
 
 Native Windows and Linux x64 recording and transcription with a .NET 10 desktop interface, durable local audio, searchable transcripts, and optional NVIDIA ASR.
 
-Record the **selected Windows output endpoint**, optionally with a separately
+Record the **selected output device** (WASAPI loopback on Windows; the PulseAudio/PipeWire monitor of the output on Linux), optionally with a separately
 timestamped microphone, or import a long audio/video recording. Transcription
 never sits in the capture callback: slow inference or an unavailable network
 leaves the original recording on disk.
@@ -90,7 +90,7 @@ Installed release builds update themselves from the latest GitHub release: Windo
 
 Windows: download and run `AudioTranscriber-vX.Y.Z-win-x64-setup.exe` (unsigned, per-user), or extract the ZIP and run `AudioTranscriber.App.exe`. Linux: install `sudo apt install ./audiotranscriber_X.Y.Z_amd64.deb`, `sudo dnf install ./audiotranscriber-X.Y.Z-1.x86_64.rpm`, or extract `AudioTranscriber-vX.Y.Z-linux-x64.tar.gz` and run `./install.sh` (use `--yes` for non-interactive prerequisite install offers). Then start AudioTranscriber and click **Start recording**. Everything has a working default:
 
-- Output: the default Windows output device. Microphone: your default microphone
+- Output: the default output device. Microphone: your default microphone
   as a separate track when one exists. Echo reduction is on, so no headset is needed:
   speaker audio the mic picks up is removed before transcription instead of being
   transcribed twice.
@@ -103,13 +103,14 @@ Windows: download and run `AudioTranscriber-vX.Y.Z-win-x64-setup.exe` (unsigned,
   for other languages; its model downloads the first time you use it.
 - On a PC with an NVIDIA GPU (GTX 10-series or newer, 4 GB+), the app asks once
   whether to download NVIDIA's CUDA runtime (about 4.4 GB, NVIDIA licence terms) so
-  Parakeet runs on the GPU instead. If you decline, it stays on the CPU.
-- If the Microsoft Visual C++ runtime is missing, its official installer runs on
+  Parakeet runs on the GPU instead. If you decline, it stays on the CPU. (GPU Parakeet is
+  Windows-only for now; Linux runs Parakeet on the CPU and Whisper via Vulkan.)
+- Windows: if the Microsoft Visual C++ runtime is missing, its official installer runs on
   startup (approve the Windows prompt).
 - No cloud upload, key, or consent is needed. Provider, language, and microphone
   choices are remembered from your last recording.
 
-Optional: pick an NVIDIA provider, supply a memory-only key (or Windows-protected
+Optional: pick an NVIDIA provider, supply a memory-only key (or per-user encrypted
 persistence), and grant session upload consent only for permitted audio. Stop
 seals original audio; transcription continues afterward. Pause, Cancel, and
 Resume control durable processing separately from recording. Search the
