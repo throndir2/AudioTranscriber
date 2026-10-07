@@ -304,6 +304,7 @@ public sealed class HeadlessMcpTools
                 ? Path.Combine(AppContext.BaseDirectory, "AudioTranscriber.Worker.exe") : "development worker (dotnet host)",
             controller.IsRecording, controller.RecordingSessionId,
             controller.DiarizationModelsReady, controller.ParakeetModelReady, controller.WhisperModelPath, controller.HasNvidiaKey, localGpu = controller.LocalGpuStatus, gpuOffer = controller.GpuOffer,
+            hardware = controller.HardwarePlan?.Hardware.Describe(), recommendedSetup = controller.HardwarePlan?.Summary, whisperOnGpu = controller.WhisperOnGpu,
             prerequisites.FFmpeg, prerequisites.FFprobe, prerequisites.VcRuntimeReady,
             recentErrors = notifications.Where(item => item.IsError).TakeLast(5)
         };

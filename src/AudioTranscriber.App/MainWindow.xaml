@@ -783,6 +783,18 @@
                                 <StackPanel>
                                     <Border Style="{StaticResource Card}">
                                         <StackPanel>
+                                            <ContentControl Style="{StaticResource SectionHeader}" Content="Recommended setup for this PC" />
+                                            <TextBlock Style="{StaticResource Help}" Text="The app reads this PC's CPU, RAM and graphics card memory and works out what fits, like a self-hosting calculator. A local template LLM (Ollama on this PC) gets the GPU first because it is unusably slow on the CPU; Parakeet goes on the GPU only if there is room left, since it is already fast on the CPU; Whisper gets the largest size the remaining GPU memory or CPU can keep up with. Memory figures are planning estimates. Until you change a setting yourself, these are the defaults." />
+                                            <TextBlock Text="{Binding HardwareText}" TextWrapping="Wrap" Foreground="{StaticResource Muted}" />
+                                            <TextBlock Text="{Binding RecommendationText}" TextWrapping="Wrap" FontWeight="SemiBold" Margin="0,4,0,4" AutomationProperties.LiveSetting="Polite" />
+                                            <WrapPanel>
+                                                <Button Content="Apply recommended settings…" Command="{Binding ApplyRecommendedCommand}" />
+                                                <Button Content="Re-check hardware" Command="{Binding RecheckHardwareCommand}" />
+                                            </WrapPanel>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource Card}">
+                                        <StackPanel>
                                             <ContentControl Style="{StaticResource SectionHeader}" Content="Prerequisites" />
                                             <TextBlock Text="{Binding PrerequisiteStatus}" TextWrapping="Wrap" FontWeight="SemiBold">
                                                 <TextBlock.Style>
@@ -826,11 +838,12 @@
                                     <Border Style="{StaticResource Card}">
                                         <StackPanel>
                                             <ContentControl Style="{StaticResource SectionHeader}" Content="Local Whisper (optional)" />
-                                            <TextBlock Style="{StaticResource Help}" Text="Whisper large-v3-turbo (about 1.51 GiB, MIT) downloads and is SHA256-verified the first time you record or import with Local Whisper. Choose it for languages Parakeet doesn't support or if you prefer its output. It runs on your GPU through Vulkan when a GPU driver is present (NVIDIA, AMD, or Intel), otherwise on the CPU, where it is much heavier than Parakeet. The runtime used is shown in the status bar after each chunk. Whisper transcribes all voices but does not label speakers; speaker analysis does that." />
+                                            <TextBlock Style="{StaticResource Help}" Text="Whisper (MIT) downloads and is SHA256-verified the first time you record or import with Local Whisper, in the size recommended for this PC (large-v3-turbo, about 1.51 GiB, on most PCs; small or base on weaker ones). Choose it for languages Parakeet doesn't support or if you prefer its output. It runs on your GPU through Vulkan (NVIDIA, AMD, or Intel) when the recommended setup has room for it, otherwise on the CPU, where it is much heavier than Parakeet. The runtime used is shown in the status bar after each chunk. Whisper transcribes all voices but does not label speakers; speaker analysis does that." />
                                             <WrapPanel>
-                                                <Button Content="Install recommended model (large-v3-turbo)…" Command="{Binding InstallWhisperModelCommand}" />
+                                                <Button Content="{Binding InstallWhisperLabel}" Command="{Binding InstallWhisperModelCommand}" />
                                                 <Button Content="Choose existing Whisper model…" Command="{Binding ChooseWhisperModelCommand}" />
                                             </WrapPanel>
+                                            <CheckBox IsChecked="{Binding WhisperOnGpu}" Content="Run Whisper on the GPU (Vulkan); off uses the CPU and leaves GPU memory to the LLM and Parakeet" />
                                             <TextBlock Text="{Binding LocalModel}" TextWrapping="Wrap" Foreground="{StaticResource Muted}" />
                                         </StackPanel>
                                     </Border>
@@ -896,7 +909,7 @@
                                     <Border Style="{StaticResource Card}">
                                         <StackPanel>
                                             <ContentControl Style="{StaticResource SectionHeader}" Content="Parakeet on the NVIDIA GPU" />
-                                            <TextBlock Style="{StaticResource Help}" Text="At startup the app looks for an NVIDIA GPU that can run Parakeet with CUDA 12 (GTX 10-series or newer, 4 GB+, driver 527.41+). The first time it finds one it asks once whether to download the GPU runtime (about 4.4 GB: NVIDIA's CUDA runtime, cuBLAS and cuDNN, ONNX Runtime's CUDA build, and the full-precision Parakeet model), which needs accepting NVIDIA's license terms. Then Parakeet runs on the GPU in a separate worker process: much faster on long imports, with almost no CPU load and the same accuracy. If anything goes wrong it falls back to the CPU model. No Docker, admin rights, or system install." />
+                                            <TextBlock Style="{StaticResource Help}" Text="At startup the app looks for an NVIDIA GPU that can run Parakeet with CUDA 12 (GTX 10-series or newer, 4 GB+, driver 527.41+). The first time it finds one, and the recommended setup has room for Parakeet beside a local template LLM, it asks once whether to download the GPU runtime (about 4.4 GB: NVIDIA's CUDA runtime, cuBLAS and cuDNN, ONNX Runtime's CUDA build, and the full-precision Parakeet model), which needs accepting NVIDIA's license terms. Then Parakeet runs on the GPU in a separate worker process: much faster on long imports, with almost no CPU load and the same accuracy. If anything goes wrong it falls back to the CPU model. No Docker, admin rights, or system install." />
                                             <TextBlock Text="{Binding LocalGpuStatus}" TextWrapping="Wrap" FontWeight="SemiBold" />
                                             <WrapPanel>
                                                 <Button Content="Use the GPU for Parakeet…" Command="{Binding UseGpuCommand}" />

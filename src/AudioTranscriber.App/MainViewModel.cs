@@ -176,6 +176,15 @@ public sealed class MainViewModel : ObservableObject
         LoadLiveSettings();
         Templates = new TemplatesViewModel(controller, dialogs, dispatcher, () => controller.RecordingSessionId ?? SelectedSession?.Id,
             (text, error) => Log(text, error ? ActivityKind.Error : ActivityKind.Info));
+        controller.LocalLlmExpected = Templates.UsesLocalLlm;
+        ApplyRecommendedCommand = new AsyncCommand(ApplyRecommendedAsync, () => !Busy && !closing && Plan is not null);
+        RecheckHardwareCommand = new AsyncCommand(async () =>
+        {
+            HardwareText = "Checking this PC's CPU, memory and graphics cards…";
+            await controller.RecheckHardwareAsync();
+            recommendationText = "";
+            RefreshSetup();
+        }, () => !closing);
         if (liveFileEnabled) liveFileStatus = ArmedLiveStatus();
         controller.Notification += OnNotification;
         controller.LevelsChanged += OnLevelsChanged;
@@ -326,6 +335,23 @@ public sealed class MainViewModel : ObservableObject
     public string ParakeetStatus { get => parakeetStatus; private set => Set(ref parakeetStatus, value); }
     private string parakeetStatus = "";
     private bool shownParakeetReady, gpuOfferAsked;
+    public string HardwareText { get => hardwareText; private set => Set(ref hardwareText, value); }
+    private string hardwareText = "Checking this PC's CPU, memory and graphics cards…";
+    public string RecommendationText { get => recommendationText; private set => Set(ref recommendationText, value); }
+    private string recommendationText = "";
+    private AudioTranscriber.Providers.HardwarePlan? Plan => controller.HardwarePlan;
+    private AudioTranscriber.Providers.LocalWhisperModel RecommendedWhisper =>
+        AudioTranscriber.Providers.LocalWhisperModelCatalog.All.FirstOrDefault(m => m.Id == Plan?.WhisperModelId)
+        ?? AudioTranscriber.Providers.LocalWhisperModelCatalog.Recommended;
+    public string InstallWhisperLabel => $"Install recommended model ({RecommendedWhisper.Id})…";
+    public bool WhisperOnGpu
+    {
+        get => controller.WhisperOnGpu;
+        set => Guard(() => { if (value != controller.WhisperOnGpu) controller.SetWhisperGpu(value); Changed(nameof(WhisperOnGpu)); });
+    }
+    private bool? shownWhisperGpu;
+    public ICommand ApplyRecommendedCommand { get; private set; } = null!;
+    public ICommand RecheckHardwareCommand { get; private set; } = null!;
     public string PrerequisiteStatus => prerequisites.Summary;
     public bool PrerequisitesReady => prerequisites.AllReady;
     public bool VcRuntimeMissing => !prerequisites.VcRuntimeReady;
@@ -875,6 +901,69 @@ public sealed class MainViewModel : ObservableObject
             shownDiarizationReady = ready;
             ModelStatus = ready ? "Local diarization models are installed." : "Local diarization models are not installed.";
         }
+        RefreshHardwarePlan();
+    }
+
+    private void RefreshHardwarePlan()
+    {
+        controller.LocalLlmExpected = Templates.UsesLocalLlm;
+        if (controller.WhisperOnGpu != shownWhisperGpu)
+        {
+            shownWhisperGpu = controller.WhisperOnGpu;
+            Changed(nameof(WhisperOnGpu));
+        }
+        if (Plan is not { } plan) return;
+        if (Templates.TakeFreshDefaults() && plan.LlmModel is { } model && Templates.UseRecommendedLlm(model).Count > 0)
+            Log($"Templates use {model} in Ollama: the recommended size for this PC ({plan.LlmDevice switch { AudioTranscriber.Providers.PlanDevice.Gpu => "fits in GPU memory", _ => "runs on the CPU" }}).");
+        var text = plan.Summary;
+        if (text == RecommendationText) return;
+        HardwareText = "Detected: " + plan.Hardware.Describe() + ".";
+        RecommendationText = text;
+        Changed(nameof(InstallWhisperLabel));
+        CommandManager.InvalidateRequerySuggested();
+    }
+
+    /// <summary>Applies the hardware plan: Whisper size and device, Parakeet device, and the local template model.</summary>
+    private async Task ApplyRecommendedAsync()
+    {
+        if (Plan is not { } plan) return;
+        if (!dialogs.Confirm("Apply the recommended setup for this PC?",
+                HardwareText + "\n\n" + plan.Summary + "\n\nGPU downloads still ask first. You can change each setting afterward."))
+            return;
+        var done = new List<string>();
+        Guard(() =>
+        {
+            controller.SetWhisperGpu(plan.WhisperOnGpu);
+            done.Add($"Whisper on the {(plan.WhisperOnGpu ? "GPU" : "CPU")}");
+            Changed(nameof(WhisperOnGpu));
+            if (plan.LlmModel is { } model && Templates.UseRecommendedLlm(model) is { Count: > 0 } changed)
+                done.Add($"{string.Join(", ", changed)} uses {model}");
+            if (!plan.ParakeetOnGpu && controller.GpuParakeetEnabled != false)
+            {
+                controller.SetGpuParakeet(false);
+                LocalGpuStatus = controller.LocalGpuStatus ?? LocalGpuStatus;
+                done.Add("Parakeet on the CPU");
+            }
+        });
+        if (plan.ParakeetOnGpu && controller.GpuParakeetEnabled != true) AskGpu(plan.Gpu?.Name);
+        var whisper = RecommendedWhisper;
+        var whisperSelected = controller.SelectInstalledWhisperModel(whisper.Id);
+        if (whisperSelected)
+        {
+            LocalModel = DescribeModel(controller.WhisperModelPath!);
+            done.Add($"Whisper {whisper.Id}");
+        }
+        SetStatus("Recommended setup applied: " + string.Join("; ", done) + ".");
+        // Download a different Whisper size only when one is already installed; otherwise it downloads when first needed.
+        if (!whisperSelected && controller.WhisperModelPath is not null &&
+            dialogs.Confirm("Download the recommended Whisper model?",
+                $"Whisper {whisper.Id} suits this PC better than the installed model. Download it now ({whisper.Bytes / 1048576d:N0} MiB, SHA256-verified, MIT)?"))
+            await RunAsync($"Downloading Whisper {whisper.Id}…", async token =>
+            {
+                await controller.InstallWhisperModelAsync(whisper.Id, new Progress<string>(message => LocalModel = message), token);
+                if (controller.WhisperModelPath is { } path) LocalModel = DescribeModel(path);
+                SetStatus($"Whisper {whisper.Id} installed and selected.");
+            });
     }
 
     public async Task InitializeAsync()
@@ -1279,16 +1368,16 @@ public sealed class MainViewModel : ObservableObject
 
     private Task InstallWhisperModelAsync()
     {
-        var model = AudioTranscriber.Providers.LocalWhisperModelCatalog.Recommended;
+        var model = RecommendedWhisper;
         if (!dialogs.Confirm("Install the recommended Whisper model?",
             $"Download {model.FileName} ({model.Bytes:N0} bytes, about {model.Bytes / 1073741824d:N2} GiB) from the pinned whisper.cpp Hugging Face revision?\n\n" +
-            "Whisper large-v3-turbo: near large-v3 accuracy at several times the speed. MIT license (OpenAI Whisper; GGML conversion by whisper.cpp contributors). SHA256 is verified before use and the model is selected automatically.\n\nNo audio is uploaded."))
+            $"Whisper {model.Id} is the size recommended for this PC's hardware. MIT license (OpenAI Whisper; GGML conversion by whisper.cpp contributors). SHA256 is verified before use and the model is selected automatically.\n\nNo audio is uploaded."))
             return Task.CompletedTask;
         return RunAsync("Downloading the recommended local Whisper model…", async token =>
         {
-            await controller.InstallRecommendedWhisperModelAsync(new Progress<string>(message => LocalModel = message), token);
+            await controller.InstallWhisperModelAsync(model.Id, new Progress<string>(message => LocalModel = message), token);
             if (controller.WhisperModelPath is { } path) LocalModel = DescribeModel(path);
-            SetStatus("Whisper large-v3-turbo installed and selected for local transcription.");
+            SetStatus($"Whisper {model.Id} installed and selected for local transcription.");
         });
     }
 

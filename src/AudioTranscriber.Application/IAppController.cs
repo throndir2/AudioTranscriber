@@ -42,6 +42,15 @@ public interface IAppController : IAsyncDisposable
     string? GpuOffer { get; }
     bool? GpuParakeetEnabled { get; }
     void SetGpuParakeet(bool enabled);
+    // Hardware-aware defaults: what fits on this PC's GPU, CPU and RAM. Null until the startup check finishes.
+    AudioTranscriber.Providers.HardwarePlan? HardwarePlan { get; }
+    // Whether templates use a local LLM (Ollama, LM Studio); the plan keeps GPU memory for it first.
+    bool LocalLlmExpected { get; set; }
+    Task<AudioTranscriber.Providers.HardwarePlan?> RecheckHardwareAsync();
+    bool WhisperOnGpu { get; }
+    void SetWhisperGpu(bool enabled);
+    bool SelectInstalledWhisperModel(string modelId);
+    Task InstallWhisperModelAsync(string modelId, IProgress<string>? progress = null, CancellationToken cancellationToken = default);
     bool ModelSetupRunning { get; }
     Task EnsureDefaultModelsAsync();
     void RetryBlockedLocalWork();
