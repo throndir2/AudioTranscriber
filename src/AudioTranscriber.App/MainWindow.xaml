@@ -566,6 +566,7 @@
                                                 <Button Content="Duplicate" Command="{Binding DuplicateTemplateCommand}" />
                                                 <Button Content="Delete…" Command="{Binding DeleteTemplateCommand}" />
                                                 <Button Content="Add starter templates" Command="{Binding AddStartersCommand}" ToolTip="Adds DM guidance, session summary, NPCs and items templates." />
+                                                <Button Content="Add table (VTT) templates" Command="{Binding AddTableStartersCommand}" ToolTip="Adds turn order, token positions and DM reminders templates. They read a screenshot of your virtual tabletop window (set it in the Table screenshot card) and need a vision model such as gemma4:e4b." />
                                             </WrapPanel>
                                         </StackPanel>
                                     </Border>

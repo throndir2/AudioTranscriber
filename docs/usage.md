@@ -327,6 +327,24 @@ and they also re-run when the screen changes even if the transcript did not. Thi
 needs a vision model (for example Ollama `gemma4:e4b`); keep each template to one
 narrow job, such as turn order or token positions.
 
+### Virtual tabletop assistant
+
+**Add table (VTT) templates** adds three linked templates that show the
+one-narrow-job-per-call design for small vision models:
+
+- **Table: turn order** reads only the initiative tracker from the table screenshot.
+- **Table: token positions** reads only the battle map: tokens, PC or monster, where
+  they are and who is next to whom.
+- **Table: DM reminders** uses both outputs plus the recent transcript and your
+  reference files to give up to 8 short reminders: whose turn is now and next,
+  monster tactics, rules to remember, and story beats or clues from your notes not
+  presented yet ("Don't forget to present …").
+
+Setup: pick your Roll20 (or Foundry) browser window in **Table screenshot**, use a
+vision model such as Ollama `gemma4:e4b` for the connection, and point the
+**context folder** at your adventure PDF and notes. All three keep updating on
+their own; the reminders re-run whenever the turn order, tokens or transcript change.
+
 **LLM connections** use the OpenAI-compatible `/v1/chat/completions` API. Pick a
 type and choose **Add**: OpenRouter (`https://openrouter.ai/api/v1`), NVIDIA Build
 (`https://integrate.api.nvidia.com/v1`), OpenAI, Ollama (`http://localhost:11434/v1`,
