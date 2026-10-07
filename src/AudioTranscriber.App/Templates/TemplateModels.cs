@@ -96,7 +96,7 @@ public sealed class OutputTemplate : ObservableObject
 {
     private string name = "", prompt = "", outputPath = "", output = "", status = "Not run yet.";
     private Guid? connectionId;
-    private bool autoUpdate, writeToFile, includePrevious = true, useReferences = true, useTranscript = true, running;
+    private bool autoUpdate, writeToFile, includePrevious = true, useReferences = true, useTranscript = true, useScreenshot, running;
     private int intervalSeconds = 60, maxTranscriptChars = 60000;
     private List<Guid> inputTemplateIds = [];
 
@@ -111,6 +111,8 @@ public sealed class OutputTemplate : ObservableObject
     public bool UseTranscript { get => useTranscript; set => Set(ref useTranscript, value); }
     /// <summary>Other templates whose latest output is fed into this one; a change in any of them triggers an automatic update.</summary>
     public List<Guid> InputTemplateIds { get => inputTemplateIds; set { if (Set(ref inputTemplateIds, value ?? [])) Changed(nameof(Summary)); } }
+    /// <summary>Attach a screenshot of the shared capture target (the user's virtual tabletop) to every run.</summary>
+    public bool UseScreenshot { get => useScreenshot; set => Set(ref useScreenshot, value); }
     public int MaxTranscriptChars { get => maxTranscriptChars; set => Set(ref maxTranscriptChars, Math.Clamp(value, 1000, 2_000_000)); }
     public bool WriteToFile { get => writeToFile; set => Set(ref writeToFile, value); }
     public string OutputPath { get => outputPath; set => Set(ref outputPath, value ?? ""); }
@@ -220,4 +222,7 @@ public sealed class TemplateSettings
     public List<OutputTemplate> Templates { get; set; } = [];
     public string ContextFolder { get; set; } = "";
     public string PinnedFiles { get; set; } = "";
+    /// <summary>"Screen N (…)" or a window title (matched exactly, then by "contains").</summary>
+    public string CaptureTarget { get; set; } = "";
+    public int CaptureMaxWidth { get; set; } = ScreenCapture.DefaultMaxWidth;
 }

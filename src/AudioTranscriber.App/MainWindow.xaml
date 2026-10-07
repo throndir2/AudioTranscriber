@@ -610,7 +610,7 @@
                                                     <CheckBox IsChecked="{Binding SelectedTemplate.UseTranscript}" Content="Transcript (most recent part of the session)" ToolTip="Untick for templates that only work from other inputs; they then run without a session." />
                                                     <CheckBox IsChecked="{Binding SelectedTemplate.UseReferences}" Content="Reference files (below)" ToolTip="Sends the always-included files and lets the model search and read the context folder." />
                                                     <CheckBox IsChecked="{Binding SelectedTemplate.IncludePrevious}" Content="Previous output (update it instead of starting over)" />
-                                                    <!-- Screenshot input checkbox (OutputTemplate.UseScreenshot) belongs here. -->
+                                                    <CheckBox IsChecked="{Binding SelectedTemplate.UseScreenshot}" Content="Include a screenshot of the table" ToolTip="Attaches a screenshot of the window or screen chosen under Table screenshot below. Needs a vision model (for example gemma4:e4b). Also re-runs when the screen changes." />
                                                     <TextBlock Text="Outputs of other templates" Margin="0,6,0,2" />
                                                     <ItemsControl ItemsSource="{Binding TemplateInputs}" AutomationProperties.Name="Other templates used as inputs">
                                                         <ItemsControl.ItemTemplate>
@@ -649,6 +649,28 @@
                                             <TextBox x:Name="PinnedFilesInput" Text="{Binding PinnedFiles, UpdateSourceTrigger=LostFocus}" AcceptsReturn="True" TextWrapping="NoWrap" MinHeight="60" MaxHeight="140"
                                                      VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" VerticalContentAlignment="Top" Margin="0,3,0,8" AutomationProperties.Name="Always-included reference files" />
                                             <TextBlock Style="{StaticResource Caption}" Text="Always-included files are sent in full with every update (up to about 60,000 characters in total), so keep them short: a campaign summary, party roster or cheat sheet. Put big books in the context folder instead. Files are read without locking them." />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource Card}">
+                                        <StackPanel>
+                                            <ContentControl Style="{StaticResource SectionHeader}" Content="Table screenshot (shared by all templates)" />
+                                            <TextBlock Style="{StaticResource Help}" Text="Pick your Roll20 or Foundry browser window (or a whole screen). Templates with &quot;Include a screenshot of the table&quot; get a fresh screenshot on each update; all templates updating together share the same frame. Window capture works when other windows cover it, but not when it is minimized. Screenshots are sent to the template's LLM connection." />
+                                            <Label Content="Capture" Target="{Binding ElementName=CaptureTargetInput}" />
+                                            <DockPanel>
+                                                <Button DockPanel.Dock="Right" Content="Refresh" Command="{Binding RefreshCaptureSourcesCommand}" Margin="0,3,0,8" ToolTip="Reload the list of screens and open windows." />
+                                                <ComboBox x:Name="CaptureTargetInput" IsEditable="True" IsTextSearchEnabled="False" local:EditableComboBox.SyncSelection="True"
+                                                          ItemsSource="{Binding CaptureSources}" Text="{Binding CaptureTarget, UpdateSourceTrigger=LostFocus}" Margin="0,3,8,8"
+                                                          AutomationProperties.Name="Screen or window to capture"
+                                                          ToolTip="A window is matched by its exact title, then by any title containing this text, so you can shorten it to e.g. Roll20." />
+                                            </DockPanel>
+                                            <WrapPanel>
+                                                <Label Content="Max width (pixels)" Target="{Binding ElementName=CaptureWidthInput}" VerticalAlignment="Center" />
+                                                <TextBox x:Name="CaptureWidthInput" Width="80" Text="{Binding CaptureMaxWidth, UpdateSourceTrigger=LostFocus}" Margin="8,3,12,8"
+                                                         AutomationProperties.Name="Maximum screenshot width in pixels" ToolTip="Screenshots are scaled down to this width (aspect kept). Smaller is faster for local models." />
+                                                <Button Content="Test capture" Command="{Binding TestCaptureCommand}" Margin="0,3,0,8" />
+                                            </WrapPanel>
+                                            <Image Source="{Binding CapturePreview}" MaxHeight="220" Stretch="Uniform" HorizontalAlignment="Left" Margin="0,0,0,4" AutomationProperties.Name="Last screenshot" />
+                                            <TextBlock Style="{StaticResource Caption}" Text="{Binding CaptureCaption}" AutomationProperties.LiveSetting="Polite" />
                                         </StackPanel>
                                     </Border>
                                     <Border Style="{StaticResource Card}">
