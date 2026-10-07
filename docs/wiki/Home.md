@@ -13,9 +13,10 @@ transcripts, corrections, playback, exports, WebVTT import, optional Teams trans
 retrieval, and optional output templates powered by OpenAI-compatible LLMs. NVIDIA cloud
 routes are opt-in per session.
 
-Latest release: download `AudioTranscriber-<tag>-win-x64.zip` from [the latest
-release](https://github.com/throndir2/AudioTranscriber/releases/latest). Release ZIPs
-are unsigned Windows x64 builds and update themselves from GitHub.
+Latest release: get the Windows setup `.exe`, a Linux `.deb`/`.rpm`, or the portable
+`.zip`/`.tar.gz` from [the latest release](https://github.com/throndir2/AudioTranscriber/releases/latest)
+(see [Installing](Installing-AudioTranscriber)). Releases are unsigned and update
+themselves from GitHub.
 
 <img src="https://raw.githubusercontent.com/throndir2/AudioTranscriber/main/docs/images/transcript.png" alt="A transcribed game session with every line labeled by speaker">
 
@@ -29,7 +30,7 @@ are unsigned Windows x64 builds and update themselves from GitHub.
 
 | Page | What it helps with |
 | --- | --- |
-| [Installing](Installing-AudioTranscriber) | Downloading the unsigned Windows x64 ZIP and keeping its folders together. |
+| [Installing](Installing-AudioTranscriber) | Windows installer, Linux packages, portable downloads and prerequisites. |
 | [First Steps](First-Steps) | The default first recording: output, microphone, local Parakeet, models, and consent. |
 | [Recording and Importing](Recording-and-Importing) | Recording output/mic audio, importing media, phrase pauses, and live activity. |
 | [Transcripts and Search](Transcripts-and-Search) | Searching, correcting, playing, exporting, and mirroring transcripts to a live file. |
