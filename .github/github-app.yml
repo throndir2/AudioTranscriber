@@ -5,10 +5,22 @@ instructions: |
   or approval. Nothing runs CI on PRs or pushes, so there are no checks to wait for.
   If the merge hits a conflict, rebase on origin/main, fix the conflict, and merge.
 
-  Releases: after merging a user-facing change (or when asked), cut a release by
-  dispatching the build-only workflow from main:
-  `gh workflow run release.yml --ref main` (optional: `-f version=vX.Y.Z`; leaving it
-  empty bumps the patch). Do not add tests or validation jobs to any workflow.
+  Changelog: this repository is public and every GitHub Release shows its
+  `CHANGELOG.md` section as release notes. Every PR with a user-facing change (features,
+  behavior/default changes, fixes, removals) must add a short, plain-language bullet
+  ending with the PR number, e.g. `(#38)`, under `## Unreleased` → `### Added`, `### Changed`,
+  `### Fixed`, or `### Removed` in `CHANGELOG.md`. Describe what users see, not
+  implementation details; skip internal-only changes (CI, scripts, refactors, tests, docs).
+
+  Releases: after merging a user-facing change (or when asked), cut a release:
+  1. Pick the next version (patch bump of the latest `vX.Y.Z` tag unless asked otherwise).
+  2. In a PR, rename `## Unreleased` to `## vX.Y.Z - YYYY-MM-DD` (today's date), add a fresh
+     empty `## Unreleased` above it, check the entries are accurate against
+     `git log <last-tag>..origin/main`, and merge it.
+  3. Dispatch the build-only workflow from main with that exact version:
+     `gh workflow run release.yml --ref main -f version=vX.Y.Z`.
+  The release fails before tagging if `CHANGELOG.md` has no section for the version.
+  Do not add tests or validation jobs to any workflow.
   If Actions refuses to start the job (billing/spending limit), do not retry or change
   billing. Release locally instead: `.\scripts\Publish.ps1 -OutputDirectory <tmp>\publish -RequireEmptyOutput`,
   then `.\scripts\Release.ps1 -Phase Package ...`, create the tag with `gh api` on the merged
