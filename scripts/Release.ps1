@@ -271,6 +271,7 @@ function New-RpmPackage([object]$Version, [string]$SourceCommit, [string]$Direct
     @"
 %define debug_package %{nil}
 %define _build_id_links none
+%global __os_install_post %{nil}
 Name: audiotranscriber
 Version: $(($Version.SemVer -replace '\+.*$', '') -replace '-', '~')
 Release: 1
@@ -278,6 +279,8 @@ Summary: Local audio recording and transcription desktop app
 License: Proprietary and third-party notices
 URL: https://github.com/throndir2/AudioTranscriber
 BuildArch: x86_64
+# The bundled .NET runtime, ONNX Runtime, FFmpeg etc. are private to /opt; only the system libraries below are required.
+AutoReqProv: no
 Requires: glibc, libstdc++, libgcc, libicu, fontconfig, libX11, libICE, libSM, libXext, libXrandr, libXi, libXcursor, pulseaudio-libs, pulseaudio-utils, libgomp
 Recommends: vulkan-loader, pipewire-pulseaudio
 
