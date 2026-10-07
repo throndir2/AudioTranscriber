@@ -323,6 +323,7 @@ public sealed class CaptureSession : IAsyncDisposable
 
         private void RunPulse()
         {
+            if (ExternalAudioSources.TryGet(choice.DeviceId, out var external)) { RunExternal(external); return; }
             Task? writer = null;
             PulseAudio.Recorder? recorder = null;
             try
