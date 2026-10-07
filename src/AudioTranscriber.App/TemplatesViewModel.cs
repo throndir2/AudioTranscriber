@@ -45,6 +45,7 @@ public sealed class TemplatesViewModel : ObservableObject
         RemoveConnectionCommand = new RelayCommand(RemoveConnection, () => SelectedConnection is not null);
         LoadModelsCommand = new AsyncCommand(LoadModelsAsync, () => SelectedConnection is not null && !loadingModels);
         TestConnectionCommand = new AsyncCommand(TestConnectionAsync, () => SelectedConnection is not null && !loadingModels);
+        CheckImageSupportCommand = new AsyncCommand(CheckImageSupportAsync, () => SelectedConnection is not null && !loadingModels);
         AddTemplateCommand = new RelayCommand(() => AddTemplate(new OutputTemplate { Name = "New template", Prompt = "Describe what to produce from the transcript…" }));
         DuplicateTemplateCommand = new RelayCommand(DuplicateTemplate, () => SelectedTemplate is not null);
         DeleteTemplateCommand = new RelayCommand(DeleteTemplate, () => SelectedTemplate is not null);
@@ -74,6 +75,7 @@ public sealed class TemplatesViewModel : ObservableObject
     public ICommand RemoveConnectionCommand { get; }
     public ICommand LoadModelsCommand { get; }
     public ICommand TestConnectionCommand { get; }
+    public ICommand CheckImageSupportCommand { get; }
     public ICommand AddTemplateCommand { get; }
     public ICommand DuplicateTemplateCommand { get; }
     public ICommand DeleteTemplateCommand { get; }
@@ -261,12 +263,31 @@ public sealed class TemplatesViewModel : ObservableObject
             var reply = await LlmClient.CompleteAsync(connection.BaseUrl, connection.GetKey(), connection.Model,
                 "You are a connectivity check.", "Reply with exactly: OK", null, null, CancellationToken.None);
             ConnectionStatus = $"Connected. {connection.Model} replied: {(reply.Length > 80 ? reply[..80] + "…" : reply)}";
+            ConnectionStatus += " " + await CheckImagesAsync(connection);
         }
         catch (Exception error) when (error is LlmException or HttpRequestException or TaskCanceledException)
         {
             ConnectionStatus = "Test failed: " + Explain(error);
         }
         finally { loadingModels = false; CommandManager.InvalidateRequerySuggested(); }
+    }
+
+    private async Task CheckImageSupportAsync()
+    {
+        if (SelectedConnection is not { } connection) return;
+        loadingModels = true;
+        ConnectionStatus = $"Checking whether {connection.Model} reads images…";
+        try { ConnectionStatus = await CheckImagesAsync(connection); }
+        finally { loadingModels = false; CommandManager.InvalidateRequerySuggested(); }
+    }
+
+    private async Task<string> CheckImagesAsync(LlmConnection connection)
+    {
+        var model = connection.Model;
+        var supported = await LlmClient.SupportsImagesAsync(connection.BaseUrl, connection.GetKey(), model, CancellationToken.None);
+        connection.SetImageSupport(model, supported);
+        dirty = true;
+        return connection.ImageSupportStatus + ".";
     }
 
     private static string Explain(Exception error) => error switch

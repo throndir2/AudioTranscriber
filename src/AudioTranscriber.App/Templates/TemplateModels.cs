@@ -12,8 +12,8 @@ public sealed record LlmPreset(string Name, string BaseUrl, string Model, bool N
             "OpenRouter: one key for hundreds of hosted models (openrouter.ai/keys). Pick a model that supports tools to let it read your files."),
         new("NVIDIA Build", "https://integrate.api.nvidia.com/v1", "meta/llama-3.3-70b-instruct", true,
             "NVIDIA Build (build.nvidia.com): free hosted models with an nvapi- key. Finite free quotas apply."),
-        new("Ollama", "http://localhost:11434/v1", "llama3.1", false,
-            "Ollama on this PC, or another machine: replace localhost with its address (start Ollama there with OLLAMA_HOST=0.0.0.0). Nothing leaves your network."),
+        new("Ollama", "http://localhost:11434/v1", "gemma4:e4b", false,
+            "Ollama on this PC, or another machine: replace localhost with its address (start Ollama there with OLLAMA_HOST=0.0.0.0). Default model gemma4:e4b reads images and can use tools; install it with: ollama pull gemma4:e4b. Nothing leaves your network."),
         new("LM Studio", "http://localhost:1234/v1", "", false,
             "LM Studio's local server (Developer tab → Start server). Nothing leaves your network."),
         new("OpenAI", "https://api.openai.com/v1", "gpt-4.1-mini", true, "OpenAI API key from platform.openai.com."),
@@ -26,12 +26,47 @@ public sealed class LlmConnection : ObservableObject
 {
     private string name = "", baseUrl = "", model = "";
     private string? protectedKey;
+    private bool? supportsImages;
 
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get => name; set => Set(ref name, value ?? ""); }
     public string Kind { get; set; } = "";
     public string BaseUrl { get => baseUrl; set => Set(ref baseUrl, value ?? ""); }
-    public string Model { get => model; set => Set(ref model, value ?? ""); }
+    public string Model
+    {
+        get => model;
+        set
+        {
+            if (!Set(ref model, value ?? "")) return;
+            if (!string.Equals(model, ImagesCheckedFor, StringComparison.Ordinal)) SupportsImages = null;
+            Changed(nameof(ImageSupportStatus));
+        }
+    }
+
+    /// <summary>Whether <see cref="ImagesCheckedFor"/> accepts images; null when unknown or not checked.</summary>
+    public bool? SupportsImages
+    {
+        get => supportsImages;
+        set { if (Set(ref supportsImages, value)) Changed(nameof(ImageSupportStatus)); }
+    }
+    public string? ImagesCheckedFor { get; set; }
+
+    [JsonIgnore]
+    public string ImageSupportStatus =>
+        !string.Equals(ImagesCheckedFor, Model, StringComparison.Ordinal) ? "Images: not checked yet (choose Check image support)."
+        : SupportsImages switch
+        {
+            true => "Images: supported",
+            false => "Images: not supported by this model",
+            _ => "Images: unknown (the server doesn't say)"
+        };
+
+    public void SetImageSupport(string checkedModel, bool? supported)
+    {
+        ImagesCheckedFor = checkedModel;
+        SupportsImages = supported;
+        Changed(nameof(ImageSupportStatus));
+    }
 
     /// <summary>API key encrypted with Windows DPAPI for the current user; never stored in plain text.</summary>
     public string? ProtectedKey

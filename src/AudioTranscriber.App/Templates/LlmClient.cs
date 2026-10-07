@@ -55,6 +55,68 @@ public static partial class LlmClient
             .Distinct().OrderBy(id => id, StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
+    /// <summary>Asks the server whether <paramref name="model"/> accepts images. Null when no probe gives a conclusive answer.</summary>
+    public static async Task<bool?> SupportsImagesAsync(string baseUrl, string? apiKey, string model, CancellationToken ct)
+    {
+        model = (model ?? "").Trim();
+        if (model.Length == 0) return null;
+        string root;
+        try { root = Endpoint(baseUrl, "")[..^1]; }
+        catch (LlmException) { return null; }
+        var serverRoot = root.EndsWith("/v1", StringComparison.OrdinalIgnoreCase) ? root[..^3] : root;
+
+        // Ollama
+        var ollama = await ProbeAsync(HttpMethod.Post, serverRoot + "/api/show", apiKey,
+            new JsonObject { ["model"] = model }.ToJsonString(), ct);
+        if (ollama is JsonObject show)
+        {
+            if (show["capabilities"] is JsonArray caps)
+                return caps.Any(c => string.Equals(c?.ToString(), "vision", StringComparison.OrdinalIgnoreCase));
+            if (show["projector_info"] is not null) return true;
+            if (show["model_info"] is JsonObject info && info.Any(p => p.Key.Contains("vision", StringComparison.OrdinalIgnoreCase))) return true;
+        }
+
+        // LM Studio
+        var lms = await ProbeAsync(HttpMethod.Get, serverRoot + "/api/v0/models/" + Uri.EscapeDataString(model), apiKey, null, ct);
+        switch (lms?["type"]?.ToString()?.ToLowerInvariant())
+        {
+            case "vlm": return true;
+            case "llm": return false;
+        }
+
+        // OpenRouter and other OpenAI-compatible model lists
+        var list = await ProbeAsync(HttpMethod.Get, root + "/models", apiKey, null, ct);
+        var items = list?["data"] as JsonArray ?? list as JsonArray;
+        var entry = items?.FirstOrDefault(i => string.Equals(i?["id"]?.ToString(), model, StringComparison.OrdinalIgnoreCase));
+        if (entry?["architecture"] is JsonObject arch)
+        {
+            if (arch["input_modalities"] is JsonArray inputs)
+                return inputs.Any(m => string.Equals(m?.ToString(), "image", StringComparison.OrdinalIgnoreCase));
+            if (arch["modality"]?.ToString() is { Length: > 0 } modality)
+                return modality.Split("->")[0].Contains("image", StringComparison.OrdinalIgnoreCase);
+        }
+        return null;
+    }
+
+    private static async Task<JsonNode?> ProbeAsync(HttpMethod method, string url, string? apiKey, string? json, CancellationToken ct)
+    {
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromSeconds(8));
+            using var request = Request(method, url, apiKey);
+            if (json is not null) request.Content = new StringContent(json, Encoding.UTF8, "application/json");
+            using var response = await Http.SendAsync(request, timeout.Token);
+            if (!response.IsSuccessStatusCode) return null;
+            return JsonNode.Parse(await response.Content.ReadAsStringAsync(timeout.Token));
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException or InvalidOperationException or UriFormatException)
+        {
+            ct.ThrowIfCancellationRequested();
+            return null;
+        }
+    }
+
     /// <summary>Runs a chat with optional tools until the model returns a final answer.</summary>
     public static async Task<string> CompleteAsync(string baseUrl, string? apiKey, string model, string system, string user,
         ILlmToolHost? tools, IProgress<string>? progress, CancellationToken cancellationToken)

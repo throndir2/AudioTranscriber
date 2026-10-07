@@ -312,8 +312,14 @@ Files are read without locking them. The folder tools need a model with tool
 type and choose **Add**: OpenRouter (`https://openrouter.ai/api/v1`), NVIDIA Build
 (`https://integrate.api.nvidia.com/v1`), OpenAI, Ollama (`http://localhost:11434/v1`,
 or `http://other-pc:11434/v1` for Ollama on another machine started with
-`OLLAMA_HOST=0.0.0.0`), LM Studio, or any custom server. **Load models** lists what
-the server offers; **Test** sends a one-line check. API keys are encrypted with
+`OLLAMA_HOST=0.0.0.0`), LM Studio, or any custom server. The Ollama preset defaults
+to `gemma4:e4b` (Gemma 4 E4B: reads text and images, supports tool calling, runs
+locally; install it with `ollama pull gemma4:e4b`). **Load models** lists what
+the server offers; **Test** sends a one-line check and also asks the server whether
+the model accepts images (Ollama `/api/show` capabilities, LM Studio model type, or
+the OpenRouter-style `/models` input modalities). **Check image support** runs just
+that check; the result shows under the connection as supported, not supported, or
+unknown, and resets when you change the model. API keys are encrypted with
 Windows DPAPI for your account in the library's `templates.json` and sent only to
 that connection's URL. Running a template sends the transcript text, and any
 reference text the model reads, to that endpoint; Ollama and LM Studio keep it on
