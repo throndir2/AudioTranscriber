@@ -10,6 +10,7 @@ Format: newest first; each version is `## vX.Y.Z - YYYY-MM-DD` with `### Added`,
 
 ### Added
 
+- Templates can include a screenshot of your virtual tabletop (Roll20, Foundry or any window or screen) for vision models, set up in the new **Table screenshot** card. (#40)
 - Output template connections can check whether the selected model accepts images (**Check image support**, also run by **Test**). (#37)
 
 ### Changed
