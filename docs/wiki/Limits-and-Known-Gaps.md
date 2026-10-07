@@ -27,9 +27,9 @@ Teams transcript retrieval needs configured Graph access and permitted transcrip
 access. It is not live Teams media capture, and tenant attribution restrictions must be
 respected.
 
-Discord live receive is deferred pending real bot/DAVE permission, rekey, reconnect, and
-packet-loss validation. Universal loopback remains usable without Discord credentials.
-No selfbot integration is provided.
+Discord server voice channels are recorded through your own visible bot (no user token
+or selfbot); see [Discord](Discord). Bots cannot join DM or group-DM calls, so record
+Windows output for those.
 
 ## Validation boundary
 

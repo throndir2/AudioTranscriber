@@ -53,6 +53,8 @@ The speech model downloads by itself the first time you start the app.
 
 > 💼 **Meetings and calls.** Teams, Zoom, Discord, whatever your PC plays. Your microphone is its own track and echo reduction means no headset is needed.
 
+> 🎮 **Discord servers.** Invite your own bot to a voice channel and every line is named after the Discord user who said it, no speaker guessing needed.
+
 > 🎓 **Lectures and long recordings.** Import hours of audio or video and come back to a timestamped, searchable transcript. Click any line to hear it.
 
 > 🎬 **Subtitles.** Export SRT or WebVTT with timestamps, or plain text and JSON.
