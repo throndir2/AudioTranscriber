@@ -90,6 +90,11 @@ DPAPI for the current Windows user in `templates.json`, and sent only to the
 connection's own base URL. The model's file tools are read-only and limited to the
 chosen context folder and always-included files.
 
+Templates with **Include a screenshot of the table** also send a screenshot (JPEG) of
+the window or screen chosen under **Table screenshot** with every run, so anything
+visible there goes to that template's LLM connection. With Ollama or LM Studio the
+screenshot stays on your machines. Screenshots are kept in memory only, not saved.
+
 ## Participant metadata
 
 `Speaker 1` is an acoustic cluster, not an authenticated person. A renamed speaker

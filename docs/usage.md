@@ -316,6 +316,17 @@ characters in total), so keep them short: a campaign summary, roster or cheat sh
 Files are read without locking them. The folder tools need a model with tool
 (function) calling; other models still get the transcript and always-included files.
 
+**Table screenshot** (shared by all templates) lets templates see your virtual
+tabletop. Pick your Roll20 or Foundry browser window, or a whole screen, from the
+**Capture** list (**Refresh** reloads it; a shortened title such as `Roll20` matches
+any window whose title contains it), set the **max width** (default 1280 px), and use
+**Test capture** to preview. Window capture works while other windows cover it, but
+not while it is minimized. Tick **Include a screenshot of the table** on a template to
+attach a fresh JPEG on each update; templates updating together share the same frame,
+and they also re-run when the screen changes even if the transcript did not. This
+needs a vision model (for example Ollama `gemma4:e4b`); keep each template to one
+narrow job, such as turn order or token positions.
+
 **LLM connections** use the OpenAI-compatible `/v1/chat/completions` API. Pick a
 type and choose **Add**: OpenRouter (`https://openrouter.ai/api/v1`), NVIDIA Build
 (`https://integrate.api.nvidia.com/v1`), OpenAI, Ollama (`http://localhost:11434/v1`,

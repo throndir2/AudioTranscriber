@@ -117,15 +117,27 @@ public static partial class LlmClient
         }
     }
 
-    /// <summary>Runs a chat with optional tools until the model returns a final answer.</summary>
+    /// <summary>Runs a chat with optional tools until the model returns a final answer. Images (JPEG) go in the user message.</summary>
     public static async Task<string> CompleteAsync(string baseUrl, string? apiKey, string model, string system, string user,
-        ILlmToolHost? tools, IProgress<string>? progress, CancellationToken cancellationToken)
+        ILlmToolHost? tools, IProgress<string>? progress, CancellationToken cancellationToken, IReadOnlyList<byte[]>? images = null)
     {
         if (string.IsNullOrWhiteSpace(model)) throw new LlmException("The connection has no model. Choose or type a model name.");
+        JsonNode userContent = user;
+        if (images is { Count: > 0 })
+        {
+            var parts = new JsonArray { new JsonObject { ["type"] = "text", ["text"] = user } };
+            foreach (var image in images)
+                parts.Add(new JsonObject
+                {
+                    ["type"] = "image_url",
+                    ["image_url"] = new JsonObject { ["url"] = "data:image/jpeg;base64," + Convert.ToBase64String(image) }
+                });
+            userContent = parts;
+        }
         var messages = new JsonArray
         {
             new JsonObject { ["role"] = "system", ["content"] = system },
-            new JsonObject { ["role"] = "user", ["content"] = user }
+            new JsonObject { ["role"] = "user", ["content"] = userContent }
         };
         var useTools = tools is not null;
         for (var round = 0; ; round++)
@@ -154,6 +166,8 @@ public static partial class LlmClient
                     round = -1;
                     continue;
                 }
+                if (images is { Count: > 0 } && VisionError().IsMatch(body))
+                    throw new LlmException(Describe(response, body) + " This model can't read images. Pick a vision model such as gemma4:e4b.");
                 throw new LlmException(Describe(response, body));
             }
             JsonNode? json;
@@ -200,6 +214,9 @@ public static partial class LlmClient
 
     [GeneratedRegex(@"<think>.*?(</think>|$)", RegexOptions.Singleline | RegexOptions.IgnoreCase)]
     private static partial Regex ThinkBlock();
+
+    [GeneratedRegex(@"image|vision|multimodal|multi-modal", RegexOptions.IgnoreCase)]
+    private static partial Regex VisionError();
 
     private static string Describe(HttpResponseMessage response, string body)
     {

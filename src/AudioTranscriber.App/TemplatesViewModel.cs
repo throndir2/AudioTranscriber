@@ -30,7 +30,10 @@ public sealed class TemplatesViewModel : ObservableObject
     private OutputTemplate? selectedTemplate;
     private LlmPreset selectedPreset = LlmPreset.All[0];
     private string contextFolder = "", pinnedFiles = "", connectionStatus = "", targetDescription = "No session selected.";
-    private bool dirty, ticking, closing, loadingModels;
+    private string captureTarget = "", captureCaption = "No screenshot taken yet.";
+    private int captureMaxWidth = ScreenCapture.DefaultMaxWidth;
+    private System.Windows.Media.Imaging.BitmapSource? capturePreview;
+    private bool dirty, ticking, closing, loadingModels, capturing;
 
     public TemplatesViewModel(IAppController controller, DesktopDialogs dialogs, Dispatcher dispatcher, Func<Guid?> targetSession,
         Action<string, bool> log)
@@ -57,6 +60,12 @@ public sealed class TemplatesViewModel : ObservableObject
         BrowseOutputCommand = new RelayCommand(BrowseOutput, () => SelectedTemplate is not null);
         BrowseFolderCommand = new RelayCommand(() => { if (dialogs.ChooseFolder(ContextFolder) is { } folder) ContextFolder = folder; });
         AddPinnedFilesCommand = new RelayCommand(AddPinnedFiles);
+        RefreshCaptureSourcesCommand = new AsyncCommand(RefreshCaptureSourcesAsync);
+        TestCaptureCommand = new AsyncCommand(async () =>
+        {
+            try { await CaptureAsync(); }
+            catch (CaptureException error) { CaptureCaption = "Capture failed: " + error.Message; }
+        }, () => !capturing);
         CopyOutputCommand = new RelayCommand(() =>
         {
             try { System.Windows.Clipboard.SetText(SelectedTemplate?.Output ?? ""); }
@@ -73,7 +82,10 @@ public sealed class TemplatesViewModel : ObservableObject
     /// <summary>Checklist of the other templates the selected template can use as inputs.</summary>
     public ObservableCollection<TemplateInputOption> TemplateInputs { get; } = [];
     public ObservableCollection<string> Models { get; } = [];
+    public ObservableCollection<string> CaptureSources { get; } = [];
     public IReadOnlyList<LlmPreset> Presets => LlmPreset.All;
+    public ICommand RefreshCaptureSourcesCommand { get; }
+    public ICommand TestCaptureCommand { get; }
 
     public ICommand AddConnectionCommand { get; }
     public ICommand RemoveConnectionCommand { get; }
@@ -161,7 +173,42 @@ public sealed class TemplatesViewModel : ObservableObject
     public string PinnedFiles { get => pinnedFiles; set { if (Set(ref pinnedFiles, value ?? "")) dirty = true; } }
     public string TargetDescription { get => targetDescription; private set => Set(ref targetDescription, value); }
 
-    public void Start() { timer.Start(); _ = TickAsync(); }
+    public string CaptureTarget { get => captureTarget; set { if (Set(ref captureTarget, value?.Trim() ?? "")) dirty = true; } }
+    public int CaptureMaxWidth { get => captureMaxWidth; set { if (Set(ref captureMaxWidth, Math.Clamp(value, 320, 7680))) dirty = true; } }
+    public System.Windows.Media.Imaging.BitmapSource? CapturePreview { get => capturePreview; private set => Set(ref capturePreview, value); }
+    public string CaptureCaption { get => captureCaption; private set => Set(ref captureCaption, value); }
+
+    public void Start() { timer.Start(); _ = RefreshCaptureSourcesAsync(); _ = TickAsync(); }
+
+    private async Task RefreshCaptureSourcesAsync()
+    {
+        var sources = await Task.Run(ScreenCapture.ListSources);
+        var text = CaptureTarget;
+        CaptureSources.Clear();
+        foreach (var source in sources) CaptureSources.Add(source);
+        CaptureTarget = text;
+    }
+
+    /// <summary>Takes a screenshot of the shared capture target off the UI thread and shows it as the preview.</summary>
+    private async Task<CaptureResult> CaptureAsync()
+    {
+        capturing = true;
+        CommandManager.InvalidateRequerySuggested();
+        try
+        {
+            var target = CaptureTarget;
+            var width = CaptureMaxWidth;
+            var shot = await Task.Run(() =>
+            {
+                try { return ScreenCapture.Capture(target, width); }
+                catch (Exception error) when (error is not CaptureException) { throw new CaptureException(error.Message); }
+            });
+            CapturePreview = shot.Preview;
+            CaptureCaption = shot.Caption;
+            return shot;
+        }
+        finally { capturing = false; CommandManager.InvalidateRequerySuggested(); }
+    }
 
     public void Shutdown()
     {
@@ -201,6 +248,8 @@ public sealed class TemplatesViewModel : ObservableObject
         }
         contextFolder = saved.ContextFolder ?? "";
         pinnedFiles = saved.PinnedFiles ?? "";
+        captureTarget = saved.CaptureTarget ?? "";
+        captureMaxWidth = saved.CaptureMaxWidth > 0 ? Math.Clamp(saved.CaptureMaxWidth, 320, 7680) : ScreenCapture.DefaultMaxWidth;
         foreach (var connection in saved.Connections) Track(connection, Connections);
         foreach (var template in saved.Templates) Track(template, Templates);
         AssignDefaultConnection();
@@ -227,7 +276,9 @@ public sealed class TemplatesViewModel : ObservableObject
                 Connections = Connections.ToList(),
                 Templates = Templates.ToList(),
                 ContextFolder = ContextFolder,
-                PinnedFiles = PinnedFiles
+                PinnedFiles = PinnedFiles,
+                CaptureTarget = CaptureTarget,
+                CaptureMaxWidth = CaptureMaxWidth
             };
             var path = SettingsPath;
             var temp = path + ".tmp";
@@ -354,7 +405,7 @@ public sealed class TemplatesViewModel : ObservableObject
         {
             Name = source.Name + " (copy)", Prompt = source.Prompt, ConnectionId = source.ConnectionId, IntervalSeconds = source.IntervalSeconds,
             IncludePrevious = source.IncludePrevious, UseReferences = source.UseReferences, MaxTranscriptChars = source.MaxTranscriptChars,
-            UseTranscript = source.UseTranscript, InputTemplateIds = [.. source.InputTemplateIds]
+            UseTranscript = source.UseTranscript, InputTemplateIds = [.. source.InputTemplateIds], UseScreenshot = source.UseScreenshot
         });
     }
 
@@ -422,29 +473,49 @@ public sealed class TemplatesViewModel : ObservableObject
             if (session is { } sessionId && due.Any(t => t.UseTranscript))
                 (transcript, rows) = await Task.Run(() => (LiveTranscriptFile.Render(store, sessionId, out var count), count));
             if (closing) return;
+            // One screenshot per tick, shared by every template that uses it, so they all see the same frame.
+            CaptureResult? shot = null;
+            string? captureError = null;
+            if (due.Any(t => t.UseScreenshot && !t.IsRunning && (!t.UseTranscript || rows > 0)))
+            {
+                try { shot = await CaptureAsync(); }
+                catch (CaptureException error) { captureError = error.Message; }
+            }
             // Upstream first: a template started here is already IsRunning, so its downstream waits for the fresh output.
             foreach (var template in due)
             {
                 var inputs = TemplateGraph.Inputs(template, Templates);
                 if (template.IsRunning || inputs.Any(i => i.IsRunning)) continue;
                 if (template.UseTranscript && rows == 0) continue;
-                if (template.LastFingerprint != TemplateGraph.Fingerprint(template, session, transcript, inputs.Select(i => (i.Id, i.Output)), ExtraFingerprint(template)))
-                    _ = RunAsync(template, manual: false, session, transcript);
+                if (template.UseScreenshot && shot is null)
+                {
+                    template.Status = $"Screenshot failed {DateTime.Now:HH:mm:ss}: {captureError}";
+                    continue;
+                }
+                if (template.LastFingerprint != TemplateGraph.Fingerprint(template, session, transcript, inputs.Select(i => (i.Id, i.Output)), ExtraFingerprint(template, shot)))
+                    _ = RunAsync(template, manual: false, session, transcript, shot);
             }
         }
         catch (Exception error) when (error is IOException or InvalidOperationException or UnauthorizedAccessException) { }
         finally { ticking = false; }
     }
 
-    /// <summary>Extension point for extra per-template inputs (e.g. a screenshot hash) that should trigger re-runs.</summary>
-    private static string? ExtraFingerprint(OutputTemplate template) => null;
+    /// <summary>Extra per-template inputs that should trigger re-runs: the screenshot's thumbnail hash.</summary>
+    private static string? ExtraFingerprint(OutputTemplate template, CaptureResult? shot) =>
+        template.UseScreenshot && shot is not null ? "screen:" + shot.Fingerprint : null;
 
-    private async Task RunAsync(OutputTemplate template, bool manual, Guid? sessionId = null, string? transcript = null)
+    private async Task RunAsync(OutputTemplate template, bool manual, Guid? sessionId = null, string? transcript = null, CaptureResult? shot = null)
     {
         if (template.IsRunning || closing) return;
         if (ConnectionFor(template) is not { } connection) { template.Status = "Add an LLM connection below first."; return; }
         var session = sessionId ?? targetSession();
         if (template.UseTranscript && session is null) { template.Status = "Select or record a session first (or untick Transcript in this template's inputs)."; return; }
+        if (template.UseScreenshot && connection.SupportsImages == false)
+        {
+            template.LastRunUtc = DateTime.UtcNow;
+            template.Status = $"{connection.Model} can't read images. Pick a vision model such as gemma4:e4b, or untick the screenshot input.";
+            return;
+        }
         var cancellation = new CancellationTokenSource();
         running[template.Id] = cancellation;
         template.IsRunning = true;
@@ -459,17 +530,23 @@ public sealed class TemplatesViewModel : ObservableObject
                 var id = session!.Value;
                 transcript = await Task.Run(() => LiveTranscriptFile.Render(store, id));
             }
+            if (template.UseScreenshot && shot is null)
+            {
+                template.Status = "Taking a screenshot…";
+                shot = await CaptureAsync();
+            }
+            IReadOnlyList<byte[]>? images = template.UseScreenshot && shot is not null ? [shot.Jpeg] : null;
             var inputs = TemplateGraph.Inputs(template, Templates).Select(t => (t.Id, t.Name, t.Output)).ToArray();
-            var fingerprint = TemplateGraph.Fingerprint(template, session, transcript, inputs.Select(i => (i.Id, i.Output)), ExtraFingerprint(template));
+            var fingerprint = TemplateGraph.Fingerprint(template, session, transcript, inputs.Select(i => (i.Id, i.Output)), ExtraFingerprint(template, shot));
             var previous = template.IncludePrevious && (!template.UseTranscript || template.OutputSessionId == session) ? template.Output : "";
             var library = template.UseReferences ? new ReferenceLibrary(ContextFolder, PinnedList()) : null;
             var references = library is null ? "" : await Task.Run(() => library.PinnedText(MaxReferenceChars), cancellation.Token);
             var tools = library is { HasFolder: true } ? library : null;
-            var system = BuildSystem(tools is not null);
+            var system = BuildSystem(tools is not null, images is not null);
             var user = BuildUser(template, template.UseTranscript ? transcript : null, inputs.Select(i => (i.Name, i.Output)).ToArray(), references, previous);
             var progress = new Progress<string>(message => template.Status = message);
             var key = connection.GetKey();
-            var result = await Task.Run(() => LlmClient.CompleteAsync(connection.BaseUrl, key, connection.Model, system, user, tools, progress, cancellation.Token));
+            var result = await Task.Run(() => LlmClient.CompleteAsync(connection.BaseUrl, key, connection.Model, system, user, tools, progress, cancellation.Token, images));
             if (string.IsNullOrWhiteSpace(result)) throw new LlmException("The model returned an empty answer.");
             template.Output = result;
             template.OutputSessionId = template.UseTranscript ? session : null;
@@ -489,6 +566,11 @@ public sealed class TemplatesViewModel : ObservableObject
         {
             template.Status = "Stopped.";
         }
+        catch (CaptureException error)
+        {
+            template.Status = $"Screenshot failed {DateTime.Now:HH:mm:ss}: {error.Message}";
+            log($"Template \"{template.Name}\" screenshot failed: {error.Message}", true);
+        }
         catch (Exception error) when (error is LlmException or HttpRequestException or TaskCanceledException or IOException or UnauthorizedAccessException or InvalidOperationException)
         {
             template.Status = $"Failed {DateTime.Now:HH:mm:ss}: {Explain(error)}" + (template.AutoUpdate ? $" Retrying in {template.IntervalSeconds} s." : "");
@@ -503,13 +585,15 @@ public sealed class TemplatesViewModel : ObservableObject
         }
     }
 
-    private static string BuildSystem(bool tools)
+    private static string BuildSystem(bool tools, bool image = false)
     {
         var text = new StringBuilder();
         text.AppendLine("You are an assistant built into AudioTranscriber, a live transcription app. You receive the transcript of a conversation that may still be in progress.");
         text.AppendLine("The transcript comes from speech recognition: expect misheard words, especially names, and generic speaker labels such as 'Speaker 1'. Infer sensibly and do not invent facts.");
         text.AppendLine("Follow the user's template instructions and reply with only the requested document (Markdown is fine). No preamble, no closing remarks, no questions back.");
         text.AppendLine("Sections titled 'Output of \"…\"' are the latest results of other templates (other focused assistants); treat them as inputs.");
+        if (image)
+            text.AppendLine("You also get a screenshot of the user's virtual tabletop (for example Roll20 or Foundry VTT), taken just now. Only report what is actually visible in it; if something is unreadable or not shown, say so instead of guessing.");
         if (tools)
             text.AppendLine("You can call list_files, read_file and search_files to consult the user's reference files (rules, adventure books, notes). Search for names, places and topics from the transcript and use what you find; cite file and page when helpful. Keep tool use focused.");
         return text.ToString();
