@@ -10,7 +10,7 @@ Format: newest first; each version is `## vX.Y.Z - YYYY-MM-DD` with `### Added`,
 
 ### Added
 
-- **Add table (VTT) templates** adds a ready-made virtual tabletop assistant: turn order and token positions read from your table screenshot feed live DM reminders (whose turn, monster tactics, rules, story beats not presented yet). (#PR)
+- **Add table (VTT) templates** adds a ready-made virtual tabletop assistant: turn order and token positions read from your table screenshot feed live DM reminders (whose turn, monster tactics, rules, story beats not presented yet). (#42)
 - Templates can include a screenshot of your virtual tabletop (Roll20, Foundry or any window or screen) for vision models, set up in the new **Table screenshot** card. (#40)
 - Output template connections can check whether the selected model accepts images (**Check image support**, also run by **Test**). (#37)
 
