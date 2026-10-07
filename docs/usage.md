@@ -393,6 +393,32 @@ model string property, logs it, exports it, or accepts it as an argument.
 
 ## Local models
 
+### Recommended setup for this PC
+
+**Privacy / models > Recommended setup for this PC** reads the CPU, RAM and each
+graphics card's memory (nvidia-smi for NVIDIA, the Windows display driver for
+others; integrated GPUs don't count) and plans what fits:
+
+1. Keep 10% of the card (at least 0.8 GB) for Windows.
+2. If templates use an LLM on this PC (Ollama or LM Studio), give it the GPU
+   first: the largest Gemma 4 (26B, 12B, E4B, E2B) whose weights plus about
+   1.5 GB of runtime and context fit. With no room it falls back to E2B on the
+   CPU (16 GB+ RAM, slow) or a hosted connection.
+3. Put Parakeet on an NVIDIA CUDA 12 GPU only if about 3 GB is still free;
+   otherwise it stays on the CPU, which already runs ~15× real time. On an 8 GB
+   card with a local LLM, transcription runs on the CPU.
+4. Give Whisper the leftover: large-v3-turbo on the GPU if 2.5 GB is free,
+   on the CPU with 12+ threads, otherwise small or base.
+
+Figures are planning estimates, not measurements. Until you choose otherwise,
+the plan is the default: the one-time Parakeet GPU question is asked only when
+the plan puts Parakeet on the GPU, Whisper's first download uses the planned
+size and device, and a fresh Ollama connection uses the planned model.
+**Apply recommended settings** applies all of it (GPU downloads still ask
+first). **Re-check hardware** probes again.
+
+### Models
+
 The small speaker models (approximately 33.49 MB, 33,488,994 bytes of official
 release artifacts: MIT CNRS 2023 segmentation and CC BY 4.0 embedding, with
 attribution/package notices) download automatically on first start, so speakers
