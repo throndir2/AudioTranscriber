@@ -1,0 +1,277 @@
+<Window x:Class="AudioTranscriber.App.MainWindow"
+        xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="using:AudioTranscriber.App"
+        Title="AudioTranscriber · Local audio library"
+        Width="1440" Height="940" MinWidth="1040" MinHeight="720"
+        WindowStartupLocation="CenterScreen"
+        Icon="/Assets/AppIcon.ico">
+  <Grid x:Name="RootGrid" RowDefinitions="Auto,*,Auto">
+    <Border Background="{StaticResource TitleBarFill}" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="14,8">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+          <Border Height="28" CornerRadius="14" BorderBrush="{StaticResource LineStrong}" BorderThickness="1" Background="#120E0B" Padding="10,0" Margin="0,0,8,0">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+              <Ellipse Width="9" Height="9" Fill="{StaticResource CrimsonBright}" Stroke="{StaticResource CrimsonBright}" />
+              <TextBlock Text="{Binding CaptureState}" Margin="8,0,0,0" FontSize="12" FontWeight="Bold" Foreground="{StaticResource GoldBright}" AutomationProperties.LiveSetting="Polite" />
+              <TextBlock Text="{Binding RecordingSession}" Margin="8,0,0,0" FontSize="12" Foreground="{StaticResource Muted}" MaxWidth="220" TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+          </Border>
+          <Button Content="●  Record" Command="{Binding StartRecordingCommand}" Classes="primary" AutomationProperties.Name="Quick start recording" />
+          <Button Content="■  Stop recording" Command="{Binding StopRecordingCommand}" Classes="stop" />
+          <Button Content="{Binding RestartToUpdateLabel}" Command="{Binding RestartToUpdateCommand}" Classes="primary" IsVisible="{Binding UpdateReady}" />
+        </StackPanel>
+        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+          <TextBlock Text="▌▌▌" FontSize="22" Foreground="{StaticResource GoldBright}" Margin="0,0,10,0" AutomationProperties.Name="AudioTranscriber logo" />
+          <TextBlock Text="AudioTranscriber" Classes="heading" Margin="0" />
+        </StackPanel>
+        <DockPanel Margin="16,0,12,0" VerticalAlignment="Center">
+          <Border DockPanel.Dock="Left" Width="1" Height="18" Background="{StaticResource Line}" Margin="0,0,14,0" />
+          <TextBlock DockPanel.Dock="Left" MaxWidth="420" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Text="{Binding SelectedSession.Name, TargetNullValue=No session selected}" />
+          <TextBlock Text="{Binding SessionSummary}" Foreground="{StaticResource Muted}" FontSize="12" Margin="12,1,0,0" TextTrimming="CharacterEllipsis" />
+        </DockPanel>
+      </DockPanel>
+    </Border>
+
+    <Grid Grid.Row="1" ColumnDefinitions="264,5,*">
+      <Border Background="{StaticResource SidebarFill}">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Top" Margin="14,10,8,0">
+            <TextBlock Classes="heading" Text="Your sessions" Margin="0,0,0,4" />
+            <WrapPanel>
+              <Button Classes="ghost" Command="{Binding MergeSessionsCommand}" AutomationProperties.Name="Merge sessions" Content="Merge" />
+              <Button Classes="ghost" Command="{Binding DeleteSessionsCommand}" AutomationProperties.Name="Delete sessions" ToolTip.Tip="Delete sessions">
+                <PathIcon Width="13" Height="13"
+                          Data="M5,1 L11,1 L12,2 L16,2 L16,4 L1,4 L1,2 L4,2 Z M3,5 L14,5 L13,17 L4,17 Z M6,7 L7,7 L7,15 L6,15 Z M10,7 L11,7 L11,15 L10,15 Z" />
+              </Button>
+              <Button Classes="ghost" Command="{Binding RefreshCommand}" AutomationProperties.Name="Refresh library" Content="Refresh" />
+            </WrapPanel>
+          </StackPanel>
+          <TextBlock DockPanel.Dock="Top" Text="Shift/Ctrl-click for several · right-click for actions" Classes="caption" Margin="14,2,14,8" TextTrimming="CharacterEllipsis" />
+          <ListBox x:Name="SessionList" ItemsSource="{Binding Sessions}" SelectedItem="{Binding SelectedSession}" SelectionMode="Multiple"
+                   Margin="6,0,6,6" Background="Transparent" PointerPressed="SessionListPointerPressed"
+                   KeyDown="SessionListKeyDown" SelectionChanged="SessionListSelectionChanged"
+                   AutomationProperties.Name="Saved sessions"
+                   AutomationProperties.HelpText="Shift-click or Ctrl-click to select several sessions. Right-click the selection, or press Delete, to merge or delete it.">
+            <ListBox.ContextMenu><ContextMenu AutomationProperties.Name="Session actions" /></ListBox.ContextMenu>
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <StackPanel>
+                  <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                  <DockPanel Margin="0,4,0,0">
+                    <TextBlock DockPanel.Dock="Right" Text="{Binding State}" FontSize="11.5" Foreground="{StaticResource Accent}" Margin="8,0,0,0" />
+                    <TextBlock Text="{Binding CreatedUtc, StringFormat='{}{0:MMM d · HH:mm}'}" Foreground="{StaticResource Dim}" FontSize="12" />
+                  </DockPanel>
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </DockPanel>
+      </Border>
+      <GridSplitter Grid.Column="1" ResizeDirection="Columns" />
+
+      <Grid Grid.Column="2" RowDefinitions="Auto,*">
+        <Border Background="#2A1311" BorderBrush="#6E2620" BorderThickness="0,0,0,1" Padding="14,7">
+          <TextBlock Text="{Binding SessionError}" Foreground="{StaticResource ErrorText}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
+        </Border>
+        <TabControl x:Name="MainTabs" Grid.Row="1" Background="Transparent" BorderThickness="0">
+          <TabItem Header="Record / import">
+            <Grid Margin="16,14,16,4" ColumnDefinitions="3*,16,2*">
+              <DockPanel>
+                <Border DockPanel.Dock="Top" Classes="card hero">
+                  <StackPanel>
+                    <TextBlock Classes="heading" Text="Start with your audio" />
+                    <TextBlock Classes="help" Text="Just press Start recording: defaults are ready. Output and microphone are archived as separate tracks; originals survive slow or unavailable transcription." />
+                    <WrapPanel>
+                      <Button Content="●  Start recording" Classes="primary" Command="{Binding StartRecordingCommand}" />
+                      <Button Content="{Binding ContinueRecordingLabel}" Command="{Binding ContinueRecordingCommand}" />
+                      <Button Content="■  Stop recording" Classes="stop" Command="{Binding StopRecordingCommand}" />
+                      <Button Content="Import audio / video…" Command="{Binding ImportAudioCommand}" />
+                      <Button Content="Refresh devices" Command="{Binding RefreshDevicesCommand}" />
+                    </WrapPanel>
+                    <TextBlock Text="{Binding SetupStatus}" IsVisible="{Binding HasSetupStatus}" Foreground="{StaticResource Accent}" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,6,0,0" AutomationProperties.LiveSetting="Polite" />
+                  </StackPanel>
+                </Border>
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                  <StackPanel Margin="0,0,6,0">
+                    <Border Classes="card">
+                      <StackPanel>
+                        <TextBlock Classes="heading" Text="New session" />
+                        <Grid ColumnDefinitions="*,*,120">
+                          <StackPanel><TextBlock Classes="caption" Text="Session name" /><TextBox x:Name="SessionNameInput" Text="{Binding SessionName, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="New session name" /></StackPanel>
+                          <StackPanel Grid.Column="1"><TextBlock Classes="caption" Text="Transcription provider" /><ComboBox x:Name="ProviderInput" ItemsSource="{Binding Providers}" DisplayMemberBinding="{Binding Name}" SelectedItem="{Binding SelectedProvider}" AutomationProperties.Name="New session transcription provider" /></StackPanel>
+                          <StackPanel Grid.Column="2"><TextBlock Classes="caption" Text="Source language" /><TextBox x:Name="LanguageInput" Text="{Binding Language, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Source language" /></StackPanel>
+                        </Grid>
+                        <TextBlock Text="{Binding ProviderHelp}" Classes="help" />
+                      </StackPanel>
+                    </Border>
+                    <Border Classes="card">
+                      <StackPanel>
+                        <TextBlock Classes="heading" Text="Visible capture" />
+                        <Grid ColumnDefinitions="*,16,*">
+                          <StackPanel>
+                            <TextBlock Classes="caption" Text="Output endpoint" /><ComboBox x:Name="OutputInput" ItemsSource="{Binding OutputDevices}" DisplayMemberBinding="{Binding Name}" SelectedItem="{Binding OutputDevice}" AutomationProperties.Name="Selected output device" />
+                            <ProgressBar Value="{Binding OutputLevel}" Minimum="0" Maximum="1" Height="10" AutomationProperties.Name="Output capture peak level" />
+                            <TextBlock Classes="caption" Text="Pause that ends a phrase" Margin="0,8,0,0" />
+                            <DockPanel><TextBlock DockPanel.Dock="Right" Width="60" TextAlignment="Right" Text="{Binding PhrasePauseMilliseconds, StringFormat='{}{0} ms'}" /><Slider x:Name="PhrasePauseInput" Minimum="200" Maximum="3000" TickFrequency="100" IsSnapToTickEnabled="True" Value="{Binding PhrasePauseMilliseconds}" AutomationProperties.Name="Silence in milliseconds that ends a live transcript phrase" /></DockPanel>
+                          </StackPanel>
+                          <StackPanel Grid.Column="2">
+                            <CheckBox Content="Include a separate microphone track" IsChecked="{Binding MicrophoneEnabled}" />
+                            <ComboBox ItemsSource="{Binding MicrophoneDevices}" DisplayMemberBinding="{Binding Name}" SelectedItem="{Binding MicrophoneDevice}" IsEnabled="{Binding MicrophoneEnabled}" AutomationProperties.Name="Optional separate microphone device" />
+                            <CheckBox Content="Reduce echo from speakers" IsChecked="{Binding ReduceEcho}" IsEnabled="{Binding MicrophoneEnabled}" />
+                            <TextBlock Classes="caption" Text="Label microphone lines as" /><TextBox x:Name="MicrophoneNameInput" Text="{Binding MicrophoneName, UpdateSourceTrigger=LostFocus}" IsEnabled="{Binding MicrophoneEnabled}" AutomationProperties.Name="Speaker name for microphone lines" />
+                            <ProgressBar Value="{Binding MicrophoneLevel}" Minimum="0" Maximum="1" Height="10" AutomationProperties.Name="Microphone capture peak level" />
+                          </StackPanel>
+                        </Grid>
+                      </StackPanel>
+                    </Border>
+                    <Border Classes="card">
+                      <StackPanel>
+                        <TextBlock Classes="heading" Text="Live transcript file" />
+                        <CheckBox IsChecked="{Binding LiveFileEnabled}" AutomationProperties.Name="Mirror new sessions to a live transcript file" Content="Write transcript to a live text file" />
+                        <DockPanel><Button DockPanel.Dock="Right" Content="Browse…" Command="{Binding BrowseLiveFileCommand}" /><TextBox Text="{Binding LiveFilePath, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Live transcript file path" /></DockPanel>
+                        <TextBlock Text="{Binding LiveFileStatus}" Classes="caption" />
+                      </StackPanel>
+                    </Border>
+                    <Border Classes="card warning">
+                      <StackPanel>
+                        <TextBlock Classes="heading" Text="Optional NVIDIA upload — this new session only" Foreground="#F2B3A8" />
+                        <TextBlock Classes="help" Text="If enabled, audio for this session may be sent to the selected NVIDIA-hosted ASR service. Local Parakeet never uploads." />
+                        <CheckBox IsChecked="{Binding NewCloudConsent}" AutomationProperties.Name="Explicit NVIDIA upload consent for this new session" Content="I explicitly permit NVIDIA uploads for this new session." />
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
+                </ScrollViewer>
+              </DockPanel>
+              <Border Grid.Column="2" Classes="card">
+                <DockPanel>
+                  <DockPanel DockPanel.Dock="Top"><Button DockPanel.Dock="Right" Content="Clear" Command="{Binding ClearActivityCommand}" /><Button DockPanel.Dock="Right" Content="Copy" Command="{Binding CopyActivityCommand}" /><TextBlock Classes="heading" Text="Live activity" /></DockPanel>
+                  <TextBlock DockPanel.Dock="Top" Classes="caption" Text="Shows capture, jobs, transcript lines, errors and live file writes." Margin="0,0,0,10" />
+                  <ListBox x:Name="ActivityList" ItemsSource="{Binding ActivityLog}" MinHeight="160" Background="{StaticResource InputBg}" AutomationProperties.Name="Live activity log">
+                    <ListBox.ItemTemplate><DataTemplate><Grid ColumnDefinitions="62,*"><TextBlock Text="{Binding TimeText}" Foreground="{StaticResource Dim}" FontFamily="Consolas" FontSize="12" VerticalAlignment="Top" /><TextBlock Grid.Column="1" Text="{Binding Text}" TextWrapping="Wrap" Foreground="{StaticResource Muted}" FontSize="13" /></Grid></DataTemplate></ListBox.ItemTemplate>
+                  </ListBox>
+                </DockPanel>
+              </Border>
+            </Grid>
+          </TabItem>
+
+          <TabItem Header="Transcript">
+            <Grid Margin="12,10" RowDefinitions="Auto,Auto,2*,8,*">
+              <DockPanel>
+                <Button DockPanel.Dock="Right" Content="Clear" Command="{Binding ClearSearchCommand}" />
+                <Button DockPanel.Dock="Right" Content="Find / jump" Command="{Binding SearchCommand}" />
+                <TextBox DockPanel.Dock="Right" Width="86" Text="{Binding Seek, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Jump to transcript timestamp"><TextBox.KeyBindings><KeyBinding Gesture="Enter" Command="{Binding SearchCommand}" /></TextBox.KeyBindings></TextBox>
+                <ComboBox DockPanel.Dock="Right" Width="170" ItemsSource="{Binding SpeakerFilters}" DisplayMemberBinding="{Binding Name}" SelectedItem="{Binding SpeakerFilter}" AutomationProperties.Name="Transcript speaker filter" />
+                <TextBox Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Search transcript text"><TextBox.KeyBindings><KeyBinding Gesture="Enter" Command="{Binding SearchCommand}" /></TextBox.KeyBindings></TextBox>
+              </DockPanel>
+              <DockPanel Grid.Row="1" Margin="0,2,0,6">
+                <Button DockPanel.Dock="Right" Content="Export…" Command="{Binding ExportCommand}" />
+                <Button DockPanel.Dock="Right" Content="Stop live file" Command="{Binding StopLiveFileCommand}" />
+                <Button DockPanel.Dock="Right" Content="Live file" Command="{Binding LiveMirrorSelectedCommand}" />
+                <Button DockPanel.Dock="Right" Content="Re-transcribe…" Command="{Binding ResplitCommand}" />
+                <Button DockPanel.Dock="Right" Content="Analyze speakers" Command="{Binding DiarizeCommand}" />
+                <Button DockPanel.Dock="Right" Content="Fill speakers from my labels" Classes="primary" Command="{Binding FillSpeakersCommand}" />
+                <TextBlock Text="{Binding TranscriptSummary}" Classes="caption" TextTrimming="CharacterEllipsis" />
+              </DockPanel>
+              <DataGrid x:Name="TranscriptGrid" Grid.Row="2" ItemsSource="{Binding Transcript}" SelectedItem="{Binding SelectedRow}" SelectionMode="Extended" RowHeight="NaN" SelectionChanged="TranscriptSelectionChanged" DoubleTapped="TranscriptDoubleTapped" PointerPressed="TranscriptPointerPressed" AutomationProperties.Name="Transcript lines" AutomationProperties.HelpText="Right-click lines to set or rename the speaker. Ctrl/Shift-click to select several. Double-click plays a line.">
+                <DataGrid.ContextMenu><ContextMenu AutomationProperties.Name="Transcript line actions" /></DataGrid.ContextMenu>
+                <DataGrid.Columns>
+                  <DataGridTextColumn Header="Time" Binding="{Binding Timestamp}" Width="80" />
+                  <DataGridTextColumn Header="Track" Binding="{Binding TrackName}" Width="90" />
+                  <DataGridTextColumn Header="Speaker" Binding="{Binding Speaker}" Width="120" />
+                  <DataGridTextColumn Header="Transcript" Binding="{Binding Text}" Width="*" MinWidth="160" />
+                  <DataGridTextColumn Header="Timing" Binding="{Binding Timing}" Width="80" />
+                  <DataGridTextColumn Header="Attribution" Binding="{Binding Attribution}" Width="120" />
+                </DataGrid.Columns>
+              </DataGrid>
+              <GridSplitter Grid.Row="3" ResizeDirection="Rows" />
+              <TabControl Grid.Row="4">
+                <TabItem Header="Selected line" x:Name="SelectedLineTab">
+                  <Grid Margin="8,6" RowDefinitions="Auto,*">
+                    <DockPanel><Button DockPanel.Dock="Right" Content="■ Stop" Command="{Binding StopPlaybackCommand}" /><Button DockPanel.Dock="Right" Content="▶ Play" Command="{Binding PlayRowCommand}" /><Button DockPanel.Dock="Right" Content="Restore raw" Command="{Binding RestoreRawCommand}" /><Button DockPanel.Dock="Right" Content="Save text" Command="{Binding SaveCorrectionCommand}" /><TextBlock Text="{Binding SelectionSummary}" Foreground="{StaticResource Muted}" Margin="0,0,8,0" /><ComboBox Width="180" IsEditable="True" local:EditableComboBox.SyncSelection="True" ItemsSource="{Binding SpeakerNames}" Text="{Binding LineSpeaker, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Speaker for selected lines"><ComboBox.KeyBindings><KeyBinding Gesture="Enter" Command="{Binding SetLineSpeakerCommand}" /></ComboBox.KeyBindings></ComboBox><Button Content="Set speaker" Command="{Binding SetLineSpeakerCommand}" /></DockPanel>
+                    <Grid Grid.Row="1" ColumnDefinitions="*,*" Margin="0,4,0,0"><TextBox x:Name="CorrectionInput" Text="{Binding Correction, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" AutomationProperties.Name="Editable transcript correction" /><TextBox Grid.Column="1" Text="{Binding RawText}" IsReadOnly="True" TextWrapping="Wrap" Background="{StaticResource SurfaceAlt}" Foreground="{StaticResource Muted}" AutomationProperties.Name="Preserved raw recognition" /></Grid>
+                  </Grid>
+                </TabItem>
+                <TabItem Header="Speaker names"><ScrollViewer><StackPanel Margin="8,6"><TextBlock Classes="help" Text="Rename a speaker on every line. Giving two speakers the same name merges them." /><WrapPanel><ComboBox Width="190" ItemsSource="{Binding Speakers}" SelectedItem="{Binding ManagedSpeaker}" DisplayMemberBinding="{Binding Name}" AutomationProperties.Name="Speaker to rename" /><TextBox Width="220" Text="{Binding SpeakerName, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Speaker display name"><TextBox.KeyBindings><KeyBinding Gesture="Enter" Command="{Binding RenameSpeakerCommand}" /></TextBox.KeyBindings></TextBox><Button Content="Rename throughout session" Command="{Binding RenameSpeakerCommand}" /></WrapPanel><WrapPanel><Button Content="Match known voices" Command="{Binding RecognizeVoicesCommand}" /><Button Content="Remember this session's named voices" Command="{Binding RememberSessionVoicesCommand}" /><Button Content="Name all microphone lines…" Command="{Binding NameMicrophoneLinesCommand}" /></WrapPanel></StackPanel></ScrollViewer></TabItem>
+                <TabItem Header="Track playback"><ScrollViewer><StackPanel Margin="8,6"><TextBlock Classes="help" Text="Play one original track from a time. Unlinked VTT tracks have no audio." /><WrapPanel><ComboBox Width="260" ItemsSource="{Binding Tracks}" SelectedItem="{Binding SelectedTrack}" DisplayMemberBinding="{Binding Name}" AutomationProperties.Name="Original track to play" /><TextBox Width="140" Text="{Binding PlaybackTimestamp, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Original track playback timestamp" /><Button Content="▶ Play track" Command="{Binding PlayTrackCommand}" /><Button Content="■ Stop playback" Command="{Binding StopPlaybackCommand}" /></WrapPanel></StackPanel></ScrollViewer></TabItem>
+              </TabControl>
+            </Grid>
+          </TabItem>
+
+          <TabItem Header="Templates">
+            <Grid Margin="16,14,16,4" ColumnDefinitions="*,16,*" DataContext="{Binding Templates}">
+              <ScrollViewer><StackPanel Margin="0,0,6,0">
+                <Border Classes="card hero"><StackPanel><TextBlock Classes="heading" Text="Output templates" /><TextBlock Classes="help" Text="Write prompts that turn the transcript into summaries, guidance, notes, or files." /><TextBlock Text="{Binding TargetDescription}" Foreground="{StaticResource Accent}" FontWeight="SemiBold" TextWrapping="Wrap" /><ListBox ItemsSource="{Binding Templates}" SelectedItem="{Binding SelectedTemplate}" MinHeight="90" MaxHeight="200" Background="{StaticResource InputBg}" AutomationProperties.Name="Output templates"><ListBox.ItemTemplate><DataTemplate><DockPanel><TextBlock DockPanel.Dock="Right" Text="{Binding Summary}" Foreground="{StaticResource Dim}" Margin="12,0,0,0" /><TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" /></DockPanel></DataTemplate></ListBox.ItemTemplate></ListBox><WrapPanel><Button Content="New template" Command="{Binding AddTemplateCommand}" /><Button Content="Duplicate" Command="{Binding DuplicateTemplateCommand}" /><Button Content="Delete…" Command="{Binding DeleteTemplateCommand}" /><Button Content="Add starter templates" Command="{Binding AddStartersCommand}" /><Button Content="Add table templates" Command="{Binding AddTableStartersCommand}" /></WrapPanel></StackPanel></Border>
+                <Border Classes="card" IsEnabled="{Binding HasTemplate}"><StackPanel><TextBlock Classes="heading" Text="Selected template" /><TextBlock Classes="caption" Text="Name" /><TextBox x:Name="TemplateNameInput" Text="{Binding SelectedTemplate.Name, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Template name" /><TextBlock Classes="caption" Text="Prompt" /><TextBox x:Name="TemplatePromptInput" Text="{Binding SelectedTemplate.Prompt, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="110" MaxHeight="260" AutomationProperties.Name="Template prompt" /><Grid ColumnDefinitions="*,12,110,12,140"><StackPanel><TextBlock Classes="caption" Text="LLM connection" /><ComboBox x:Name="TemplateConnectionInput" ItemsSource="{Binding Connections}" DisplayMemberBinding="{Binding Name}" SelectedValueBinding="{Binding Id}" SelectedValue="{Binding SelectedTemplate.ConnectionId}" AutomationProperties.Name="LLM connection for this template" /></StackPanel><StackPanel Grid.Column="2"><TextBlock Classes="caption" Text="Every seconds" /><TextBox x:Name="TemplateIntervalInput" Text="{Binding SelectedTemplate.IntervalSeconds, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Minimum seconds between automatic updates" /></StackPanel><StackPanel Grid.Column="4"><TextBlock Classes="caption" Text="Transcript characters" /><TextBox x:Name="TemplateCharsInput" Text="{Binding SelectedTemplate.MaxTranscriptChars, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Maximum transcript characters sent" /></StackPanel></Grid><CheckBox IsChecked="{Binding SelectedTemplate.AutoUpdate}" Content="Keep updating as the transcript grows" /><CheckBox IsChecked="{Binding SelectedTemplate.UseTranscript}" Content="Transcript (most recent part of the session)" /><CheckBox IsChecked="{Binding SelectedTemplate.UseReferences}" Content="Reference files (below)" /><CheckBox IsChecked="{Binding SelectedTemplate.IncludePrevious}" Content="Previous output" /><CheckBox IsChecked="{Binding SelectedTemplate.UseScreenshot}" Content="Include a screenshot of the table" /><TextBlock Text="Outputs of other templates" Classes="caption" Margin="0,6,0,2" /><ItemsControl ItemsSource="{Binding TemplateInputs}" AutomationProperties.Name="Other templates used as inputs"><ItemsControl.ItemTemplate><DataTemplate><CheckBox IsChecked="{Binding IsSelected}" IsEnabled="{Binding IsEnabled}" Content="{Binding Template.Name}" ToolTip.Tip="{Binding Hint}" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl><CheckBox IsChecked="{Binding SelectedTemplate.WriteToFile}" Content="Also write output to a file" /><DockPanel IsEnabled="{Binding SelectedTemplate.WriteToFile}"><Button DockPanel.Dock="Right" Content="Browse…" Command="{Binding BrowseOutputCommand}" /><TextBox Text="{Binding SelectedTemplate.OutputPath, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Template output file path" /></DockPanel><WrapPanel><Button Content="▶  Update now" Classes="primary" Command="{Binding RunTemplateCommand}" /><Button Content="■  Stop" Command="{Binding StopTemplateCommand}" /></WrapPanel></StackPanel></Border>
+                <Border Classes="card"><StackPanel><TextBlock Classes="heading" Text="Reference files" /><TextBlock Classes="help" Text="Context folder and always-included files shared by all templates." /><DockPanel><Button DockPanel.Dock="Right" Content="Browse…" Command="{Binding BrowseFolderCommand}" /><TextBox Text="{Binding ContextFolder, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Context folder" /></DockPanel><DockPanel><Button DockPanel.Dock="Right" Content="Add files…" Command="{Binding AddPinnedFilesCommand}" /><TextBlock Classes="caption" Text="Always-included files (one path per line)" /></DockPanel><TextBox x:Name="PinnedFilesInput" Text="{Binding PinnedFiles, UpdateSourceTrigger=LostFocus}" AcceptsReturn="True" TextWrapping="NoWrap" MinHeight="60" MaxHeight="140" AutomationProperties.Name="Always-included reference files" /></StackPanel></Border>
+                <Border Classes="card"><StackPanel><TextBlock Classes="heading" Text="Table screenshot" /><TextBlock Classes="help" Text="Pick a virtual tabletop window or whole screen. Templates with Include a screenshot get a fresh image on each update." /><DockPanel><Button DockPanel.Dock="Right" Content="Refresh" Command="{Binding RefreshCaptureSourcesCommand}" /><ComboBox IsEditable="True" local:EditableComboBox.SyncSelection="True" ItemsSource="{Binding CaptureSources}" Text="{Binding CaptureTarget, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Screen or window to capture" /></DockPanel><WrapPanel><TextBlock Classes="caption" Text="Max width" VerticalAlignment="Center" /><TextBox Width="80" Text="{Binding CaptureMaxWidth, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Maximum screenshot width in pixels" /><Button Content="Test capture" Command="{Binding TestCaptureCommand}" /></WrapPanel><TextBlock Text="{Binding CaptureCaption}" Classes="caption" /><Image Source="{Binding CapturePreview}" MaxHeight="220" Stretch="Uniform" /></StackPanel></Border>
+                <Border Classes="card"><StackPanel><TextBlock Classes="heading" Text="LLM connections" /><DockPanel><Button DockPanel.Dock="Right" Content="Add" Command="{Binding AddConnectionCommand}" /><ComboBox ItemsSource="{Binding Presets}" DisplayMemberBinding="{Binding Name}" SelectedItem="{Binding SelectedPreset}" AutomationProperties.Name="Type of connection to add" /></DockPanel><TextBlock Classes="caption" Text="{Binding PresetHelp}" /><DockPanel><Button DockPanel.Dock="Right" Content="Remove…" Command="{Binding RemoveConnectionCommand}" /><ComboBox ItemsSource="{Binding Connections}" DisplayMemberBinding="{Binding Name}" SelectedItem="{Binding SelectedConnection}" AutomationProperties.Name="Connection to edit" /></DockPanel><StackPanel IsEnabled="{Binding HasConnection}"><Grid ColumnDefinitions="*,12,2*"><StackPanel><TextBlock Classes="caption" Text="Connection name" /><TextBox x:Name="ConnectionNameInput" Text="{Binding SelectedConnection.Name, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Connection name" /></StackPanel><StackPanel Grid.Column="2"><TextBlock Classes="caption" Text="Base URL" /><TextBox x:Name="ConnectionUrlInput" Text="{Binding SelectedConnection.BaseUrl, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Connection base URL" /></StackPanel></Grid><TextBlock Classes="caption" Text="Model" /><DockPanel><Button DockPanel.Dock="Right" Content="Load models" Command="{Binding LoadModelsCommand}" /><ComboBox DockPanel.Dock="Right" Width="200" ItemsSource="{Binding Models}" SelectedItem="{Binding PickedModel}" AutomationProperties.Name="Models offered by the server" /><TextBox x:Name="ConnectionModelInput" Text="{Binding SelectedConnection.Model, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Model name" /></DockPanel><TextBlock Text="{Binding SelectedConnection.KeyStatus}" Classes="caption" /><WrapPanel><TextBox x:Name="LlmKeyInput" Width="300" PasswordChar="●" AutomationProperties.Name="API key for this connection, password input" /><Button Content="Save key" Click="SaveLlmKeyClick" /><Button Content="Remove key" Click="ClearLlmKeyClick" /><Button Content="Test" Command="{Binding TestConnectionCommand}" /></WrapPanel><TextBlock Text="{Binding ConnectionStatus}" TextWrapping="Wrap" FontWeight="SemiBold" Foreground="{StaticResource Accent}" AutomationProperties.LiveSetting="Polite" /></StackPanel></StackPanel></Border>
+              </StackPanel></ScrollViewer>
+              <Border Grid.Column="2" Classes="card"><DockPanel><DockPanel DockPanel.Dock="Top"><Button DockPanel.Dock="Right" Content="Copy" Command="{Binding CopyOutputCommand}" /><TextBlock Classes="heading" Text="{Binding SelectedTemplate.Name}" /></DockPanel><TextBlock DockPanel.Dock="Top" Text="{Binding SelectedTemplate.Status}" Classes="caption" AutomationProperties.LiveSetting="Polite" /><TextBox Text="{Binding SelectedTemplate.Output}" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" AutomationProperties.Name="Template output" /></DockPanel></Border>
+            </Grid>
+          </TabItem>
+
+          <TabItem Header="Jobs">
+            <Grid Margin="16,14" RowDefinitions="Auto,*">
+              <Border Classes="card"><StackPanel><TextBlock Classes="heading" Text="Transcription queue" /><TextBlock Text="{Binding QueueSummary}" FontWeight="SemiBold" Foreground="{StaticResource Accent}" TextWrapping="Wrap" /><WrapPanel><Button Content="Pause transcription" Command="{Binding PauseCommand}" /><Button Content="Resume transcription" Command="{Binding ResumeCommand}" /><Button Content="Cancel transcription jobs" Command="{Binding CancelJobsCommand}" /></WrapPanel><TextBlock Classes="caption" Text="These controls affect transcription for the selected session, not audio capture." /></StackPanel></Border>
+              <DataGrid Grid.Row="1" ItemsSource="{Binding Jobs}" AutomationProperties.Name="Selected session latest transcription jobs"><DataGrid.Columns><DataGridTextColumn Header="State" Binding="{Binding State}" Width="110" /><DataGridTextColumn Header="Provider" Binding="{Binding ProviderId}" Width="160" /><DataGridTextColumn Header="Attempts" Binding="{Binding Attempts}" Width="90" /><DataGridTextColumn Header="Error / diagnostic" Binding="{Binding Error}" Width="*" /></DataGrid.Columns></DataGrid>
+            </Grid>
+          </TabItem>
+
+          <TabItem Header="Privacy / models">
+            <ScrollViewer><Grid Margin="16,14,16,6" ColumnDefinitions="*,16,*" RowDefinitions="Auto,Auto">
+              <StackPanel>
+                <Border Classes="card"><StackPanel><TextBlock Classes="heading" Text="Prerequisites" /><TextBlock Text="{Binding PrerequisiteStatus}" TextWrapping="Wrap" FontWeight="SemiBold" Foreground="{StaticResource Accent}" /><WrapPanel><Button Content="Install Visual C++ runtime…" Command="{Binding InstallVcRuntimeCommand}" IsVisible="{Binding VcRuntimeMissing}" /><Button Content="Re-check prerequisites" Command="{Binding RecheckPrerequisitesCommand}" /></WrapPanel></StackPanel></Border>
+                <Border Classes="card"><StackPanel><TextBlock Classes="heading" Text="Updates" /><TextBlock Text="{Binding CurrentVersionText}" Classes="help" /><TextBlock Text="{Binding UpdateStatus}" TextWrapping="Wrap" FontWeight="SemiBold" AutomationProperties.LiveSetting="Polite" /><CheckBox IsChecked="{Binding AutoUpdate}" Content="Automatically download new releases and install them when the app closes" /><WrapPanel><Button Content="Check for updates now" Command="{Binding CheckForUpdatesCommand}" /><Button Content="{Binding RestartToUpdateLabel}" Command="{Binding RestartToUpdateCommand}" IsVisible="{Binding UpdateReady}" /></WrapPanel></StackPanel></Border>
+                <Border Classes="card"><StackPanel><TextBlock Classes="heading" Text="Diagnostics and bug reports" /><TextBlock Classes="help" Text="Save diagnostics as a ZIP for bug reports. The ZIP includes logs, update log, Activity panel and system summary, not audio, transcripts, keys or settings." /><TextBlock Text="{Binding LogFolderText}" Classes="caption" TextWrapping="Wrap" /><WrapPanel><Button Content="Save diagnostics ZIP…" Command="{Binding SaveDiagnosticsCommand}" AutomationProperties.Name="Save diagnostics ZIP" /><Button Content="Open log folder" Command="{Binding OpenLogsFolderCommand}" /></WrapPanel></StackPanel></Border>
+                <Border Classes="card"><StackPanel><TextBlock Classes="heading" Text="Local Parakeet" /><TextBlock Classes="help" Text="Default local transcription model; downloaded automatically on first start." /><TextBlock Text="{Binding ParakeetStatus}" TextWrapping="Wrap" FontWeight="SemiBold" /><TextBlock Text="{Binding SetupStatus}" IsVisible="{Binding HasSetupStatus}" Foreground="{StaticResource Accent}" FontWeight="SemiBold" TextWrapping="Wrap" /><Button Content="Install / repair Parakeet model…" Command="{Binding InstallParakeetModelCommand}" HorizontalAlignment="Left" /></StackPanel></Border>
+                <Border Classes="card"><StackPanel><TextBlock Classes="heading" Text="Local Whisper" /><TextBlock Classes="help" Text="Optional local Whisper model using Vulkan when available." /><WrapPanel><Button Content="Install recommended model…" Command="{Binding InstallWhisperModelCommand}" /><Button Content="Choose existing Whisper model…" Command="{Binding ChooseWhisperModelCommand}" /></WrapPanel><TextBlock Text="{Binding LocalModel}" TextWrapping="Wrap" Foreground="{StaticResource Muted}" /></StackPanel></Border>
+              </StackPanel>
+              <StackPanel Grid.Column="2">
+                <Border Classes="card"><StackPanel><TextBlock Classes="heading" Text="Your data, your decision" /><TextBlock Text="{Binding ConsentSummary}" FontWeight="SemiBold" Foreground="{StaticResource Accent}" TextWrapping="Wrap" /><CheckBox IsChecked="{Binding SelectedCloudConsent}" IsEnabled="{Binding HasSession}" Content="I explicitly permit NVIDIA uploads for the selected session." /><WrapPanel><Button Content="Grant selected-session consent" Command="{Binding GrantConsentCommand}" /><Button Content="Revoke cloud consent" Command="{Binding RevokeConsentCommand}" /></WrapPanel></StackPanel></Border>
+                <Border Classes="card"><StackPanel><TextBlock Classes="heading" Text="NVIDIA key" /><TextBlock Text="{Binding KeyStatus}" Classes="help" /><WrapPanel><TextBox x:Name="NvidiaKeyInput" Width="330" PasswordChar="●" AutomationProperties.Name="NVIDIA key, password input, never logged" /><Button Content="Use entered key" Click="SaveKeyClick" /><Button Content="Clear key" Click="ClearKeyClick" /></WrapPanel><CheckBox Content="Remember key (encrypted for your user account)" IsChecked="{Binding RememberKey}" /></StackPanel></Border>
+                <Border Classes="card"><StackPanel><TextBlock Classes="heading" Text="Automatic local speaker analysis" /><TextBlock Text="{Binding ModelStatus}" TextWrapping="Wrap" FontWeight="SemiBold" /><WrapPanel><Button Content="Install small diarization models…" Command="{Binding InstallModelsCommand}" /><Button Content="Analyze selected session speakers" Command="{Binding DiarizeCommand}" /></WrapPanel></StackPanel></Border>
+                <Border Classes="card"><StackPanel><TextBlock Classes="heading" Text="Voice library" /><CheckBox IsChecked="{Binding RememberVoices}" Content="Remember speakers I name and recognize them in future recordings" /><TextBlock Text="{Binding VoiceLibrarySummary}" TextWrapping="Wrap" FontWeight="SemiBold" /><ListBox ItemsSource="{Binding Voices}" SelectedItem="{Binding SelectedVoice}" DisplayMemberBinding="{Binding Summary}" MinHeight="60" MaxHeight="180" AutomationProperties.Name="Remembered voices" /><WrapPanel><Button Content="Learn from past sessions" Command="{Binding RememberAllVoicesCommand}" /><Button Content="Rename…" Command="{Binding RenameVoiceCommand}" /><Button Content="Forget selected voice" Command="{Binding ForgetVoiceCommand}" /><Button Content="Forget all voices…" Command="{Binding ForgetAllVoicesCommand}" /></WrapPanel></StackPanel></Border>
+                <Border Classes="card"><StackPanel><TextBlock Classes="heading" Text="Parakeet on the NVIDIA GPU" /><TextBlock Text="{Binding LocalGpuStatus}" TextWrapping="Wrap" FontWeight="SemiBold" /><WrapPanel><Button Content="Use the GPU for Parakeet…" Command="{Binding UseGpuCommand}" /><Button Content="Use the CPU only" Command="{Binding UseCpuCommand}" /></WrapPanel></StackPanel></Border>
+              </StackPanel>
+              <TextBlock Grid.Row="1" Grid.ColumnSpan="3" Text="{Binding DataRoot, StringFormat='Local library: {0}'}" Classes="caption" Margin="2,0,0,8" />
+            </Grid></ScrollViewer>
+          </TabItem>
+
+          <TabItem Header="Discord">
+            <ScrollViewer DataContext="{Binding Discord}" VerticalScrollBarVisibility="Auto">
+              <Grid Margin="16,14,16,6" ColumnDefinitions="*,16,*">
+                <StackPanel>
+                  <Border Classes="card hero"><StackPanel><TextBlock Classes="heading" Text="Record a Discord server voice channel" /><TextBlock Classes="help" Text="Your own Discord bot joins a server voice channel and records everyone separately, so transcript lines are named after the Discord user speaking." /><TextBlock Classes="heading" Text="1 · Create your Discord app" /><TextBlock Classes="help" Text="{Binding Steps}" /><WrapPanel><Button Content="Open the Discord Developer Portal" Command="{Binding OpenPortalCommand}" /><Button Content="Open my bot's page" Command="{Binding OpenBotPageCommand}" /></WrapPanel><TextBlock Classes="heading" Text="2 · Connect the bot" /><WrapPanel><TextBox Width="330" PasswordChar="●" Text="{Binding TokenInput, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Discord bot token, password input, never logged" /><Button Content="Save and connect" Classes="primary" Command="{Binding ConnectCommand}" /><Button Content="Disconnect" Command="{Binding DisconnectCommand}" /><Button Content="Forget the bot" Command="{Binding ForgetCommand}" /></WrapPanel><TextBlock Text="{Binding BotStatus}" TextWrapping="Wrap" FontWeight="SemiBold" AutomationProperties.LiveSetting="Polite" /><TextBlock Classes="heading" Text="3 · Add the bot to your server" /><TextBlock Classes="help" Text="Opens Discord's invite page for your bot with only View Channels and Connect." /><WrapPanel><Button Content="Add the bot to a server" Command="{Binding InviteCommand}" /><Button Content="Copy invite link" Command="{Binding CopyInviteCommand}" /></WrapPanel><TextBlock Text="{Binding InviteUrl}" Classes="caption" TextWrapping="Wrap" /></StackPanel></Border>
+                  <Border Classes="card"><StackPanel><TextBlock Classes="heading" Text="Voice channel" /><DockPanel><Button DockPanel.Dock="Right" Content="Refresh" Command="{Binding RefreshChannelsCommand}" /><ComboBox ItemsSource="{Binding Channels}" SelectedItem="{Binding SelectedChannel}" DisplayMemberBinding="{Binding Display}" AutomationProperties.Name="Discord server voice channel" /></DockPanel><WrapPanel><Button Content="●  Join and record" Classes="primary" Command="{Binding JoinAndRecordCommand}" /><Button Content="Join only" Command="{Binding JoinCommand}" /><Button Content="Leave" Command="{Binding LeaveCommand}" /></WrapPanel><TextBlock Text="{Binding VoiceStatus}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" /><TextBlock Classes="caption" Text="Stop the recording on Record / import. Everyone in the channel sees the bot join; tell people they are recorded and get consent." /></StackPanel></Border>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                  <Border Classes="card"><StackPanel><TextBlock Classes="heading" Text="Network: firewall, UPnP and port forwarding" /><TextBlock Classes="help" Text="Voice audio arrives over UDP on one fixed port of this PC. It usually works with no setup; if audio does not arrive, work down this list." /><DockPanel><TextBlock Text="Voice UDP port" Classes="caption" VerticalAlignment="Center" /><TextBox Width="90" Text="{Binding VoicePort, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Discord voice UDP port" /></DockPanel><StackPanel IsVisible="{Binding IsWindows}"><TextBlock Classes="heading" Text="Firewall" /><Button Content="Allow in Windows Firewall" Command="{Binding FirewallCommand}" HorizontalAlignment="Left" /><TextBlock Text="{Binding FirewallStatus}" Classes="caption" TextWrapping="Wrap" /><TextBlock Classes="heading" Text="UPnP" /><CheckBox Content="Ask the router to forward the voice port (UPnP) each time the bot joins" IsChecked="{Binding UseUpnp}" /><Button Content="Try UPnP now" Command="{Binding UpnpCommand}" HorizontalAlignment="Left" /></StackPanel><TextBlock IsVisible="{Binding !IsWindows}" Classes="help" TextWrapping="Wrap" Text="On Linux, open the voice UDP port above in your firewall if one is active (for example sudo ufw allow PORT/udp, or sudo firewall-cmd --add-port=PORT/udp), and use manual port forwarding below if audio does not arrive." /><TextBlock Text="{Binding NetworkStatus}" Classes="caption" TextWrapping="Wrap" /></StackPanel></Border>
+                  <Border Classes="card"><StackPanel><TextBlock Classes="heading" Text="Manual port forwarding" /><TextBlock Text="{Binding PortForwardSteps}" TextWrapping="Wrap" /><Button Content="Copy port-forwarding steps" Command="{Binding CopyPortForwardCommand}" HorizontalAlignment="Left" /></StackPanel></Border>
+                </StackPanel>
+              </Grid>
+            </ScrollViewer>
+          </TabItem>
+          <TabItem Header="VTT / Teams">
+            <ScrollViewer><Grid Margin="16,14,16,6" ColumnDefinitions="*,16,*">
+              <StackPanel><Border Classes="card"><StackPanel><TextBlock Classes="heading" Text="Transcript sources with provenance" /><TextBlock Classes="help" Text="Import a local WebVTT file to add timed cues and source speaker labels to the selected session." /><Button Content="Import local .vtt into selected session…" Command="{Binding ImportVttCommand}" HorizontalAlignment="Left" /></StackPanel></Border><Border Classes="card"><StackPanel><TextBlock Classes="heading" Text="Not included: live Teams or Discord audio" /><TextBlock Classes="help" Text="Live Teams and Discord capture require separate bots; selected-output capture is a local action." /></StackPanel></Border></StackPanel>
+              <Border Grid.Column="2" Classes="card" VerticalAlignment="Top"><StackPanel><TextBlock Classes="heading" Text="Microsoft Teams · configuration required" /><TextBlock Classes="help" Text="Fetch an existing meeting transcript using delegated Microsoft Graph with explicit tenant/app/resource IDs." /><Button Content="Fetch configured Teams transcript…" Command="{Binding FetchTeamsCommand}" HorizontalAlignment="Left" /></StackPanel></Border>
+            </Grid></ScrollViewer>
+          </TabItem>
+        </TabControl>
+      </Grid>
+    </Grid>
+
+    <Border Grid.Row="2" Background="#110D0B" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="12,6">
+      <Grid ColumnDefinitions="*,220,Auto">
+        <TextBlock Text="{Binding Status}" TextWrapping="Wrap" FontSize="12.5" AutomationProperties.LiveSetting="Polite" />
+        <ProgressBar Grid.Column="1" IsIndeterminate="{Binding Busy}" IsVisible="{Binding Busy}" Height="8" Margin="15,0" AutomationProperties.Name="Current operation progress" />
+        <Button Grid.Column="2" Content="Cancel operation" Command="{Binding CancelOperationCommand}" IsVisible="{Binding Busy}" MinHeight="26" Padding="10,2" Margin="0,2" />
+      </Grid>
+    </Border>
+  </Grid>
+</Window>
+
+
+
+

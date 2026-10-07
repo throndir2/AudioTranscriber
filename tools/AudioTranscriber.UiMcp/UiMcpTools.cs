@@ -124,14 +124,13 @@ public sealed class UiMcpTools(string defaultDataRoot, bool dataRootSpecified)
             if (!File.Exists(model)) throw new FileNotFoundException("Whisper model not found: " + model);
             File.WriteAllText(preferences, System.Text.Json.JsonSerializer.Serialize(new { WhisperModelPath = model }));
         }
-        var host = Environment.ProcessPath ?? throw new InvalidOperationException("Unknown host path.");
-        var start = new ProcessStartInfo(host)
+        var appPath = ResolveAppPath();
+        var start = new ProcessStartInfo(appPath.Host)
         {
             UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
-            WorkingDirectory = AppContext.BaseDirectory
+            WorkingDirectory = Path.GetDirectoryName(appPath.AssemblyOrExe) ?? AppContext.BaseDirectory
         };
-        if (Path.GetFileNameWithoutExtension(host).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
-            start.ArgumentList.Add(typeof(UiMcpTools).Assembly.Location);
+        if (appPath.Argument is not null) start.ArgumentList.Add(appPath.Argument);
         start.ArgumentList.Add("--data-root");
         start.ArgumentList.Add(root);
         var process = Process.Start(start) ?? throw new InvalidOperationException("The app did not start.");
@@ -143,6 +142,28 @@ public sealed class UiMcpTools(string defaultDataRoot, bool dataRootSpecified)
         appDataRoot = root;
         var window = await WaitForMainWindowAsync(timeoutSeconds, token);
         return new { pid = process.Id, dataRoot = root, window = window.Current.Name, windows = Windows().Select(item => item.Current.Name) };
+    }
+
+    private static (string Host, string? Argument, string AssemblyOrExe) ResolveAppPath()
+    {
+        var configured = Environment.GetEnvironmentVariable("AUDIOTRANSCRIBER_APP");
+        var candidates = new[]
+        {
+            configured,
+            Path.Combine(AppContext.BaseDirectory, "AudioTranscriber.App.exe"),
+            Path.Combine(AppContext.BaseDirectory, "AudioTranscriber.App.dll"),
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "src", "AudioTranscriber.App", "bin", "Release", "net10.0", "AudioTranscriber.App.dll")),
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "src", "AudioTranscriber.App", "bin", "Debug", "net10.0", "AudioTranscriber.App.dll"))
+        }.Where(path => !string.IsNullOrWhiteSpace(path)).Select(Path.GetFullPath);
+        var app = candidates.FirstOrDefault(File.Exists) ?? throw new FileNotFoundException("AudioTranscriber.App build output was not found. Set AUDIOTRANSCRIBER_APP to AudioTranscriber.App.exe or .dll.");
+        if (Path.GetExtension(app).Equals(".dll", StringComparison.OrdinalIgnoreCase))
+        {
+            var dotnet = Environment.GetEnvironmentVariable("DOTNET_ROOT") is { Length: > 0 } root
+                ? Path.Combine(root, OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet")
+                : "dotnet";
+            return (dotnet, app, app);
+        }
+        return (app, null, app);
     }
 
     private object Attach(int pid)

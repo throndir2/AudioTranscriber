@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=AudioTranscriber
+GenericName=Audio Transcriber
+Comment=Record and transcribe audio locally
+Exec=audiotranscriber %U
+Icon=audiotranscriber
+Terminal=false
+Categories=AudioVideo;Audio;Recorder;
+Keywords=transcription;speech;recording;
+StartupWMClass=audiotranscriber

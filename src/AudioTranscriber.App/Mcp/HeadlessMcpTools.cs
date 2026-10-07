@@ -37,7 +37,7 @@ public sealed class HeadlessMcpTools
     [
         McpTool.Create("status", "Engine status: data root, recording state, installed models, prerequisites, worker presence and recent errors.",
             _ => McpToolResult.Json(Status())),
-        McpTool.Create("list_devices", "List available Windows output (loopback) and microphone endpoints. The first entry is the Windows default.",
+        McpTool.Create("list_devices", "List available output (loopback) and microphone endpoints (WASAPI on Windows, PulseAudio/PipeWire on Linux). The first entry is the system default.",
             _ => McpToolResult.Json(new { outputs = controller.GetOutputDevices(), microphones = controller.GetMicrophoneDevices() })),
         McpTool.Create("list_providers", "List transcription providers. Names start with where they run: 'Local · CPU/GPU' runs on this PC (local-parakeet, local-whisper); 'Internet · NVIDIA cloud' uploads audio to NVIDIA (isCloud=true).",
             _ => McpToolResult.Json(controller.Providers)),
@@ -75,7 +75,7 @@ public sealed class HeadlessMcpTools
                 await controller.InstallDiarizationModelsAsync(progress, token);
                 return McpToolResult.Json(new { ready = controller.DiarizationModelsReady, last = progress.Value });
             }),
-        McpTool.Create("start_recording", "Start recording the selected Windows output (loopback) and optionally a microphone.",
+        McpTool.Create("start_recording", "Start recording the selected output (loopback) and optionally a microphone.",
             async (args, token) =>
             {
                 var output = args.String("output_device_id") ?? controller.GetOutputDevices().FirstOrDefault()?.Id
@@ -94,7 +94,7 @@ public sealed class HeadlessMcpTools
             },
             ("session_id", "string", "Continue this existing session (new audio follows its current end; name/provider/language/consent are the session's own). Omit to start a new session.", false),
             ("name", "string", "Session name", false),
-            ("output_device_id", "string", "Output endpoint id from list_devices (default: Windows default output)", false),
+            ("output_device_id", "string", "Output endpoint id from list_devices (default: system default output)", false),
             ("microphone_device_id", "string", "Microphone id, or 'default'; omit to skip the microphone track", false),
             ("provider_id", "string", "Provider id (default local-parakeet; local-whisper for other languages)", false),
             ("language", "string", "Source language (default en)", false),
@@ -113,11 +113,11 @@ public sealed class HeadlessMcpTools
             }),
         McpTool.Create("levels", "Current recording state and peak capture levels seen since recording started (non-zero output means audio was captured).",
             _ => McpToolResult.Json(new { controller.IsRecording, controller.RecordingSessionId, peakOutput, peakMicrophone })),
-        McpTool.Create("play_audio", "Play a local audio file to a Windows output endpoint (so loopback recording captures it). Waits until playback ends.",
+        McpTool.Create("play_audio", "Play a local audio file to an output endpoint (so loopback recording captures it). Waits until playback ends.",
             async (args, token) => McpToolResult.Json(await AudioFilePlayer.PlayAsync(args.RequireString("path"),
                 args.String("output_device_id"), args.Int("volume_percent", 100) / 100d, token)),
             ("path", "string", "Audio file (wav/mp3)", true),
-            ("output_device_id", "string", "Output endpoint id (default: Windows default output)", false),
+            ("output_device_id", "string", "Output endpoint id (default: system default output)", false),
             ("volume_percent", "integer", "Playback volume 0-100 (default 100)", false)),
         McpTool.Create("import_audio", "Import a local audio/video file as a new session; returns after the original is retained and normalized.",
             async (args, token) =>
@@ -301,11 +301,12 @@ public sealed class HeadlessMcpTools
             dataRoot = controller.Store.RootDirectory,
             appDirectory = AppContext.BaseDirectory,
             workerExecutable = File.Exists(Path.Combine(AppContext.BaseDirectory, "AudioTranscriber.Worker.dll"))
-                ? Path.Combine(AppContext.BaseDirectory, "AudioTranscriber.Worker.exe") : "development worker (dotnet host)",
+                ? Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "AudioTranscriber.Worker.exe" : "AudioTranscriber.Worker")
+                : "development worker (dotnet host)",
             controller.IsRecording, controller.RecordingSessionId,
             controller.DiarizationModelsReady, controller.ParakeetModelReady, controller.WhisperModelPath, controller.HasNvidiaKey, localGpu = controller.LocalGpuStatus, gpuOffer = controller.GpuOffer,
             hardware = controller.HardwarePlan?.Hardware.Describe(), recommendedSetup = controller.HardwarePlan?.Summary, whisperOnGpu = controller.WhisperOnGpu,
-            prerequisites.FFmpeg, prerequisites.FFprobe, prerequisites.VcRuntimeReady,
+            prerequisites.FFmpeg, prerequisites.FFprobe, prerequisites.VcRuntimeReady, linuxAudioReady = Prerequisites.LinuxAudioReady,
             recentErrors = notifications.Where(item => item.IsError).TakeLast(5)
         };
     }

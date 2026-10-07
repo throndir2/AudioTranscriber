@@ -59,6 +59,8 @@ public static class DiscordNetwork
     /// <summary>Whether Windows Firewall already has this app's inbound UDP rule for <paramref name="port"/> (null: unknown).</summary>
     public static async Task<bool?> FirewallRuleExistsAsync(int port, CancellationToken token = default)
     {
+        // Linux desktops rarely filter inbound UDP by default (ufw/firewalld rules are left to the user).
+        if (!OperatingSystem.IsWindows()) return null;
         try
         {
             var start = new ProcessStartInfo("netsh", $"advfirewall firewall show rule name=\"{RuleName}\" verbose")
@@ -80,6 +82,7 @@ public static class DiscordNetwork
     /// Windows asks for administrator approval once (UAC). Returns false when the user declined.</summary>
     public static async Task<bool> AddFirewallRuleAsync(int port, CancellationToken token = default)
     {
+        if (!OperatingSystem.IsWindows()) return false;
         var program = Environment.ProcessPath ?? throw new InvalidOperationException("The app's path is unknown.");
         var arguments = $"/c netsh advfirewall firewall delete rule name=\"{RuleName}\" >nul 2>&1 & " +
             $"netsh advfirewall firewall add rule name=\"{RuleName}\" dir=in action=allow protocol=UDP localport={port} " +
@@ -132,6 +135,8 @@ public static class DiscordNetwork
     // NATUPnP is a COM object that discovers the router synchronously (it can take several seconds), so it runs off the UI.
     private static Task<UpnpResult> RunCom(Func<UpnpResult> work, CancellationToken token)
     {
+        if (!OperatingSystem.IsWindows())
+            return Task.FromResult(new UpnpResult(false, "Automatic router forwarding (UPnP) is only available on Windows; forward the port by hand if audio doesn't arrive."));
         var result = new TaskCompletionSource<UpnpResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
         {

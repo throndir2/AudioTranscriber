@@ -45,7 +45,7 @@ public static class DiscordSetup
     public const string Steps =
         "1. Open the Discord Developer Portal and choose New Application. Name it, for example \"Transcriber\", and accept the terms.\n" +
         "2. Open Bot. Choose Reset Token, copy the token and paste it below, then choose Save and connect. The token is encrypted for " +
-        "your Windows account and never leaves this PC except to sign in to Discord.\n" +
+        "your user account and never leaves this PC except to sign in to Discord.\n" +
         "3. Still on Bot, you may turn off Public Bot so only you can add it to servers. No privileged intents are needed.\n" +
         "4. Choose Add the bot to a server: Discord opens the invite page with the right permissions (View Channels and Connect). " +
         "Pick a server you manage and authorize it.\n" +

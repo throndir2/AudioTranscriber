@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.throndir2.AudioTranscriber</id>
+  <name>AudioTranscriber</name>
+  <summary>Record and transcribe audio locally</summary>
+  <description>
+    <p>AudioTranscriber records local audio, imports long audio or video recordings, and produces searchable transcripts with local speech models.</p>
+    <p>It keeps recordings and transcripts on the local computer unless an external provider is explicitly configured and approved.</p>
+  </description>
+  <launchable type="desktop-id">audiotranscriber.desktop</launchable>
+  <url type="homepage">https://github.com/throndir2/AudioTranscriber</url>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-Proprietary</project_license>
+  <developer id="io.github.throndir2">
+    <name>throndir2</name>
+  </developer>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+    <category>Recorder</category>
+  </categories>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="@VERSION@" date="@DATE@" />
+  </releases>
+</component>
+

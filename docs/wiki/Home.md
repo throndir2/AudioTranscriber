@@ -2,9 +2,9 @@
 
 <img src="https://raw.githubusercontent.com/throndir2/AudioTranscriber/main/src/AudioTranscriber.App/Assets/AppIcon.png" alt="AudioTranscriber icon" width="96">
 
-AudioTranscriber is a native Windows x64 desktop app for recording, importing,
+AudioTranscriber is a native Windows and Linux x64 desktop app for recording, importing,
 transcribing, searching, and exporting durable transcripts. It records the selected
-Windows output device, can keep a separately timestamped microphone track, and keeps
+output device (WASAPI on Windows, PulseAudio/PipeWire on Linux), can keep a separately timestamped microphone track, and keeps
 original audio on disk so slow inference or a network problem does not erase the
 recording.
 

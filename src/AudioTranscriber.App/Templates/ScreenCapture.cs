@@ -1,39 +1,47 @@
 using System.Diagnostics;
-using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
+using Avalonia;
+using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 
 namespace AudioTranscriber.App.Templates;
 
-public sealed record CaptureResult(byte[] Jpeg, BitmapSource Preview, string Fingerprint, string Source, DateTime Time)
+public sealed record CaptureResult(byte[] Jpeg, Bitmap Preview, string Fingerprint, string Source, DateTime Time)
 {
-    public string Caption => $"{Source} · {Preview.PixelWidth}×{Preview.PixelHeight} · {Jpeg.Length / 1024.0:N0} KB · {Time:HH:mm:ss}";
+    public string Caption => $"{Source} · {Preview.PixelSize.Width}×{Preview.PixelSize.Height} · {Jpeg.Length / 1024.0:N0} KB · {Time:HH:mm:ss}";
 }
 
 public sealed class CaptureException(string message) : Exception(message);
 
-/// <summary>Screenshots of a monitor or a top-level window (for example the browser running Roll20) as downscaled JPEG.</summary>
+/// <summary>Screenshots of a monitor or top-level window as PNG bytes for multimodal template inputs.</summary>
 public static partial class ScreenCapture
 {
     public const int DefaultMaxWidth = 1280;
 
-    /// <summary>"Screen N (W×H)" for each monitor, then the titles of visible top-level windows.</summary>
-    public static IReadOnlyList<string> ListSources() => WithPhysicalPixels(() =>
+    public static IReadOnlyList<string> ListSources()
     {
-        var sources = Monitors().Select((m, i) => $"Screen {i + 1} ({m.Width}×{m.Height})").ToList();
-        sources.AddRange(Windows().Select(w => w.Title).Distinct().OrderBy(t => t, StringComparer.CurrentCultureIgnoreCase));
-        return (IReadOnlyList<string>)sources;
-    });
+        if (!OperatingSystem.IsWindows()) return LinuxSources();
+        return WithPhysicalPixels(() =>
+        {
+            var sources = Monitors().Select((m, i) => $"Screen {i + 1} ({m.Width}×{m.Height})").ToList();
+            sources.AddRange(Windows().Select(w => w.Title).Distinct().OrderBy(t => t, StringComparer.CurrentCultureIgnoreCase));
+            return (IReadOnlyList<string>)sources;
+        });
+    }
 
-    public static CaptureResult Capture(string target, int maxWidth) => WithPhysicalPixels(() =>
+    public static CaptureResult Capture(string target, int maxWidth)
     {
         target = (target ?? "").Trim();
         if (target.Length == 0) throw new CaptureException("Choose a screen or window to capture in the Table screenshot card first.");
-        BitmapSource full;
+        return OperatingSystem.IsWindows() ? CaptureWindows(target, maxWidth) : CaptureLinux(target, maxWidth);
+    }
+
+    private static CaptureResult CaptureWindows(string target, int maxWidth) => WithPhysicalPixels(() =>
+    {
+        Bitmap full;
         string source;
         if (ScreenTarget().Match(target) is { Success: true } screen)
         {
@@ -52,58 +60,135 @@ public static partial class ScreenCapture
         else
         {
             var window = FindWindow(target) ?? throw new CaptureException($"No open window matches \"{target}\". Open it, or choose Refresh and pick it again.");
-            if (IsIconic(window.Handle)) throw new CaptureException($"The window \"{window.Title}\" is minimized. Restore it (other windows may cover it) and try again.");
+            if (IsIconic(window.Handle)) throw new CaptureException($"The window \"{window.Title}\" is minimized. Restore it and try again.");
             if (!GetWindowRect(window.Handle, out var rect) || rect.Width <= 0 || rect.Height <= 0)
                 throw new CaptureException($"Could not read the size of \"{window.Title}\".");
             full = Grab(rect.Width, rect.Height, dc => PrintWindow(window.Handle, dc, PW_RENDERFULLCONTENT),
                 $"Windows could not capture \"{window.Title}\". If it runs as administrator, capture its screen instead.");
             source = window.Title;
         }
-        var scaled = Downscale(full, Math.Max(160, maxWidth));
-        var encoder = new JpegBitmapEncoder { QualityLevel = 85 };
-        encoder.Frames.Add(BitmapFrame.Create(scaled));
-        using var stream = new MemoryStream();
-        encoder.Save(stream);
-        return new CaptureResult(stream.ToArray(), scaled, Fingerprint(full), source, DateTime.Now);
+        return ResultFromBitmap(full, source, maxWidth);
     });
 
-    /// <summary>Exact title first, then a title containing the text, then one sharing the part before " - " (browser titles change per tab).</summary>
+    private static CaptureResult CaptureLinux(string target, int maxWidth)
+    {
+        var temp = Path.Combine(Path.GetTempPath(), "audiotranscriber-capture-" + Guid.NewGuid().ToString("N") + ".png");
+        try
+        {
+            if (target.StartsWith("Window:", StringComparison.OrdinalIgnoreCase))
+            {
+                var id = target.Split(' ', 3).Skip(1).FirstOrDefault()?.Trim();
+                if (string.IsNullOrWhiteSpace(id) || !TryRun("import", ["-window", id, temp], out _))
+                    throw new CaptureException("Window capture on Linux needs X11 with ImageMagick 'import' and wmctrl. Capture the entire screen instead, or install imagemagick wmctrl.");
+            }
+            else if (!TryCaptureLinuxScreen(temp, out var message)) throw new CaptureException(message);
+            awaitFile(temp);
+            var png = File.ReadAllBytes(temp);
+            return ResultFromEncoded(png, target.StartsWith("Window:", StringComparison.OrdinalIgnoreCase) ? target : "Entire screen", maxWidth);
+        }
+        finally { try { File.Delete(temp); } catch { } }
+
+        static void awaitFile(string path)
+        {
+            if (!File.Exists(path) || new FileInfo(path).Length == 0) throw new CaptureException("The screenshot tool did not create an image file.");
+        }
+    }
+
+    private static IReadOnlyList<string> LinuxSources()
+    {
+        var sources = new List<string> { "Entire screen" };
+        if (TryRun("wmctrl", ["-l"], out var output))
+        {
+            foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var parts = line.Split(' ', 4, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 4) sources.Add($"Window: {parts[0]} {parts[3].Trim()}");
+            }
+        }
+        return sources;
+    }
+
+    private static bool TryCaptureLinuxScreen(string output, out string message)
+    {
+        var attempts = new (string Command, string[] Args, string Package)[]
+        {
+            ("grim", [output], "grim"),
+            ("gnome-screenshot", ["-f", output], "gnome-screenshot"),
+            ("spectacle", ["-b", "-n", "-o", output], "spectacle"),
+            ("scrot", [output], "scrot"),
+            ("import", ["-window", "root", output], "imagemagick"),
+        };
+        foreach (var (command, args, _) in attempts)
+            if (TryRun(command, args, out _) && File.Exists(output) && new FileInfo(output).Length > 0)
+            { message = ""; return true; }
+        if (TryRunPipeline("xwd -root -silent", "convert xwd:- " + Quote(output)) && File.Exists(output) && new FileInfo(output).Length > 0)
+        { message = ""; return true; }
+        message = "No Linux screenshot tool was available. Install one of: grim (Wayland), gnome-screenshot, spectacle, scrot, or ImageMagick (import/convert with xwd).";
+        return false;
+    }
+
+    private static CaptureResult ResultFromBitmap(Bitmap image, string source, int maxWidth)
+    {
+        using var stream = new MemoryStream();
+        image.Save(stream);
+        return ResultFromEncoded(stream.ToArray(), source, maxWidth);
+    }
+
+    private static CaptureResult ResultFromEncoded(byte[] imageBytes, string source, int maxWidth)
+    {
+        Bitmap preview;
+        using (var input = new MemoryStream(imageBytes))
+        {
+            var original = new Bitmap(input);
+            preview = original.PixelSize.Width > Math.Max(160, maxWidth)
+                ? Bitmap.DecodeToWidth(new MemoryStream(imageBytes), Math.Max(160, maxWidth))
+                : original;
+        }
+        using var output = new MemoryStream();
+        preview.Save(output);
+        var bytes = output.ToArray();
+        return new CaptureResult(bytes, preview, Convert.ToHexString(SHA256.HashData(bytes))[..16], source, DateTime.Now);
+    }
+
+    private static bool TryRun(string command, IReadOnlyList<string> args, out string output)
+    {
+        output = "";
+        try
+        {
+            var start = new ProcessStartInfo(command) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+            foreach (var arg in args) start.ArgumentList.Add(arg);
+            using var process = Process.Start(start);
+            if (process is null) return false;
+            output = process.StandardOutput.ReadToEnd();
+            process.WaitForExit(7000);
+            return process.HasExited && process.ExitCode == 0;
+        }
+        catch (Exception error) when (error is IOException or System.ComponentModel.Win32Exception or InvalidOperationException) { return false; }
+    }
+
+    private static bool TryRunPipeline(string first, string second)
+    {
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo("sh", "-c " + Quote(first + " | " + second)) { UseShellExecute = false });
+            process?.WaitForExit(7000);
+            return process is { HasExited: true, ExitCode: 0 };
+        }
+        catch { return false; }
+    }
+
+    private static string Quote(string value) => "'" + value.Replace("'", "'\\''") + "'";
+
     private static (IntPtr Handle, string Title)? FindWindow(string target)
     {
         var windows = Windows();
         var head = target.Split(" - ")[0].Trim();
-        foreach (var match in new Func<string, bool>[]
-                 {
-                     t => t == target,
-                     t => t.Contains(target, StringComparison.OrdinalIgnoreCase),
-                     t => head.Length >= 3 && t.Contains(head, StringComparison.OrdinalIgnoreCase)
-                 })
+        foreach (var match in new Func<string, bool>[] { t => t == target, t => t.Contains(target, StringComparison.OrdinalIgnoreCase), t => head.Length >= 3 && t.Contains(head, StringComparison.OrdinalIgnoreCase) })
             if (windows.FirstOrDefault(w => match(w.Title)) is { Handle: not 0 } found) return found;
         return null;
     }
 
-    private static BitmapSource Downscale(BitmapSource image, int maxWidth)
-    {
-        if (image.PixelWidth <= maxWidth) return image;
-        var scale = (double)maxWidth / image.PixelWidth;
-        var result = new TransformedBitmap(image, new ScaleTransform(scale, scale));
-        result.Freeze();
-        return result;
-    }
-
-    /// <summary>A 64×36 grayscale thumbnail quantized to 8 levels, hashed: unchanged screens give the same value.</summary>
-    private static string Fingerprint(BitmapSource image)
-    {
-        var thumb = new FormatConvertedBitmap(new TransformedBitmap(image, new ScaleTransform(64.0 / image.PixelWidth, 36.0 / image.PixelHeight)),
-            PixelFormats.Gray8, null, 0);
-        var stride = (thumb.PixelWidth + 3) & ~3;
-        var pixels = new byte[stride * thumb.PixelHeight];
-        thumb.CopyPixels(pixels, stride, 0);
-        for (var i = 0; i < pixels.Length; i++) pixels[i] >>= 5;
-        return Convert.ToHexString(SHA256.HashData(pixels))[..16];
-    }
-
-    private static BitmapSource Grab(int width, int height, Func<IntPtr, bool> draw, string failure = "Windows could not capture the screen.")
+    private static Bitmap Grab(int width, int height, Func<IntPtr, bool> draw, string failure = "Windows could not capture the screen.")
     {
         var screenDc = GetDC(IntPtr.Zero);
         var memoryDc = CreateCompatibleDC(screenDc);
@@ -120,9 +205,9 @@ public static partial class ScreenCapture
             var stride = width * 4;
             var pixels = new byte[stride * height];
             Marshal.Copy(bits, pixels, 0, pixels.Length);
-            var image = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgr32, null, pixels, stride);
-            image.Freeze();
-            return image;
+            var result = new WriteableBitmap(new PixelSize(width, height), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Premul);
+            using (var locked = result.Lock()) Marshal.Copy(pixels, 0, locked.Address, pixels.Length);
+            return result;
         }
         finally
         {
@@ -141,7 +226,6 @@ public static partial class ScreenCapture
             if (GetMonitorInfo(monitor, ref info)) list.Add((info.rcMonitor, (info.dwFlags & 1) != 0));
             return true;
         }, IntPtr.Zero);
-        // Primary first, then left to right, so "Screen 1" is the main display.
         return list.OrderByDescending(m => m.Primary).ThenBy(m => m.Rect.Left).ThenBy(m => m.Rect.Top).Select(m => m.Rect).ToList();
     }
 
@@ -167,7 +251,6 @@ public static partial class ScreenCapture
         return list;
     }
 
-    // Per-monitor DPI awareness on the calling thread so sizes and coordinates are real pixels on every monitor.
     private static T WithPhysicalPixels<T>(Func<T> action)
     {
         var previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
@@ -181,25 +264,9 @@ public static partial class ScreenCapture
     private const int SRCCOPY = 0x00CC0020, CAPTUREBLT = 0x40000000, PW_RENDERFULLCONTENT = 2, GWL_EXSTYLE = -20, DWMWA_CLOAKED = 14;
     private const long WS_EX_TOOLWINDOW = 0x80;
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct RECT
-    {
-        public int Left, Top, Right, Bottom;
-        public readonly int Width => Right - Left;
-        public readonly int Height => Bottom - Top;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MONITORINFO { public int cbSize; public RECT rcMonitor, rcWork; public uint dwFlags; }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct BITMAPINFOHEADER
-    {
-        public int biSize, biWidth, biHeight;
-        public short biPlanes, biBitCount;
-        public int biCompression, biSizeImage, biXPelsPerMeter, biYPelsPerMeter, biClrUsed, biClrImportant;
-    }
-
+    [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left, Top, Right, Bottom; public readonly int Width => Right - Left; public readonly int Height => Bottom - Top; }
+    [StructLayout(LayoutKind.Sequential)] private struct MONITORINFO { public int cbSize; public RECT rcMonitor, rcWork; public uint dwFlags; }
+    [StructLayout(LayoutKind.Sequential)] private struct BITMAPINFOHEADER { public int biSize, biWidth, biHeight; public short biPlanes, biBitCount; public int biCompression, biSizeImage, biXPelsPerMeter, biYPelsPerMeter, biClrUsed, biClrImportant; }
     private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
     private delegate bool MonitorEnumProc(IntPtr monitor, IntPtr hdc, IntPtr rect, IntPtr data);
 

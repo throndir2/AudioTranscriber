@@ -4,13 +4,14 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Windows.Input;
-using System.Windows.Threading;
+using Avalonia.Threading;
 using AudioTranscriber.Application;
 using AudioTranscriber.Discord;
+using AudioTranscriber.Providers;
 
 namespace AudioTranscriber.App;
 
-/// <summary>Discord tab: the user's own bot (token encrypted for this Windows user in discord.json), joining a server voice
+/// <summary>Discord tab: the user's own bot (token encrypted for this OS user in discord.json), joining a server voice
 /// channel to record it with every line named after the Discord user speaking, and the network help voice may need.</summary>
 public sealed class DiscordViewModel : ObservableObject
 {
@@ -28,6 +29,9 @@ public sealed class DiscordViewModel : ObservableObject
     private bool working, mapped;
     private int queued;
 
+    public bool IsWindows { get; } = OperatingSystem.IsWindows();
+
+
     public DiscordViewModel(IAppController controller, Dispatcher dispatcher, string dataRoot, Func<string, Task> recordFrom,
         Action devicesChanged, Action<string, bool> log)
     {
@@ -42,7 +46,7 @@ public sealed class DiscordViewModel : ObservableObject
         bot.Changed += () =>
         {
             if (Interlocked.Exchange(ref queued, 1) == 0)
-                dispatcher.BeginInvoke(() => { Interlocked.Exchange(ref queued, 0); Refresh(); }, DispatcherPriority.Background);
+                dispatcher.Post(() => { Interlocked.Exchange(ref queued, 0); Refresh(); }, DispatcherPriority.Background);
         };
         OpenPortalCommand = new RelayCommand(() => Open(DiscordSetup.PortalUrl));
         OpenBotPageCommand = new RelayCommand(() => Open(DiscordSetup.BotPage(ApplicationId)), () => ApplicationId != 0);
@@ -60,9 +64,15 @@ public sealed class DiscordViewModel : ObservableObject
         FirewallCommand = new AsyncCommand(AllowFirewallAsync, () => !working);
         UpnpCommand = new AsyncCommand(MapUpnpAsync, () => !working);
         CopyPortForwardCommand = new RelayCommand(() => Copy(PortForwardSteps));
-        poll = new DispatcherTimer(TimeSpan.FromSeconds(2), DispatcherPriority.Background, (_, _) => Refresh(), dispatcher);
+        poll = NewTimer(TimeSpan.FromSeconds(2), (_, _) => Refresh());
     }
 
+    private static DispatcherTimer NewTimer(TimeSpan interval, EventHandler tick)
+    {
+        var timer = new DispatcherTimer { Interval = interval };
+        timer.Tick += tick;
+        return timer;
+    }
     public string Steps => DiscordSetup.Steps;
     public ObservableCollection<DiscordVoiceChannel> Channels { get; } = [];
     public DiscordVoiceChannel? SelectedChannel { get => selectedChannel; set => Set(ref selectedChannel, value); }
@@ -145,7 +155,7 @@ public sealed class DiscordViewModel : ObservableObject
             }
             Save(settings with
             {
-                ProtectedToken = Convert.ToBase64String(ProtectedData.Protect(Encoding.UTF8.GetBytes(typed), null, DataProtectionScope.CurrentUser)),
+                ProtectedToken = Convert.ToBase64String(UserSecretProtection.Protect(Encoding.UTF8.GetBytes(typed))),
                 ApplicationId = DiscordSetup.ApplicationIdFromToken(typed)
             });
             TokenInput = "";
@@ -256,10 +266,10 @@ public sealed class DiscordViewModel : ObservableObject
     private string? Token()
     {
         if (settings.ProtectedToken is not { } stored) return null;
-        try { return Encoding.UTF8.GetString(ProtectedData.Unprotect(Convert.FromBase64String(stored), null, DataProtectionScope.CurrentUser)); }
+        try { return Encoding.UTF8.GetString(UserSecretProtection.Unprotect(Convert.FromBase64String(stored))); }
         catch (Exception error) when (error is CryptographicException or FormatException)
         {
-            log("The saved Discord token can't be read on this Windows account; paste it again.", true);
+            log("The saved Discord token can't be read on this user account; paste it again.", true);
             return null;
         }
     }
@@ -289,8 +299,8 @@ public sealed class DiscordViewModel : ObservableObject
 
     private void Copy(string text)
     {
-        try { System.Windows.Clipboard.SetText(text); log("Copied to the clipboard.", false); }
-        catch (System.Runtime.InteropServices.ExternalException) { log("The clipboard is busy; try again.", true); }
+        try { _ = DesktopDialogs.SetClipboardTextAsync(text); log("Copied to the clipboard.", false); }
+        catch (Exception error) when (error is InvalidOperationException or NotSupportedException) { log("The clipboard is unavailable; copy manually: " + text, true); }
     }
 
     private sealed record Settings

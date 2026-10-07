@@ -67,8 +67,9 @@ public sealed class NvidiaCredentialVault : INvidiaCredentialSource, IDisposable
         var bytes = key.Encode();
         try
         {
-            var encrypted = ProtectedData.Protect(bytes, null, DataProtectionScope.CurrentUser);
+            var encrypted = UserSecretProtection.Protect(bytes);
             await File.WriteAllBytesAsync(path, encrypted, cancellationToken);
+            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException)
         { throw new ProviderException(ProviderFailureKind.Configuration, "credential-save-failed"); }
@@ -82,7 +83,7 @@ public sealed class NvidiaCredentialVault : INvidiaCredentialSource, IDisposable
             if (new FileInfo(path).Length > 16384)
                 throw new ProviderException(ProviderFailureKind.Configuration, "credential-file-invalid");
             var encrypted = await File.ReadAllBytesAsync(path, cancellationToken);
-            var bytes = ProtectedData.Unprotect(encrypted, null, DataProtectionScope.CurrentUser);
+            var bytes = UserSecretProtection.Unprotect(encrypted);
             try { SetMemoryOnly(Encoding.UTF8.GetString(bytes)); }
             finally { CryptographicOperations.ZeroMemory(bytes); }
         }

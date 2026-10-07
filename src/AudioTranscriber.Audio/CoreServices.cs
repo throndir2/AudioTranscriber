@@ -69,6 +69,7 @@ public static class AudioContracts
     }
 }
 
+/// <summary>Records the selected output (loopback) and microphone: WASAPI on Windows, PulseAudio/PipeWire on Linux.</summary>
 public sealed class WasapiAudioCaptureService : Core.IAudioCaptureService
 {
     private CaptureSession? capture;
@@ -85,6 +86,9 @@ public sealed class WasapiAudioCaptureService : Core.IAudioCaptureService
     public IReadOnlyList<Core.AudioDeviceInfo> GetMicrophoneDevices() => Devices(false);
     private static IReadOnlyList<Core.AudioDeviceInfo> Devices(bool loopback)
     {
+        var kind = loopback ? Core.TrackKind.Loopback : Core.TrackKind.Microphone;
+        if (!OperatingSystem.IsWindows())
+            return PulseAudio.Enumerate(loopback).Select(d => new Core.AudioDeviceInfo(d.Id, d.Name, kind, d.IsDefault, true)).ToArray();
         using var enumerator = new NAudio.CoreAudioApi.MMDeviceEnumerator();
         string? defaultId = null;
         try

@@ -1,7 +1,9 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Net;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -12,13 +14,14 @@ public sealed record UpdateRelease(string Tag, Version Version, string PageUrl, 
     string? ZipSha256, string? ChecksumUrl);
 
 /// <summary>
-/// Checks the repository's latest GitHub release, downloads and verifies its Windows ZIP into a staging folder,
-/// and applies it after the app exits through a small PowerShell helper (files cannot be replaced while running).
+/// Checks GitHub releases, downloads and verifies the platform package, then applies it after the app exits.
+/// Windows keeps the historical ZIP updater; Linux uses the tarball for writable installs or DEB/RPM for system installs.
 /// </summary>
 public sealed class AppUpdater
 {
     public const string Repository = "throndir2/AudioTranscriber";
     private const string ProvenanceFile = "BUILD-PROVENANCE.json";
+    private const string MarkerFile = "stage.json";
     private static readonly HttpClient Http = CreateClient();
     private readonly string settingsPath;
 
@@ -37,7 +40,6 @@ public sealed class AppUpdater
     public string InstallDirectory { get; }
     public string? CurrentTag { get; }
     public Version? CurrentVersion { get; }
-    /// <summary>Only release builds (which carry BUILD-PROVENANCE.json) update themselves.</summary>
     public bool IsSupported => CurrentVersion is not null;
     public bool AutoUpdate { get; private set; }
     public UpdateRelease? Available { get; private set; }
@@ -68,34 +70,34 @@ public sealed class AppUpdater
         var root = json.RootElement;
         var tag = root.GetProperty("tag_name").GetString() ?? "";
         if (!TryParseTag(tag, out var version)) { Available = null; return null; }
-        var zipName = $"AudioTranscriber-{tag}-win-x64.zip";
-        string? zipUrl = null, digest = null, checksumUrl = null;
+        var assetName = PreferredAssetName(tag, version);
+        string? assetUrl = null, digest = null, checksumUrl = null;
         long size = 0;
         foreach (var asset in root.GetProperty("assets").EnumerateArray())
         {
             var name = asset.GetProperty("name").GetString();
-            if (name == zipName)
+            if (name == assetName)
             {
-                zipUrl = asset.GetProperty("browser_download_url").GetString();
+                assetUrl = asset.GetProperty("browser_download_url").GetString();
                 size = asset.GetProperty("size").GetInt64();
                 if (asset.TryGetProperty("digest", out var d) && d.GetString() is { } value &&
                     value.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
                     digest = value[7..].ToLowerInvariant();
             }
-            else if (name == zipName + ".sha256") checksumUrl = asset.GetProperty("browser_download_url").GetString();
+            else if (name == assetName + ".sha256") checksumUrl = asset.GetProperty("browser_download_url").GetString();
         }
-        Available = zipUrl is null || size <= 0 ? null : new UpdateRelease(tag, version,
-            root.TryGetProperty("html_url", out var page) ? page.GetString() ?? "" : "", zipUrl, size, digest, checksumUrl);
+        Available = assetUrl is null || size <= 0 ? null : new UpdateRelease(tag, version,
+            root.TryGetProperty("html_url", out var page) ? page.GetString() ?? "" : "", assetUrl, size, digest, checksumUrl);
         return Available;
     }
 
     public bool IsNewer(UpdateRelease release) => CurrentVersion is not null && release.Version > CurrentVersion;
 
-    /// <summary>Downloads, verifies (GitHub SHA-256 digest and the published .sha256 file) and stages the release.</summary>
     public async Task DownloadAsync(UpdateRelease release, IProgress<string>? progress, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(UpdateRoot);
-        var zipPath = Path.Combine(UpdateRoot, Path.GetFileName(new Uri(release.ZipUrl).LocalPath) + ".partial");
+        var assetName = Path.GetFileName(new Uri(release.ZipUrl).LocalPath);
+        var downloadPath = Path.Combine(UpdateRoot, assetName + ".partial");
         var published = release.ChecksumUrl is null ? null : await ReadChecksumAsync(release.ChecksumUrl, cancellationToken);
         if (release.ZipSha256 is null && published is null)
             throw new InvalidDataException("The release has no SHA-256 to verify the download against.");
@@ -104,7 +106,7 @@ public sealed class AppUpdater
         {
             response.EnsureSuccessStatusCode();
             await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
-            await using var output = new FileStream(zipPath, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16, true);
+            await using var output = new FileStream(downloadPath, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16, true);
             var buffer = new byte[1 << 16];
             long total = 0, reported = -1;
             int read;
@@ -113,7 +115,7 @@ public sealed class AppUpdater
                 await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
                 hash.AppendData(buffer, 0, read);
                 total += read;
-                var percent = total * 100 / release.ZipBytes;
+                var percent = Math.Min(100, total * 100 / Math.Max(1, release.ZipBytes));
                 if (percent != reported)
                 {
                     reported = percent;
@@ -125,30 +127,58 @@ public sealed class AppUpdater
         var actual = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
         if ((release.ZipSha256 is not null && actual != release.ZipSha256) || (published is not null && actual != published))
         {
-            File.Delete(zipPath);
+            File.Delete(downloadPath);
             throw new InvalidDataException("The update download does not match its published SHA-256.");
         }
-        progress?.Report($"Verified {release.Tag}; unpacking…");
+        progress?.Report($"Verified {release.Tag}; staging…");
         var unpacking = Path.Combine(UpdateRoot, "unpacking");
         if (Directory.Exists(unpacking)) Directory.Delete(unpacking, true);
-        await Task.Run(() => ZipFile.ExtractToDirectory(zipPath, unpacking), cancellationToken);
-        File.Delete(zipPath);
-        if (!File.Exists(Path.Combine(unpacking, "AudioTranscriber.App.exe")) || ReadTag(unpacking) != release.Tag)
+        Directory.CreateDirectory(unpacking);
+        if (OperatingSystem.IsWindows())
         {
-            Directory.Delete(unpacking, true);
-            throw new InvalidDataException("The downloaded package is not a complete AudioTranscriber release.");
+            ZipFile.ExtractToDirectory(downloadPath, unpacking);
+            File.Delete(downloadPath);
+            if (!File.Exists(Path.Combine(unpacking, WindowsExecutableName)) || ReadTag(unpacking) != release.Tag)
+                throw InvalidPackage(unpacking);
+            ReplaceStaged(unpacking, new StageInfo("windows-zip", release.Tag, release.PageUrl, null));
         }
-        if (Directory.Exists(StagedDirectory)) Directory.Delete(StagedDirectory, true);
-        Directory.Move(unpacking, StagedDirectory);
+        else if (assetName.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase))
+        {
+            ExtractTarGz(downloadPath, unpacking);
+            File.Delete(downloadPath);
+            var payload = Directory.Exists(Path.Combine(unpacking, "AudioTranscriber")) ? Path.Combine(unpacking, "AudioTranscriber") : unpacking;
+            if (!File.Exists(Path.Combine(payload, LinuxExecutableName)) || ReadTag(payload) != release.Tag)
+                throw InvalidPackage(unpacking);
+            ReplaceStaged(payload, new StageInfo("linux-tar", release.Tag, release.PageUrl, null));
+            if (payload != unpacking && Directory.Exists(unpacking)) Directory.Delete(unpacking, true);
+        }
+        else
+        {
+            var packageName = assetName.EndsWith(".rpm", StringComparison.OrdinalIgnoreCase) ? "update.rpm" : "update.deb";
+            File.Move(downloadPath, Path.Combine(unpacking, packageName), true);
+            ReplaceStaged(unpacking, new StageInfo(packageName.EndsWith(".rpm") ? "linux-rpm" : "linux-deb", release.Tag, release.PageUrl, packageName));
+        }
         StagedTag = release.Tag;
     }
 
-    /// <summary>Starts the helper that waits for this process to exit, copies the staged files, and optionally relaunches.</summary>
     public bool ApplyOnExit(IReadOnlyList<string> arguments)
     {
         if (StagedTag is null || !Directory.Exists(StagedDirectory)) return false;
+        return OperatingSystem.IsWindows() ? ApplyOnWindows(arguments) : ApplyOnLinux(arguments);
+    }
+
+    public static bool TryParseTag(string tag, out Version version)
+    {
+        version = new Version(0, 0);
+        if (!tag.StartsWith('v')) return false;
+        var core = tag[1..].Split('-', '+')[0];
+        return core.Count(c => c == '.') == 2 && Version.TryParse(core, out version!);
+    }
+
+    private bool ApplyOnWindows(IReadOnlyList<string> arguments)
+    {
         var script = Path.Combine(UpdateRoot, "apply-update.ps1");
-        File.WriteAllText(script, ApplyScript, Encoding.UTF8);
+        File.WriteAllText(script, WindowsApplyScript, Encoding.UTF8);
         var relaunchArguments = string.Join(" ", arguments.Select(QuoteArgument));
         var info = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe"))
         {
@@ -166,15 +196,28 @@ public sealed class AppUpdater
             "-ArgumentsBase64", Convert.ToBase64String(Encoding.UTF8.GetBytes(relaunchArguments))
         }) info.ArgumentList.Add(argument);
         try { Process.Start(info)?.Dispose(); return true; }
-        catch (System.ComponentModel.Win32Exception) { return false; }
+        catch (Win32Exception) { return false; }
     }
 
-    public static bool TryParseTag(string tag, out Version version)
+    private bool ApplyOnLinux(IReadOnlyList<string> arguments)
     {
-        version = new Version(0, 0);
-        if (!tag.StartsWith('v')) return false;
-        var core = tag[1..].Split('-', '+')[0];
-        return core.Count(c => c == '.') == 2 && Version.TryParse(core, out version!);
+        var info = ReadStageInfo();
+        var script = Path.Combine(UpdateRoot, "apply-update.sh");
+        File.WriteAllText(script, LinuxApplyScript, Encoding.UTF8);
+        TryChmod(script, "755");
+        var start = new ProcessStartInfo("sh") { UseShellExecute = false };
+        start.ArgumentList.Add(script);
+        start.ArgumentList.Add(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        start.ArgumentList.Add(StagedDirectory);
+        start.ArgumentList.Add(InstallDirectory);
+        start.ArgumentList.Add(Path.Combine(UpdateRoot, "update.log"));
+        start.ArgumentList.Add(RelaunchAfterApply ? "1" : "0");
+        start.ArgumentList.Add(Convert.ToBase64String(Encoding.UTF8.GetBytes(string.Join(" ", arguments.Select(QuoteArgument)))));
+        start.ArgumentList.Add(info.Kind);
+        start.ArgumentList.Add(info.PackageName ?? "");
+        start.ArgumentList.Add(info.PageUrl ?? "");
+        try { Process.Start(start)?.Dispose(); return true; }
+        catch (Win32Exception) { return false; }
     }
 
     private void DetectStaged()
@@ -182,10 +225,9 @@ public sealed class AppUpdater
         try
         {
             if (!Directory.Exists(StagedDirectory)) return;
-            var tag = ReadTag(StagedDirectory);
-            if (tag is not null && TryParseTag(tag, out var version) && CurrentVersion is not null && version > CurrentVersion &&
-                File.Exists(Path.Combine(StagedDirectory, "AudioTranscriber.App.exe")))
-                StagedTag = tag;
+            var info = ReadStageInfo();
+            if (TryParseTag(info.Tag, out var version) && CurrentVersion is not null && version > CurrentVersion)
+                StagedTag = info.Tag;
             else Directory.Delete(StagedDirectory, true);
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException) { }
@@ -200,6 +242,28 @@ public sealed class AppUpdater
             return !json.RootElement.TryGetProperty("autoUpdate", out var value) || value.GetBoolean();
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException) { return true; }
+    }
+
+    private string PreferredAssetName(string tag, Version version)
+    {
+        if (OperatingSystem.IsWindows()) return $"AudioTranscriber-{tag}-win-x64.zip";
+        if (CanWrite(InstallDirectory)) return $"AudioTranscriber-{tag}-linux-x64.tar.gz";
+        var semver = version.ToString(3);
+        return PreferRpm() ? $"audiotranscriber-{semver}-1.x86_64.rpm" : $"audiotranscriber_{semver}_amd64.deb";
+    }
+
+    private static bool PreferRpm() =>
+        (File.Exists("/etc/redhat-release") || File.Exists("/etc/fedora-release") || CommandExists("rpm")) && !CommandExists("dpkg");
+
+    private static bool CommandExists(string name)
+    {
+        try
+        {
+            var path = Environment.GetEnvironmentVariable("PATH") ?? "";
+            return path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+                .Any(dir => File.Exists(Path.Combine(dir, name)));
+        }
+        catch { return false; }
     }
 
     private static string? ReadTag(string directory)
@@ -233,6 +297,45 @@ public sealed class AppUpdater
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return false; }
     }
 
+    private void ReplaceStaged(string source, StageInfo info)
+    {
+        if (Directory.Exists(StagedDirectory)) Directory.Delete(StagedDirectory, true);
+        Directory.Move(source, StagedDirectory);
+        File.WriteAllText(Path.Combine(StagedDirectory, MarkerFile), JsonSerializer.Serialize(info));
+    }
+
+    private StageInfo ReadStageInfo()
+    {
+        var marker = Path.Combine(StagedDirectory, MarkerFile);
+        if (File.Exists(marker)) return JsonSerializer.Deserialize<StageInfo>(File.ReadAllText(marker)) ?? throw new InvalidDataException("Invalid update stage marker.");
+        var tag = ReadTag(StagedDirectory) ?? throw new InvalidDataException("Invalid update stage marker.");
+        return new StageInfo(OperatingSystem.IsWindows() ? "windows-zip" : "linux-tar", tag, null, null);
+    }
+
+    private static InvalidDataException InvalidPackage(string directory)
+    {
+        try { Directory.Delete(directory, true); } catch { }
+        return new InvalidDataException("The downloaded package is not a complete AudioTranscriber release.");
+    }
+
+    private static void ExtractTarGz(string archive, string destination)
+    {
+        var process = Process.Start(new ProcessStartInfo("tar")
+        {
+            UseShellExecute = false,
+            RedirectStandardError = true,
+            ArgumentList = { "-xzf", archive, "-C", destination }
+        }) ?? throw new IOException("Could not start tar to extract the update.");
+        var stderr = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        if (process.ExitCode != 0) throw new InvalidDataException("Could not extract update tarball: " + stderr);
+    }
+
+    private static void TryChmod(string path, string mode)
+    {
+        try { Process.Start("chmod", new[] { mode, path })?.WaitForExit(); } catch { }
+    }
+
     private static string QuoteArgument(string argument) =>
         argument.Length > 0 && argument.IndexOfAny([' ', '\t', '"']) < 0 ? argument : "\"" + argument.Replace("\"", "\\\"") + "\"";
 
@@ -245,7 +348,11 @@ public sealed class AppUpdater
         return client;
     }
 
-    private const string ApplyScript = """
+    private static string WindowsExecutableName => "AudioTranscriber.App.exe";
+    private static string LinuxExecutableName => "AudioTranscriber.App";
+    private sealed record StageInfo(string Kind, string Tag, string? PageUrl, string? PackageName);
+
+    private const string WindowsApplyScript = """
         param([int]$ProcessId, [string]$Source, [string]$Target, [string]$Log, [string]$Relaunch, [string]$ArgumentsBase64)
         $ErrorActionPreference = 'Stop'
         function Write-Log([string]$Message) { Add-Content -LiteralPath $Log -Value "$(Get-Date -Format s) $Message" }
@@ -254,28 +361,39 @@ public sealed class AppUpdater
             Write-Log "Waiting for process $ProcessId to exit before updating $Target"
             try { Wait-Process -Id $ProcessId -Timeout 600 -ErrorAction SilentlyContinue } catch { }
             $deadline = (Get-Date).AddMinutes(2)
-            while ((Get-Date) -lt $deadline -and @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
-                try { $_.Path -and $_.Path.StartsWith($Target + '\', [StringComparison]::OrdinalIgnoreCase) } catch { $false } }).Count -gt 0) {
-                Start-Sleep -Milliseconds 500
-            }
-            # Copy everything except the version marker first, so a partial copy is retried on the next exit.
+            while ((Get-Date) -lt $deadline -and @(Get-Process -ErrorAction SilentlyContinue | Where-Object { try { $_.Path -and $_.Path.StartsWith($Target + '\', [StringComparison]::OrdinalIgnoreCase) } catch { $false } }).Count -gt 0) { Start-Sleep -Milliseconds 500 }
             foreach ($pass in @(@('/XF', 'BUILD-PROVENANCE.json'), @('/IF', 'BUILD-PROVENANCE.json', '/IS'))) {
                 $code = 16
-                for ($attempt = 0; $attempt -lt 15 -and $code -ge 8; $attempt++) {
-                    if ($attempt -gt 0) { Start-Sleep -Seconds 2 }
-                    & robocopy.exe $Source $Target /E /R:2 /W:1 /NFL /NDL /NJH /NJS /NP @pass | Out-Null
-                    $code = $LASTEXITCODE
-                }
+                for ($attempt = 0; $attempt -lt 15 -and $code -ge 8; $attempt++) { if ($attempt -gt 0) { Start-Sleep -Seconds 2 }; & robocopy.exe $Source $Target /E /R:2 /W:1 /NFL /NDL /NJH /NJS /NP @pass | Out-Null; $code = $LASTEXITCODE }
                 if ($code -ge 8) { throw "robocopy failed with exit code $code" }
             }
+            $uninstall = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\AudioTranscriber'
+            if (Test-Path $uninstall) { try { $tag = (Get-Content (Join-Path $Target 'BUILD-PROVENANCE.json') -Raw | ConvertFrom-Json).tag; Set-ItemProperty -LiteralPath $uninstall -Name DisplayVersion -Value $tag.TrimStart('v') } catch { } }
             Remove-Item -LiteralPath $Source -Recurse -Force -ErrorAction SilentlyContinue
             Write-Log 'Update applied.'
         }
         catch { $failed = $true; Write-Log "Update failed: $_" }
-        if ($Relaunch -eq '1') {
-            $arguments = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($ArgumentsBase64))
-            $exe = Join-Path $Target 'AudioTranscriber.App.exe'
-            if ($arguments) { Start-Process -FilePath $exe -ArgumentList $arguments } else { Start-Process -FilePath $exe }
-        }
+        if ($Relaunch -eq '1') { $arguments = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($ArgumentsBase64)); $exe = Join-Path $Target 'AudioTranscriber.App.exe'; if ($arguments) { Start-Process -FilePath $exe -ArgumentList $arguments } else { Start-Process -FilePath $exe } }
+        """;
+
+    private const string LinuxApplyScript = """
+        #!/bin/sh
+        PID="$1"; SOURCE="$2"; TARGET="$3"; LOG="$4"; RELAUNCH="$5"; ARGS64="$6"; KIND="$7"; PACKAGE="$8"; PAGE="$9"
+        log() { printf '%s %s\n' "$(date -Iseconds)" "$*" >> "$LOG"; }
+        i=0; while kill -0 "$PID" 2>/dev/null && [ "$i" -lt 600 ]; do sleep 1; i=$((i+1)); done
+        if [ "$KIND" = "linux-tar" ]; then
+          log "Copying staged update to $TARGET"
+          cp -a "$SOURCE"/. "$TARGET"/ && rm -rf "$SOURCE"
+          if [ "$RELAUNCH" = "1" ]; then ARGS=$(printf '%s' "$ARGS64" | base64 -d 2>/dev/null || true); sh -c 'exec "$0" $1' "$TARGET/AudioTranscriber.App" "$ARGS" >/dev/null 2>&1 & fi
+          exit 0
+        fi
+        FILE="$SOURCE/$PACKAGE"
+        if command -v pkexec >/dev/null 2>&1; then
+          if [ "$KIND" = "linux-deb" ]; then pkexec env DEBIAN_FRONTEND=noninteractive apt-get install -y "$FILE" >> "$LOG" 2>&1 && exit 0; fi
+          if [ "$KIND" = "linux-rpm" ]; then if command -v dnf >/dev/null 2>&1; then pkexec dnf install -y "$FILE" >> "$LOG" 2>&1 && exit 0; else pkexec rpm -Uvh "$FILE" >> "$LOG" 2>&1 && exit 0; fi; fi
+        fi
+        log "Could not start a privileged package installer. Opening release page."
+        if command -v xdg-open >/dev/null 2>&1 && [ -n "$PAGE" ]; then xdg-open "$PAGE" >/dev/null 2>&1 & fi
+        exit 1
         """;
 }

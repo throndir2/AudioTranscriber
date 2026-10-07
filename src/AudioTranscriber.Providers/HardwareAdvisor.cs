@@ -92,7 +92,7 @@ public static class HardwareAdvisor
     /// <summary>Memory left for the desktop and driver: at least 0.8 GB, 10% of bigger cards.</summary>
     public static double Reserve(double memoryGb) => Math.Max(MinimumReserveGb, memoryGb * 0.1);
 
-    public static HardwarePlan Plan(HardwareProfile hardware, bool localLlm)
+    public static HardwarePlan Plan(HardwareProfile hardware, bool localLlm, bool parakeetGpuSupported = true)
     {
         // Everything shares the largest card; Ollama, whisper.cpp and the Parakeet worker all pick it first.
         var gpu = hardware.Gpus.OrderByDescending(item => item.MemoryGb).FirstOrDefault();
@@ -132,12 +132,14 @@ public static class HardwareAdvisor
         }
 
         // 2. Parakeet on the GPU only when the card can run CUDA 12 and has room left after the LLM.
-        var cudaGpu = gpu?.CanRunParakeet == true ? gpu
+        var cudaGpu = !parakeetGpuSupported ? null : gpu?.CanRunParakeet == true ? gpu
             : hardware.Gpus.Where(item => item.CanRunParakeet).OrderByDescending(item => item.MemoryGb).FirstOrDefault();
         var cudaFree = cudaGpu is null ? 0 : cudaGpu == gpu ? free : cudaGpu.MemoryGb - Reserve(cudaGpu.MemoryGb);
         var parakeetGpu = cudaGpu is not null && cudaFree >= ParakeetGpuGb;
         string parakeetReason;
-        if (cudaGpu is null)
+        if (cudaGpu is null && !parakeetGpuSupported)
+            parakeetReason = "GPU Parakeet is Windows-only for now; the CPU is fast already (about 15× real time).";
+        else if (cudaGpu is null)
             parakeetReason = hardware.Gpus.FirstOrDefault(item => item.IsNvidia) is { } unconfirmed
                 ? $"nvidia-smi couldn't confirm that {unconfirmed.Name} runs CUDA 12 (compute 6.0+, 4 GB+, driver 527.41+). The CPU is fast already (about 15× real time)."
                 : "No NVIDIA GPU that runs CUDA 12 (GTX 10-series or newer, 4 GB+). The CPU is fast already (about 15× real time).";
@@ -217,6 +219,15 @@ public static class HardwareProbe
 
     private static string CpuName()
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            try
+            {
+                var line = File.ReadLines("/proc/cpuinfo").FirstOrDefault(l => l.StartsWith("model name", StringComparison.Ordinal));
+                return line?.Split(':', 2) is [_, var model] && model.Trim().Length > 0 ? model.Trim() : "CPU";
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return "CPU"; }
+        }
         try
         {
             using var key = Registry.LocalMachine.OpenSubKey(@"HARDWARE\DESCRIPTION\System\CentralProcessor\0");
@@ -228,6 +239,7 @@ public static class HardwareProbe
     private static IEnumerable<(string Name, long Bytes)> DisplayAdapters()
     {
         var found = new List<(string, long)>();
+        if (!OperatingSystem.IsWindows()) return LinuxDisplayAdapters();
         try
         {
             using var root = Registry.LocalMachine.OpenSubKey(DisplayClass);
@@ -242,6 +254,43 @@ public static class HardwareProbe
         }
         catch (Exception error) when (error is System.Security.SecurityException or IOException or UnauthorizedAccessException) { }
         return found.DistinctBy(item => item.Item1);
+    }
+
+    /// <summary>Linux: dedicated VRAM from the amdgpu sysfs counter; NVIDIA cards come from nvidia-smi.</summary>
+    private static List<(string Name, long Bytes)> LinuxDisplayAdapters()
+    {
+        var found = new List<(string, long)>();
+        try
+        {
+            foreach (var device in Directory.EnumerateDirectories("/sys/class/drm", "card*").Select(card => Path.Combine(card, "device")).Distinct())
+            {
+                var vram = Path.Combine(device, "mem_info_vram_total");
+                if (!File.Exists(vram) || !long.TryParse(File.ReadAllText(vram).Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var bytes)) continue;
+                var uevent = Path.Combine(device, "uevent");
+                var slot = File.Exists(uevent)
+                    ? File.ReadLines(uevent).FirstOrDefault(l => l.StartsWith("PCI_SLOT_NAME=", StringComparison.Ordinal))?[14..] : null;
+                found.Add((LspciName(slot) ?? "GPU", bytes));
+            }
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+        return found.DistinctBy(item => item.Item1).ToList();
+    }
+
+    private static string? LspciName(string? slot)
+    {
+        if (slot is null) return null;
+        try
+        {
+            using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("lspci", $"-mm -s {slot}")
+                { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true });
+            if (process is null) return null;
+            var output = process.StandardOutput.ReadToEnd();
+            process.WaitForExit(2000);
+            // -mm prints: slot "class" "vendor" "device" ...
+            var fields = output.Split('"').Where((_, index) => index % 2 == 1).ToArray();
+            return fields.Length >= 3 ? $"{fields[1]} {fields[2]}".Trim() : null;
+        }
+        catch (Exception error) when (error is System.ComponentModel.Win32Exception or InvalidOperationException) { return null; }
     }
 
     private static long? ReadSize(object? value) => value switch

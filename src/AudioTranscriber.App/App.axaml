@@ -1,0 +1,10 @@
+<Application x:Class="AudioTranscriber.App.App"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             RequestedThemeVariant="Dark">
+  <Application.Styles>
+    <FluentTheme />
+    <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml" />
+    <StyleInclude Source="avares://AudioTranscriber.App/Theme.axaml" />
+  </Application.Styles>
+</Application>

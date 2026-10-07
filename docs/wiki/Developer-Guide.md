@@ -37,9 +37,15 @@ under `artifacts\TestResults`, and passes the pinned local dotnet host to VSTest
 ## Publish
 
 `Publish.ps1` publishes the self-contained Windows x64 app and worker to
-`artifacts\publish\win-x64` by default. Keep the entire output directory together. It
+`artifacts\publish\win-x64` by default; `-Runtime linux-x64` cross-builds the Linux app to
+`artifacts\publish\linux-x64` from Windows or Linux. Keep the entire output directory together. It
 includes FFmpeg/FFprobe, docs, model notices, dependency license files, package
 inventory, and provenance.
+
+To try the Linux build on a Windows PC, run the published `linux-x64` folder in Docker or WSL
+with Xvfb and PulseAudio (`pulseaudio -D`, `pactl load-module module-null-sink`), then
+`./AudioTranscriber.App --smoke --data-root /tmp/smoke`. `tools\AudioTranscriber.UiMcp` (the UI
+Automation MCP) is Windows-only.
 
 Native apphost or image-loading failures were observed intermittently on the development
 machine despite valid on-disk bytes. Published executables are a separate validation

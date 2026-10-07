@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [ValidateSet('Debug', 'Release')][string]$Configuration = 'Release',
+    [ValidateSet('win-x64', 'linux-x64')][string]$Runtime = 'win-x64',
     [string]$DotnetPath,
     [string]$OutputDirectory,
     [switch]$RequireEmptyOutput
@@ -12,7 +13,7 @@ $useLocalSdk = [string]::IsNullOrWhiteSpace($DotnetPath)
 $dotnet = if ($useLocalSdk) { Join-Path $root '.tools\dotnet\dotnet.exe' }
     else { (Get-Command $DotnetPath -ErrorAction Stop).Source }
 $project = Join-Path $root 'src\AudioTranscriber.App\AudioTranscriber.App.csproj'
-$destination = if ([string]::IsNullOrWhiteSpace($OutputDirectory)) { Join-Path $root 'artifacts\publish\win-x64' }
+$destination = if ([string]::IsNullOrWhiteSpace($OutputDirectory)) { Join-Path $root "artifacts\publish\$Runtime" }
     else { [IO.Path]::GetFullPath($OutputDirectory) }
 if (-not (Test-Path $dotnet)) { throw 'Run .\scripts\Setup.ps1 first to install the pinned local SDK.' }
 if (-not (Test-Path $project)) { throw 'The desktop application project is not present in this checkout yet.' }
@@ -33,28 +34,122 @@ elseif ([string]::IsNullOrWhiteSpace($env:NUGET_PACKAGES)) {
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 $env:DOTNET_NOLOGO = '1'
 
+function Save-UrlWithHash([string]$Url, [string]$Path, [string]$Sha256) {
+    $needsDownload = -not (Test-Path -LiteralPath $Path)
+    if (-not $needsDownload) {
+        $needsDownload = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash -ne $Sha256
+    }
+    if ($needsDownload) {
+        Write-Host "Downloading pinned asset: $Url"
+        $previousProgress = $ProgressPreference
+        $ProgressPreference = 'SilentlyContinue'
+        try { Invoke-WebRequest -Uri $Url -OutFile $Path } finally { $ProgressPreference = $previousProgress }
+    }
+    if ((Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash -ne $Sha256) {
+        Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+        throw "Downloaded asset does not match pinned SHA-256: $Url"
+    }
+}
+
+function Copy-ArchiveEntry([IO.Compression.ZipArchiveEntry]$Entry, [string]$DestinationPath) {
+    New-Item -ItemType Directory -Force (Split-Path $DestinationPath -Parent) | Out-Null
+    [IO.Compression.ZipFileExtensions]::ExtractToFile($Entry, $DestinationPath, $true)
+}
+
+function Add-WindowsFFmpeg([string]$Destination, [string]$Licenses, [string]$DownloadCache) {
+    $ffmpegUrl = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-08-31-13-27/ffmpeg-n9.0.1-11-ge47273f4d9-win64-lgpl-shared-9.0.zip'
+    $ffmpegSha256 = '83a824f0729a69d143c9865125bb86988a11dd388325f0033711045522068aa0'
+    $ffmpegZip = Join-Path $DownloadCache ([IO.Path]::GetFileName($ffmpegUrl))
+    Save-UrlWithHash $ffmpegUrl $ffmpegZip $ffmpegSha256
+    $ffmpegDestination = Join-Path $Destination 'ffmpeg'
+    New-Item -ItemType Directory -Force $ffmpegDestination | Out-Null
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [IO.Compression.ZipFile]::OpenRead($ffmpegZip)
+    try {
+        foreach ($entry in $archive.Entries) {
+            if ($entry.FullName -match '^[^/]+/bin/(ffmpeg\.exe|ffprobe\.exe|[^/]+\.dll)$') {
+                Copy-ArchiveEntry $entry (Join-Path $ffmpegDestination $entry.Name)
+            }
+            elseif ($entry.FullName -match '^[^/]+/LICENSE\.txt$') {
+                Copy-ArchiveEntry $entry (Join-Path $Licenses 'FFmpeg-LICENSE.txt')
+            }
+        }
+    }
+    finally { $archive.Dispose() }
+    foreach ($tool in @('ffmpeg.exe', 'ffprobe.exe')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $ffmpegDestination $tool))) { throw "The pinned FFmpeg archive did not contain $tool." }
+    }
+    @(
+        '# Bundled FFmpeg'
+        ''
+        'The `ffmpeg` folder contains an unmodified LGPL-2.1-or-later shared Windows build of FFmpeg'
+        '(ffmpeg.exe, ffprobe.exe and their libav* DLLs), launched as separate processes.'
+        ''
+        "- Archive: $ffmpegUrl"
+        "- SHA-256: $ffmpegSha256"
+        '- Build scripts: https://github.com/BtbN/FFmpeg-Builds'
+        '- Corresponding FFmpeg source: https://git.ffmpeg.org/ffmpeg.git (release/9.0, commit e47273f4d9)'
+        '- License text: FFmpeg-LICENSE.txt'
+    ) | Set-Content -LiteralPath (Join-Path $Licenses 'FFmpeg-provenance.md') -Encoding utf8
+}
+
+function Add-LinuxFFmpeg([string]$Destination, [string]$Licenses, [string]$DownloadCache) {
+    $ffmpegUrl = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-08-31-13-27/ffmpeg-n9.0.1-11-ge47273f4d9-linux64-lgpl-9.0.tar.xz'
+    $ffmpegSha256 = '204fc02692b11249c3e688ad18538ce2939129a1fc6abc32a6b2638a024496cf'
+    $ffmpegTar = Join-Path $DownloadCache ([IO.Path]::GetFileName($ffmpegUrl))
+    Save-UrlWithHash $ffmpegUrl $ffmpegTar $ffmpegSha256
+    $extract = Join-Path $DownloadCache 'ffmpeg-linux-lgpl-9.0'
+    if (Test-Path -LiteralPath $extract) { Remove-Item -LiteralPath $extract -Recurse -Force }
+    New-Item -ItemType Directory -Force $extract | Out-Null
+    & tar -xJf $ffmpegTar -C $extract
+    if ($LASTEXITCODE -ne 0) { throw 'Could not extract pinned Linux FFmpeg archive with tar -xJf.' }
+    $top = Get-ChildItem -LiteralPath $extract -Directory | Select-Object -First 1
+    if (-not $top) { throw 'The pinned Linux FFmpeg archive did not contain a top-level folder.' }
+    $ffmpegDestination = Join-Path $Destination 'ffmpeg'
+    New-Item -ItemType Directory -Force $ffmpegDestination | Out-Null
+    foreach ($tool in @('ffmpeg', 'ffprobe')) {
+        $source = Join-Path $top.FullName "bin\$tool"
+        if (-not (Test-Path -LiteralPath $source)) { throw "The pinned Linux FFmpeg archive did not contain $tool." }
+        Copy-Item -LiteralPath $source -Destination (Join-Path $ffmpegDestination $tool) -Force
+    }
+    $license = Join-Path $top.FullName 'LICENSE.txt'
+    if (Test-Path -LiteralPath $license) { Copy-Item -LiteralPath $license -Destination (Join-Path $Licenses 'FFmpeg-LICENSE.txt') -Force }
+    @(
+        '# Bundled FFmpeg'
+        ''
+        'The `ffmpeg` folder contains an unmodified LGPL-2.1-or-later static Linux build of FFmpeg'
+        '(ffmpeg and ffprobe), launched as separate processes.'
+        ''
+        "- Archive: $ffmpegUrl"
+        "- SHA-256: $ffmpegSha256"
+        '- Build scripts: https://github.com/BtbN/FFmpeg-Builds'
+        '- Corresponding FFmpeg source: https://git.ffmpeg.org/ffmpeg.git (release/9.0, commit e47273f4d9)'
+        '- License text: FFmpeg-LICENSE.txt'
+    ) | Set-Content -LiteralPath (Join-Path $Licenses 'FFmpeg-provenance.md') -Encoding utf8
+}
+
 Push-Location $root
 try {
     $sdkVersion = (Get-Content (Join-Path $root 'global.json') -Raw | ConvertFrom-Json).sdk.version
     $actualSdk = & $dotnet --version
     if ($LASTEXITCODE -ne 0 -or $actualSdk -ne $sdkVersion) { throw "The build requires SDK $sdkVersion from global.json." }
-    [string[]]$targeting = if ($IsWindows) { @() } else { @('-p:EnableWindowsTargeting=true') }
+    [string[]]$targeting = if ((-not $IsWindows) -and $Runtime -eq 'win-x64') { @('-p:EnableWindowsTargeting=true') } else { @() }
     $worker = Join-Path $root 'src\AudioTranscriber.Worker\AudioTranscriber.Worker.csproj'
     if (-not (Test-Path $worker)) { throw 'The required speaker worker project is missing.' }
-    # The application already references the worker; one locked restore covers both dependency graphs.
     & $dotnet restore $project --locked-mode --nologo @targeting
-    if ($LASTEXITCODE -ne 0) { throw 'Locked Windows x64 restore failed. Run Setup.ps1 after intentional dependency changes.' }
-    # The worker must be rebuilt here: the app's build graph compiles it framework-dependent, and reusing
-    # that output (--no-build) ships a worker that fails with 0x80008096 (framework missing) on clean PCs.
+    if ($LASTEXITCODE -ne 0) { throw "Locked $Runtime restore failed. Run Setup.ps1 after intentional dependency changes." }
     foreach ($item in @($project, $worker)) {
-        & $dotnet publish $item --configuration $Configuration --runtime win-x64 --self-contained true `
+        & $dotnet publish $item --configuration $Configuration --runtime $Runtime --self-contained true `
             --no-restore --output $destination --nologo -p:PublishSingleFile=false @targeting
-        if ($LASTEXITCODE -ne 0) { throw "Windows x64 publish failed: $item" }
+        if ($LASTEXITCODE -ne 0) { throw "$Runtime publish failed: $item" }
     }
     foreach ($name in @('AudioTranscriber.App', 'AudioTranscriber.Worker')) {
         $runtimeConfig = Get-Content (Join-Path $destination "$name.runtimeconfig.json") -Raw | ConvertFrom-Json
         if (-not $runtimeConfig.runtimeOptions.includedFrameworks) { throw "$name was not published self-contained." }
     }
+    # RID-agnostic libraries copy both platforms' vendored natives (SQLite, Discord libdave); keep only this platform's.
+    $otherNatives = if ($Runtime -eq 'win-x64') { @('libe_sqlite3.so', 'libdave.so') } else { @('e_sqlite3.dll', 'libdave.dll') }
+    foreach ($native in $otherNatives) { Remove-Item -LiteralPath (Join-Path $destination $native) -Force -ErrorAction SilentlyContinue }
     Copy-Item -LiteralPath (Join-Path $root 'README.md'), (Join-Path $root 'CHANGELOG.md') -Destination $destination -Force
     Copy-Item -LiteralPath (Join-Path $root 'docs') -Destination $destination -Recurse -Force
     $licenses = Join-Path $destination 'licenses'
@@ -67,53 +162,10 @@ try {
         Copy-Item -Destination $modelNotices -Force
     Copy-Item -LiteralPath (Join-Path $root 'src\AudioTranscriber.Storage\NativeSqlite\README.md') `
         -Destination (Join-Path $licenses 'SQLite-provenance.md') -Force
-    # Bundle a pinned LGPL FFmpeg/FFprobe so recording normalization and imports work on a clean PC.
-    # BtbN keeps month-end autobuilds long-term; bump the URL and SHA-256 together.
-    $ffmpegUrl = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-08-31-13-27/ffmpeg-n9.0.1-11-ge47273f4d9-win64-lgpl-shared-9.0.zip'
-    $ffmpegSha256 = '83a824f0729a69d143c9865125bb86988a11dd388325f0033711045522068aa0'
     $downloadCache = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { Join-Path $root '.tools\downloads' }
     New-Item -ItemType Directory -Force $downloadCache | Out-Null
-    $ffmpegZip = Join-Path $downloadCache ([IO.Path]::GetFileName($ffmpegUrl))
-    if (-not (Test-Path -LiteralPath $ffmpegZip) -or (Get-FileHash -LiteralPath $ffmpegZip -Algorithm SHA256).Hash -ne $ffmpegSha256) {
-        Write-Host "Downloading pinned FFmpeg: $ffmpegUrl"
-        $previousProgress = $ProgressPreference
-        $ProgressPreference = 'SilentlyContinue'
-        try { Invoke-WebRequest -Uri $ffmpegUrl -OutFile $ffmpegZip } finally { $ProgressPreference = $previousProgress }
-    }
-    if ((Get-FileHash -LiteralPath $ffmpegZip -Algorithm SHA256).Hash -ne $ffmpegSha256) {
-        Remove-Item -LiteralPath $ffmpegZip -Force
-        throw 'The FFmpeg download does not match its pinned SHA-256.'
-    }
-    $ffmpegDestination = Join-Path $destination 'ffmpeg'
-    New-Item -ItemType Directory -Force $ffmpegDestination | Out-Null
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $archive = [IO.Compression.ZipFile]::OpenRead($ffmpegZip)
-    try {
-        foreach ($entry in $archive.Entries) {
-            if ($entry.FullName -match '^[^/]+/bin/(ffmpeg\.exe|ffprobe\.exe|[^/]+\.dll)$') {
-                [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, (Join-Path $ffmpegDestination $entry.Name), $true)
-            }
-            elseif ($entry.FullName -match '^[^/]+/LICENSE\.txt$') {
-                [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, (Join-Path $licenses 'FFmpeg-LICENSE.txt'), $true)
-            }
-        }
-    }
-    finally { $archive.Dispose() }
-    foreach ($tool in @('ffmpeg.exe', 'ffprobe.exe')) {
-        if (-not (Test-Path -LiteralPath (Join-Path $ffmpegDestination $tool))) { throw "The pinned FFmpeg archive did not contain $tool." }
-    }
-    @(
-        '# Bundled FFmpeg'
-        ''
-        'The `ffmpeg` folder contains an unmodified LGPL-2.1-or-later shared build of FFmpeg'
-        '(ffmpeg.exe, ffprobe.exe and their libav* DLLs), launched as separate processes.'
-        ''
-        "- Archive: $ffmpegUrl"
-        "- SHA-256: $ffmpegSha256"
-        '- Build scripts: https://github.com/BtbN/FFmpeg-Builds'
-        '- Corresponding FFmpeg source: https://git.ffmpeg.org/ffmpeg.git (release/9.0, commit e47273f4d9)'
-        '- License text: FFmpeg-LICENSE.txt'
-    ) | Set-Content -LiteralPath (Join-Path $licenses 'FFmpeg-provenance.md') -Encoding utf8
+    if ($Runtime -eq 'win-x64') { Add-WindowsFFmpeg $destination $licenses $downloadCache }
+    else { Add-LinuxFFmpeg $destination $licenses $downloadCache }
     $inventory = [Collections.Generic.List[string]]::new()
     $packageNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($manifest in Get-ChildItem $destination -File -Filter '*.deps.json') {
@@ -138,7 +190,8 @@ try {
             Copy-Item -Destination $packageNotices -Force
     }
     $inventory | Set-Content -LiteralPath (Join-Path $licenses 'PACKAGE-INVENTORY.txt') -Encoding utf8
-    Write-Host "Published Windows x64 application to $destination"
+    Write-Host "Published $Runtime application to $destination"
     Write-Host 'FFmpeg/FFprobe are bundled in the ffmpeg folder; optional model weights are not bundled.'
 }
 finally { Pop-Location }
+

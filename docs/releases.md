@@ -1,8 +1,6 @@
 # GitHub release build
 
-`.github\workflows\release.yml` builds releases only. It has **one Ubuntu 24.04
-job**, a 15-minute timeout, and no matrix, PR/branch-push checks, schedules, tests,
-lint, benchmarks, model downloads, or deployment.
+`.github\workflows\release.yml` builds releases only. It has **one Ubuntu 24.04 job**, a 25-minute timeout, and no matrix, PR/branch-push checks, schedules, tests, lint, benchmarks, model downloads, or deployment. It installs only NSIS and rpm packaging tools before building release assets.
 
 ## Release notes (CHANGELOG.md)
 
@@ -58,10 +56,7 @@ Pushing code and choosing/pushing a release version are separate user actions.
 
 ## Cost controls and build path
 
-- Linux was selected only after an actual SDK 10.0.401 Linux-container
-  cross-publish produced both Windows executables and the matching pinned SQLite
-  binary. `EnableWindowsTargeting=true` is used on Linux; no portability changes
-  to application code are required.
+- Linux packaging is built from the Avalonia desktop port with `Publish.ps1 -Runtime linux-x64`; Windows remains `win-x64` and both outputs are self-contained.
 - Checkout is shallow and pinned to the event SHA. Official checkout and
   setup-dotnet actions are pinned to verified commit SHAs.
 - setup-dotnet reads the exact `global.json` SDK and caches NuGet packages using
@@ -71,9 +66,7 @@ Pushing code and choosing/pushing a release version are separate user actions.
   mode**. The app publish builds the referenced worker; its subsequent publish
   uses `--no-build --no-restore`. The solution's tests and benchmark tool are not
   built by the release workflow.
-- WPF prunes `System.Security.Cryptography.ProtectedData` differently during
-  Linux restore. The app therefore uses `packages.linux.lock.json` on Linux and
-  its existing Windows lockfile otherwise. Package versions are unchanged.
+- Locked package restore remains enabled for release publishes; runtime-specific native assets are selected during publish.
 - Verified assets from a completed run skip SDK setup, cache restoration, and
   rebuilding entirely. No duplicate `upload-artifact` staging is used.
 
@@ -85,32 +78,37 @@ directory. CI supplies its SDK and a fresh output directory:
   -OutputDirectory $publishDirectory -RequireEmptyOutput
 ```
 
-This publishes the self-contained Windows app and worker, framework/native
-libraries, the pinned LGPL FFmpeg/FFprobe build (downloaded once from BtbN's
+This publishes the self-contained app and worker for the selected runtime (`-Runtime win-x64` by default, or `linux-x64`), framework/native libraries, the pinned LGPL FFmpeg/FFprobe build (downloaded once from BtbN's
 GitHub releases, SHA-256-verified, cached in `.tools\downloads` or `RUNNER_TEMP`),
 README, model-license notices, package licenses, and provenance
 inventory. It does not install or execute the application.
 
 ## Release assets and reruns
 
-Each GitHub Release receives exactly these two workflow-owned assets:
+Each GitHub Release receives exactly these workflow-owned assets (each with a matching `.sha256` file):
 
-- `AudioTranscriber-<tag>-win-x64.zip`
-- `AudioTranscriber-<tag>-win-x64.zip.sha256`
+- `AudioTranscriber-<tag>-win-x64.zip` (kept for the existing auto-updater)
+- `AudioTranscriber-<tag>-win-x64-setup.exe` (per-user NSIS installer; unsigned)
+- `AudioTranscriber-<tag>-linux-x64.tar.gz` (portable folder plus install/uninstall scripts)
+- `audiotranscriber_<version>_amd64.deb`
+- `audiotranscriber-<version>-1.x86_64.rpm`
 
-The ZIP contains the complete Windows x64 distribution and a
+The Windows ZIP contains the complete Windows x64 distribution and a
 `BUILD-PROVENANCE.json` identifying its tag, commit, SDK, and platform. It omits
 other-architecture Whisper runtimes and the documentation's raw public benchmark
 transcripts/data. It bundles a pinned, SHA-256-verified LGPL FFmpeg/FFprobe build
-in `ffmpeg\` with its license and provenance under `licenses\`. Model weights,
+in `ffmpeg\` with its license and provenance under `licenses\`. The Linux tarball,
+DEB, and RPM contain the Linux x64 app/worker, executable `ffmpeg/ffmpeg` and
+`ffmpeg/ffprobe`, desktop metadata, and package metadata. Model weights,
 credentials, recordings, databases, and tool caches are not release payloads.
 Framework/runtime JSON and documentation remain included.
 
 The in-app updater relies on this layout: it reads the tag from
-`BUILD-PROVENANCE.json`, looks for `AudioTranscriber-<tag>-win-x64.zip` and its
-`.sha256` on the latest (non-draft, non-prerelease) release, and verifies both
-hashes. Keep the asset names and provenance file stable. The GitHub API it uses
-is unauthenticated, so the repository must be public for updates to be found.
+`BUILD-PROVENANCE.json`, uses the Windows ZIP on Windows, the Linux tarball for
+writable Linux installs, and the `.deb`/`.rpm` package for non-writable `/opt`
+installs. It verifies each asset with GitHub SHA-256 metadata and the matching
+`.sha256` file. Keep the asset names and provenance file stable. The GitHub API it
+uses is unauthenticated, so the repository must be public for updates to be found.
 
 Publishing uses GitHub's supported release API with the job's `GITHUB_TOKEN`:
 `contents: write` is the only permission granted. The token is supplied only to
@@ -120,11 +118,11 @@ not persist credentials. There is no PAT or third-party release action.
 The script creates a **draft for an already-existing tag** with an ownership
 marker containing that exact tag and commit. GitHub's tag lookup omits drafts,
 so a missing tag lookup falls back to the authenticated, paginated release list.
-Ambiguous duplicate releases for the same tag are rejected. Both asset digests
-and the checksum content are verified using GitHub's SHA256 asset metadata before publishing.
-The remote tag is checked again immediately before and after publication.
+Ambiguous duplicate releases for the same tag are rejected. All asset digests
+and checksum contents are verified using GitHub's SHA256 asset metadata before
+publishing. The remote tag is checked again immediately before and after publication.
 
-An interrupted upload leaves a draft. A rerun may replace only the two expected
+An interrupted upload leaves a draft. A rerun may replace only the expected named
 assets of that matching, workflow-owned draft. A complete matching release is a
 no-op; a complete matching draft is finalized without rebuilding. Unrelated
 releases, moved tags, changed prerelease metadata, and incomplete/inconsistent
@@ -141,11 +139,11 @@ Run the offline release-discovery and draft-finalization regression tests with
 release functions with simulated GitHub responses, without network requests,
 SDK setup, asset uploads, or changes to releases.
 
-Release development validated the actual SDK 10.0.401 **Ubuntu 24.04** container
-path, including locked restore, both publishes, notices, and ZIP creation. The
-Linux-built EXE also opened all five WPF tabs on Windows with an empty library:
-no capture or uploads. The Windows publish path passed independently, and the
-previous user package retained its original checksum.
+Release development validates the actual SDK publish path for Windows and Linux,
+then packages the outputs without running tests in the workflow. Local validation
+for these installer changes covered Windows publish, Linux publish, Windows NSIS
+install/uninstall, Ubuntu DEB install/remove, and tarball `install.sh`/`uninstall.sh`
+on Ubuntu and Fedora containers.
 
 Package inspection checked AMD64 PE headers, matching pinned SQLite bytes,
 required runtime/worker/model-license files, excluded data and non-x64 runtimes,
@@ -153,3 +151,29 @@ and the ZIP/checksum pair. Workflow structure passed actionlint; 52 local releas
 guard/state-machine checks used mocked API operations, not live publication.
 Those are local checks, not extra CI jobs. No hosted Actions minutes, tag push,
 or real GitHub Release was used during validation.
+
+## Local package fallback
+
+Windows fallback packaging is:
+
+```powershell
+./scripts/Release.ps1 -Phase Package -Tag vX.Y.Z -Commit <commit> `
+  -PublishDirectory <win-publish> -LinuxPublishDirectory <linux-publish> `
+  -AssetDirectory <assets>
+```
+
+If `makensis` is not on PATH, the script downloads a pinned portable NSIS tool
+package into `.tools/nsis` and verifies SHA-256. The `.deb` is written in
+PowerShell/.NET as an `ar` archive with `control.tar.gz` and `data.tar.gz`, so it
+does not require `dpkg-deb`. RPM packaging uses `rpmbuild` when available (CI
+installs `rpm`); local Windows packaging warns and skips the RPM if `rpmbuild` is
+absent.
+
+Linux package dependencies were selected from the .NET self-contained runtime and
+native desktop/audio payload by running `ldd` in Ubuntu 24.04 against the apphost,
+Skia/HarfBuzz, SQLite, ONNX/sherpa, whisper, and bundled FFmpeg/FFprobe binaries:
+`libc6`, `libstdc++6`, `libgcc-s1`, ICU, `libfontconfig1`, X11/ICE/SM/Xext/Xrandr/Xi/Xcursor,
+`libgomp1`, `libpulse0`, and `pulseaudio-utils`. Vulkan and PipeWire/PulseAudio are
+recommendations.
+
+

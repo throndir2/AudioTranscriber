@@ -39,24 +39,30 @@ pointing to that commit.
 
 ## What the job does
 
-The job checks out the exact event revision, sets up the SDK from `global.json`,
-restores cached locked packages, runs `Publish.ps1` for a self-contained Windows x64
-app/worker package, then uses `Release.ps1` to package and publish release assets.
+The job checks out the exact event revision, installs the packagers (`nsis`, `rpm`), sets up
+the SDK from `global.json`, restores cached locked packages, runs `Publish.ps1` twice
+(self-contained `win-x64` and `linux-x64` app/worker), then uses `Release.ps1` to package
+and publish release assets.
 
 It does not install or execute the app, run tests, run benchmarks, or build ordinary CI.
 
 ## Assets
 
-Each release receives exactly:
+Each release receives exactly these files, each with a matching `.sha256`:
 
-- `AudioTranscriber-<tag>-win-x64.zip`
-- `AudioTranscriber-<tag>-win-x64.zip.sha256`
+- `AudioTranscriber-<tag>-win-x64.zip` (portable; also what Windows auto-update downloads)
+- `AudioTranscriber-<tag>-win-x64-setup.exe` (NSIS per-user installer, `installer\windows`)
+- `AudioTranscriber-<tag>-linux-x64.tar.gz` (with `install.sh`/`uninstall.sh`; Linux home-folder auto-update)
+- `audiotranscriber_<version>_amd64.deb` (written by `Release.ps1` itself, no `dpkg-deb` needed)
+- `audiotranscriber-<version>-1.x86_64.rpm` (needs `rpmbuild`; skipped with a warning on hosts without it)
 
-The ZIP contains the complete Windows x64 distribution and `BUILD-PROVENANCE.json`. It
-omits model weights, credentials, recordings, databases, tool caches, non-x64 Whisper
-runtimes, and raw public benchmark transcripts/data.
+The ZIP and tarball contain the complete distribution and `BUILD-PROVENANCE.json`. They
+omit model weights, credentials, recordings, databases, tool caches, other platforms'
+natives, and raw public benchmark transcripts/data. The `.deb`/`.rpm` install to
+`/opt/audiotranscriber` with `/usr/bin/audiotranscriber`, a desktop entry, hicolor icons and
+AppStream metadata, and declare the system libraries they need.
 
-The in-app updater depends on this layout and verifies both GitHub asset metadata and
+The in-app updater depends on these names and verifies both GitHub asset metadata and
 the `.sha256` file.
 
 ## Local release tests

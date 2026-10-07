@@ -1,35 +1,58 @@
 # Installing AudioTranscriber
 
-AudioTranscriber is a Windows x64 desktop app. Release packages are unsigned ZIP files
-named like `AudioTranscriber-v0.1.33-win-x64.zip`, with a matching `.sha256` file.
+AudioTranscriber runs on Windows x64 and Linux x64. Every
+[release](https://github.com/throndir2/AudioTranscriber/releases/latest) has one download
+per system, each with a matching `.sha256` file. Builds are unsigned.
 
-## Install a release
+| System | Asset | Install |
+| --- | --- | --- |
+| Windows 10/11 | `AudioTranscriber-<tag>-win-x64-setup.exe` | Run it. Installs for your user only (no admin) into `%LOCALAPPDATA%\Programs\AudioTranscriber` with a Start menu shortcut and an uninstaller (Settings → Apps). Add `/S` for a silent install. |
+| Windows (portable) | `AudioTranscriber-<tag>-win-x64.zip` | Extract to a folder you can write to and run `AudioTranscriber.App.exe`. Keep the whole folder together. |
+| Ubuntu, Debian, Mint, Pop!_OS | `audiotranscriber_<version>_amd64.deb` | `sudo apt install ./audiotranscriber_<version>_amd64.deb` |
+| Fedora, openSUSE, RHEL | `audiotranscriber-<version>-1.x86_64.rpm` | `sudo dnf install ./audiotranscriber-<version>-1.x86_64.rpm` (`zypper install` on openSUSE) |
+| Any other Linux | `AudioTranscriber-<tag>-linux-x64.tar.gz` | Extract, then `./install.sh` (home-folder install) or `./install.sh --system` (`/opt`, uses sudo). `./uninstall.sh` removes it. |
 
-1. Open [the latest release](https://github.com/throndir2/AudioTranscriber/releases/latest).
-2. Download `AudioTranscriber-<tag>-win-x64.zip`.
-3. Extract the ZIP to a normal folder you can write to.
-4. Run `AudioTranscriber.App.exe` from the extracted folder.
-5. Keep the whole extracted folder together, including `ffmpeg`, `licenses`, the
-   worker, and native runtime libraries.
+Every package bundles the .NET runtime, a pinned LGPL FFmpeg/FFprobe build, SQLite and the
+speech/speaker runtimes, so nothing else needs to be installed by hand. The packages also
+include documentation, model notices, dependency license files and a package inventory
+under `licenses`.
 
-The ZIP includes a pinned LGPL FFmpeg/FFprobe build, so a clean PC does not need a
-separate FFmpeg install. It also includes documentation, model notices, dependency
-license files, and package inventory under `licenses`.
+## Prerequisites
 
-## First launch prerequisites
+**Windows:** local Whisper needs the Microsoft Visual C++ 2015-2022 x64 runtime (14.40 or
+newer). The setup installs it if it is missing, and the app checks again on startup and
+runs Microsoft's official installer if needed (approve the Windows prompt).
 
-Local Whisper needs the Microsoft Visual C++ 2015-2022 x64 runtime, version 14.40 or
-newer. The app checks this on startup and runs Microsoft's official installer if it is
-missing or outdated; approve the Windows administrator prompt if shown.
+**Linux:** the app uses a few system libraries: the PulseAudio client (`libpulse`, served
+by PipeWire on modern desktops) and `pactl` for recording, ICU, fontconfig and X11 for the
+window (it runs under Wayland through XWayland). `apt` and `dnf` install them automatically
+from the package's dependencies. `install.sh` checks for them and offers to install them
+with `apt-get`, `dnf`, `zypper` or `pacman` (`--yes` answers for you).
 
 The default local models download on first start and are verified before use. You can
 start recording while they download; queued audio is transcribed when they are ready.
 
+## Linux notes
+
+- Recording captures the **monitor** of the selected output (what you hear) plus the
+  selected microphone, through PulseAudio or PipeWire (`pipewire-pulse`).
+- GPU Parakeet is Windows-only for now; Linux runs Parakeet on the CPU. Whisper can use the
+  GPU through Vulkan (`libvulkan1`).
+- Saved keys are encrypted with a random per-user key in `~/.config/AudioTranscriber`
+  (readable only by your account). Windows uses DPAPI.
+- The app appears in your launcher as **AudioTranscriber** with its icon, and in GNOME
+  Software / KDE Discover through its AppStream metadata.
+
 ## Updates
 
 Release builds check GitHub for the latest non-draft, non-prerelease release. With
-automatic updates on, the app downloads and verifies the new ZIP in the background, then
-installs it when the app closes or when you choose **Restart to update**.
+automatic updates on, the app downloads and verifies the new version in the background,
+then installs it when the app closes or when you choose **Restart to update**:
+
+- Windows (setup or ZIP): the files are replaced in place.
+- Linux home-folder installs (`install.sh`): the tarball is applied in place.
+- Linux `.deb`/`.rpm` installs: the new package is installed through `apt`/`dnf` after you
+  approve the system password prompt.
 
 For details, see [Updates and Closing](Updates-and-Closing) and the source docs at
 [docs/usage.md](https://github.com/throndir2/AudioTranscriber/blob/main/docs/usage.md).

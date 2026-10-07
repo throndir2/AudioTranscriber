@@ -9,10 +9,13 @@
 [![Latest release](https://img.shields.io/github/v/release/throndir2/AudioTranscriber?style=for-the-badge&color=c9a227&label=latest)](https://github.com/throndir2/AudioTranscriber/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/throndir2/AudioTranscriber/total?style=for-the-badge&color=a67c00)](https://github.com/throndir2/AudioTranscriber/releases)
 ![Windows x64](https://img.shields.io/badge/Windows-x64-8d6e1f?style=for-the-badge&logo=windows&logoColor=white)
+![Linux x64](https://img.shields.io/badge/Linux-x64-8d6e1f?style=for-the-badge&logo=linux&logoColor=white)
 ![Runs locally](https://img.shields.io/badge/runs-100%25%20local-6b5414?style=for-the-badge)
 ![Free](https://img.shields.io/badge/price-free-4e3d0e?style=for-the-badge)
 
 <a href="https://github.com/throndir2/AudioTranscriber/releases/latest"><img src="https://img.shields.io/badge/Download-for%20Windows-c9a227?style=for-the-badge&logo=windows&logoColor=white" alt="Download AudioTranscriber for Windows" height="44"></a>
+&nbsp;
+<a href="https://github.com/throndir2/AudioTranscriber/releases/latest"><img src="https://img.shields.io/badge/Download-for%20Linux-c9a227?style=for-the-badge&logo=linux&logoColor=white" alt="Download AudioTranscriber for Linux" height="44"></a>
 &nbsp;
 <a href="https://www.buymeacoffee.com/throndir" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="44"></a>
 
@@ -68,7 +71,7 @@ The speech model downloads by itself the first time you start the app.
 <td width="50%" valign="top">
 
 ### 🎙️ Record anything
-- Captures the **Windows output device** you pick, so it hears everything your PC plays.
+- Captures the **output device** you pick (WASAPI on Windows, PulseAudio/PipeWire on Linux), so it hears everything your PC plays.
 - Records **Discord server voice channels** through your own bot, with every line named after the Discord user who said it.
 - Adds your **microphone as a separate track**, with **echo reduction** so the call isn't transcribed twice.
 - **Import** long audio or video files (FFmpeg is bundled).
@@ -81,7 +84,7 @@ The speech model downloads by itself the first time you start the app.
 ### ⚡ Fast, accurate, local
 - **NVIDIA Parakeet TDT v3** on your CPU by default: 25 European languages, detected automatically.
 - In testing it made **about a third fewer word errors** than Whisper large-v3-turbo and used far less CPU.
-- Have an **NVIDIA GPU**? The app offers to run Parakeet on it instead.
+- Have an **NVIDIA GPU**? On Windows the app offers to run Parakeet on it instead.
 - **Recommended setup for this PC** reads your CPU, RAM and graphics card and fits the speech models and a local AI model to them.
 - **Local Whisper** for any other language.
 - Optional **NVIDIA cloud** models, only when you allow it for a session.
@@ -154,17 +157,28 @@ your user name scrubbed), and a dark gold theme.
 
 ## 🚀 Up and running in a minute
 
-1. **[Download the latest release](https://github.com/throndir2/AudioTranscriber/releases/latest)**
-   (`AudioTranscriber-<version>-win-x64.zip`) and extract it anywhere.
-2. Run **`AudioTranscriber.App.exe`**. The speech and speaker models download and
-   verify themselves on first start (you can record while they download).
+1. **[Download the latest release](https://github.com/throndir2/AudioTranscriber/releases/latest)** for your system:
+
+   | System | Download | Install |
+   | --- | --- | --- |
+   | **Windows 10/11 x64** | `AudioTranscriber-<version>-win-x64-setup.exe` | Run it. Installs for your user only (no admin) with a Start menu shortcut and an uninstaller. Prefer no installer? Extract the `win-x64.zip` and run `AudioTranscriber.App.exe`. |
+   | **Ubuntu / Debian / Mint** | `audiotranscriber_<version>_amd64.deb` | `sudo apt install ./audiotranscriber_<version>_amd64.deb` |
+   | **Fedora / openSUSE** | `audiotranscriber-<version>-1.x86_64.rpm` | `sudo dnf install ./audiotranscriber-<version>-1.x86_64.rpm` |
+   | **Any other Linux** | `AudioTranscriber-<version>-linux-x64.tar.gz` | Extract it and run `./install.sh` (installs to your home folder; `--system` for `/opt`). |
+
+2. Start **AudioTranscriber** from the Start menu or your app launcher. The speech and
+   speaker models download and verify themselves on first start (you can record while
+   they download).
 3. Click **Start recording**. That's it. 🎉
 
 > [!NOTE]
-> AudioTranscriber runs on 64-bit Windows. The ZIP isn't code-signed, so Windows
-> may ask you to confirm the first time it runs. Keep the extracted folder together;
-> it includes FFmpeg and everything else it needs. If the Microsoft Visual C++
-> runtime is missing, the app runs Microsoft's installer for you.
+> AudioTranscriber runs on 64-bit Windows and Linux. Everything it needs, including
+> FFmpeg and the .NET runtime, is bundled. On Linux, `apt`/`dnf` install the few system
+> libraries it uses (PulseAudio/PipeWire client, ICU, X11, fontconfig) automatically, and
+> `install.sh` offers to install them with your distro's package manager. On Windows the
+> installer isn't code-signed, so SmartScreen may ask you to confirm; if the Microsoft
+> Visual C++ runtime is missing, the installer and app run Microsoft's installer for you.
+> GPU Parakeet is Windows-only for now; Linux runs Parakeet on the CPU.
 
 New to it? The **[First Steps](https://github.com/throndir2/AudioTranscriber/wiki/First-Steps)**
 page in the wiki walks through your first session.
@@ -173,7 +187,7 @@ page in the wiki walks through your first session.
 
 - **Local by default.** Recording, transcription and speaker labels all run on your PC.
 - **Nothing uploads without your say-so.** Cloud models need consent for each session, and it's off by default.
-- **Keys stay out of files.** An NVIDIA key is kept in memory unless you ask Windows to protect and remember it.
+- **Keys stay out of files.** An NVIDIA key is kept in memory unless you ask the app to remember it, encrypted for your user account.
 - **Your audio is safe.** Originals stay on disk with checksums, so transcripts can be rebuilt at any time.
 
 More in [Privacy and Uploads](https://github.com/throndir2/AudioTranscriber/wiki/Privacy-and-Uploads).
@@ -197,11 +211,11 @@ developers:
 The wiki's source lives in [`docs/wiki`](docs/wiki), and detailed reference docs
 are in [`docs`](docs).
 
-**Building from source** (PowerShell on Windows x64):
+**Building from source** (PowerShell on Windows x64; `Publish.ps1 -Runtime linux-x64` cross-builds Linux):
 
 ```powershell
 .\scripts\Setup.ps1      # pinned .NET 10 SDK into .tools, nothing global
 .\scripts\Start-App.ps1  # run the app
 .\scripts\Test.ps1       # run the tests
-.\scripts\Publish.ps1    # build artifacts\publish\win-x64
+.\scripts\Publish.ps1    # build artifacts\publish\win-x64 (-Runtime linux-x64 for Linux)
 ```

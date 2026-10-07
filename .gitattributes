@@ -1,3 +1,9 @@
 # Keep vendored protocol sources and notices in their upstream line-ending form.
 src/AudioTranscriber.Providers/Protocol/riva/proto/*.proto text eol=lf whitespace=-blank-at-eol
 src/AudioTranscriber.Providers/Protocol/LICENSE-* text eol=lf
+
+# Linux installer scripts and metadata must keep LF line endings.
+installer/linux/** text=auto eol=lf
+*.sh text eol=lf
+*.png binary
+*.so binary

@@ -1,27 +1,30 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
-    <UseWPF>true</UseWPF>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <PlatformTarget>x64</PlatformTarget>
-    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
-    <!-- WPF package pruning differs on Linux; retain locked restores on both hosts. -->
-    <NuGetLockFilePath Condition="$([MSBuild]::IsOSPlatform('Linux'))">packages.linux.lock.json</NuGetLockFilePath>
+    <RuntimeIdentifiers>win-x64;linux-x64</RuntimeIdentifiers>
     <AssemblyName>AudioTranscriber.App</AssemblyName>
     <RootNamespace>AudioTranscriber.App</RootNamespace>
-    <!-- Regenerate with scripts\New-AppIcon.ps1. Embedded in the exe for Explorer/shortcuts. -->
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
-    <!-- Also a WPF resource so every window sets it explicitly; the exe fallback shows the .NET icon under dotnet.exe. -->
-    <Resource Include="Assets\AppIcon.ico" />
+    <AvaloniaResource Include="Assets\AppIcon.ico" />
+    <AvaloniaResource Include="Assets\AppIcon.png" />
     <ProjectReference Include="..\AudioTranscriber.Application\AudioTranscriber.Application.csproj" />
+    <ProjectReference Include="..\AudioTranscriber.Storage\AudioTranscriber.Storage.csproj" />
+    <ProjectReference Include="..\AudioTranscriber.Integrations\AudioTranscriber.Integrations.csproj" />
+    <PackageReference Include="Avalonia" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Controls.DataGrid" Version="11.3.13" />
     <ProjectReference Include="..\AudioTranscriber.Discord\AudioTranscriber.Discord.csproj" />
-    <!-- Native GPU runtime ships via build/ targets, which do not flow transitively. -->
     <PackageReference Include="Whisper.net.Runtime.Vulkan" Version="1.9.1" />
-    <!-- Apache-2.0 PDF text extraction for output-template reference files. -->
     <PackageReference Include="PdfPig" Version="0.1.16" />
   </ItemGroup>
 </Project>
+
+

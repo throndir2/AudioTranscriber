@@ -1,9 +1,11 @@
 AudioTranscriber Discord voice: third-party notices
 ==================================================
 
-AudioTranscriber's Discord voice recording ships libdave.dll, Discord's official build of libdave v1.2.1 for Windows x64
-(https://github.com/discord/libdave/releases/tag/v1.2.1/cpp, asset libdave-Windows-X64-boringssl.zip,
-SHA-256 eb4a7bbcd755b916d306cc6364a64de63c62355296e3779b262f9a6afae8ea2f), unmodified. It provides DAVE, Discord's
+AudioTranscriber's Discord voice recording ships Discord's official, unmodified builds of libdave v1.2.1
+(https://github.com/discord/libdave/releases/tag/v1.2.1/cpp): libdave.dll on Windows x64 (asset
+libdave-Windows-X64-boringssl.zip, SHA-256 eb4a7bbcd755b916d306cc6364a64de63c62355296e3779b262f9a6afae8ea2f) and
+libdave.so on Linux x64 (asset libdave-Linux-X64-boringssl.zip, SHA-256
+7fdf10a7df894406291463130a322c04d7de58085b602500866a11874e8907b4). It provides DAVE, Discord's
 end-to-end encryption for voice, which NetCord (MIT, https://github.com/NetCordDev/NetCord) calls. libdave statically
 links mlspp, nlohmann/json and BoringSSL. Their licenses follow, exactly as shipped in that archive's licenses folder.
 

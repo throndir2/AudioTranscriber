@@ -37,9 +37,11 @@ public static class MediaToolLocator
         return null;
     }
 
-    public static string MissingMessage(string name) =>
-        $"{ExecutableName(name)} was not found. Release packages include it in the '{BundledFolder}' folder next to " +
-        "AudioTranscriber.App.exe; re-extract the complete ZIP, or install FFmpeg (for example: winget install Gyan.FFmpeg) and restart the app.";
+    public static string MissingMessage(string name) => OperatingSystem.IsWindows()
+        ? $"{ExecutableName(name)} was not found. Release packages include it in the '{BundledFolder}' folder next to " +
+          "AudioTranscriber.App.exe; re-extract the complete ZIP, or install FFmpeg (for example: winget install Gyan.FFmpeg) and restart the app."
+        : $"{name} was not found. Release packages include it in the '{BundledFolder}' folder next to AudioTranscriber.App; " +
+          "reinstall the package, or install FFmpeg (for example: sudo apt install ffmpeg) and restart the app.";
 
     private static bool IsBareName(string executable) =>
         executable.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, ':']) < 0;

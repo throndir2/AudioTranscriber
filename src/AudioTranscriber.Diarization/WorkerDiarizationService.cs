@@ -33,7 +33,7 @@ public sealed class WorkerDiarizationService : IDiarizationService, ISpeakerEnro
             if (dotnetHostPath is not null)
                 throw new ArgumentException("Specify a worker DLL when using an explicit dotnet host.");
         }
-        if (!Path.GetExtension(executable).Equals(".exe", StringComparison.OrdinalIgnoreCase))
+        if (OperatingSystem.IsWindows() && !Path.GetExtension(executable).Equals(".exe", StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException("Diarization requires a local Windows executable host.");
         this.workDirectory = LocalPaths.RequireDirectoryPath(workDirectory);
         this.models = new(Path.GetFullPath(models.SegmentationModelPath), Path.GetFullPath(models.EmbeddingModelPath));
@@ -110,7 +110,7 @@ public sealed class WorkerDiarizationService : IDiarizationService, ISpeakerEnro
             var runtimeKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
                 "SystemRoot", "WINDIR", "PATH", "ProgramFiles", "ProgramFiles(x86)",
-                "DOTNET_ROOT", "DOTNET_ROOT_X64"
+                "DOTNET_ROOT", "DOTNET_ROOT_X64", "HOME", "TMPDIR", "LD_LIBRARY_PATH", "LANG"
             };
             foreach (var name in inherited.Keys.Where(name => !runtimeKeys.Contains(name)).ToArray())
                 inherited.Remove(name);

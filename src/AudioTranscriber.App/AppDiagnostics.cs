@@ -2,8 +2,7 @@ using System.Diagnostics;
 using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Windows;
-using System.Windows.Threading;
+using Avalonia.Threading;
 using AudioTranscriber.Application;
 using AudioTranscriber.Core;
 using AudioTranscriber.Providers;
@@ -31,8 +30,7 @@ public static class AppDiagnostics
             AppLog.Error("Unobserved background task exception.", e.Exception);
             e.SetObserved();
         };
-        if (System.Windows.Application.Current is { } app)
-            app.DispatcherUnhandledException += (_, e) => AppLog.Error("Unhandled UI exception.", e.Exception);
+        Dispatcher.UIThread.UnhandledException += (_, e) => AppLog.Error("Unhandled UI exception.", e.Exception);
     }
 
     public static string AppVersion()
@@ -44,7 +42,7 @@ public static class AppDiagnostics
 
     private static IEnumerable<string> RuntimeFacts()
     {
-        yield return $"Windows {Environment.OSVersion.Version} ({RuntimeInformation.OSArchitecture})";
+        yield return $"{RuntimeInformation.OSDescription} ({RuntimeInformation.OSArchitecture})";
         yield return RuntimeInformation.FrameworkDescription;
         yield return $"{RuntimeInformation.ProcessArchitecture} process";
         yield return $"{Environment.ProcessorCount} logical CPUs";
@@ -154,6 +152,15 @@ public static class AppDiagnostics
     public static void OpenFolder(string folder)
     {
         Directory.CreateDirectory(folder);
-        Process.Start(new ProcessStartInfo("explorer.exe", $"\"{folder}\"") { UseShellExecute = true })?.Dispose();
+        OpenFolderProcess(folder);
+    }
+
+    private static void OpenFolderProcess(string folder)
+    {
+        var command = OperatingSystem.IsWindows() ? "explorer.exe" : "xdg-open";
+        var start = OperatingSystem.IsWindows()
+            ? new ProcessStartInfo(command, $"\"{folder}\"") { UseShellExecute = true }
+            : new ProcessStartInfo(command, folder) { UseShellExecute = false };
+        Process.Start(start)?.Dispose();
     }
 }

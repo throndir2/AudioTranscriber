@@ -1,40 +1,32 @@
-using System.Windows;
-using System.Windows.Controls;
+using Avalonia;
+using Avalonia.Controls;
 
 namespace AudioTranscriber.App;
 
-/// <summary>
-/// With text search off, an editable ComboBox never updates its selection when its Text changes, so the last picked
-/// entry stays selected and picking it again does nothing. SyncSelection re-matches the selection to the text each
-/// time the list opens, so every pick changes the text.
-/// </summary>
+/// <summary>Syncs an editable ComboBox selection to its text when the drop-down opens.</summary>
 public static class EditableComboBox
 {
-    public static readonly DependencyProperty SyncSelectionProperty = DependencyProperty.RegisterAttached(
-        "SyncSelection", typeof(bool), typeof(EditableComboBox), new PropertyMetadata(false, OnSyncSelectionChanged));
+    public static readonly AttachedProperty<bool> SyncSelectionProperty = AvaloniaProperty.RegisterAttached<ComboBox, bool>(
+        "SyncSelection", typeof(EditableComboBox));
 
-    public static bool GetSyncSelection(DependencyObject element) => (bool)element.GetValue(SyncSelectionProperty);
-    public static void SetSyncSelection(DependencyObject element, bool value) => element.SetValue(SyncSelectionProperty, value);
-
-    private static void OnSyncSelectionChanged(DependencyObject element, DependencyPropertyChangedEventArgs e)
+    static EditableComboBox() => SyncSelectionProperty.Changed.AddClassHandler<ComboBox>((combo, e) =>
     {
-        if (element is not ComboBox combo) return;
         combo.DropDownOpened -= OnDropDownOpened;
-        if ((bool)e.NewValue) combo.DropDownOpened += OnDropDownOpened;
-    }
+        if (e.NewValue is true) combo.DropDownOpened += OnDropDownOpened;
+    });
+
+    public static bool GetSyncSelection(AvaloniaObject element) => element.GetValue(SyncSelectionProperty);
+    public static void SetSyncSelection(AvaloniaObject element, bool value) => element.SetValue(SyncSelectionProperty, value);
 
     private static void OnDropDownOpened(object? sender, EventArgs e) => SyncSelectionToText((ComboBox)sender!);
 
-    /// <summary>Selects the entry whose text equals the combo's text, or nothing, keeping the text unchanged.</summary>
     public static void SyncSelectionToText(ComboBox combo)
     {
         var text = combo.Text ?? "";
-        var match = -1;
-        for (var i = 0; i < combo.Items.Count; i++)
-            if (string.Equals(combo.Items[i]?.ToString(), text, StringComparison.CurrentCulture)) { match = i; break; }
+        var items = combo.ItemsSource?.Cast<object?>().ToArray() ?? combo.Items.Cast<object?>().ToArray();
+        var match = Array.FindIndex(items, item => string.Equals(item?.ToString(), text, StringComparison.CurrentCulture));
         if (combo.SelectedIndex == match) return;
         combo.SelectedIndex = match;
-        // Clearing the selection also clears an editable combo's text; put it back.
         if (combo.Text != text) combo.Text = text;
     }
 }

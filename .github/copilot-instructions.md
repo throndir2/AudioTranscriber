@@ -1,17 +1,19 @@
 # AudioTranscriber repository instructions
 
-AudioTranscriber is a public, Windows-only (.NET/WPF) recording-first audio
+AudioTranscriber is a public, Windows and Linux x64 (.NET/Avalonia) recording-first audio
 transcriber with local/hosted speech recognition, speaker diarization, a session
 library, output templates, and an MCP server. Releases are public on GitHub and
 installed copies self-update from the latest release.
 
 ## Layout
 
-- `src\AudioTranscriber.App` – WPF desktop app (UI, updater, templates).
+- `src\AudioTranscriber.App` – Avalonia desktop app for Windows and Linux (UI, updater, templates). Keep UI code cross-platform; guard Windows-only APIs with `OperatingSystem.IsWindows()`.
 - `src\AudioTranscriber.Worker` – speaker/diarization worker process.
-- `src\AudioTranscriber.{Core,Application,Audio,Diarization,Providers,Storage,Integrations}` – libraries; `Core` has no UI, capture, inference, or native dependencies.
+- `src\AudioTranscriber.{Core,Application,Audio,Diarization,Providers,Storage,Integrations,Discord}` – `net10.0` libraries; `Core` has no UI, capture, inference, or native dependencies. Audio capture/playback is WASAPI on Windows and PulseAudio/PipeWire (`PulseAudio.cs`) on Linux.
+- `tools\AudioTranscriber.UiMcp` – Windows-only UI Automation MCP server that drives the real app window.
+- `installer\` – NSIS Windows setup script and Linux desktop entry, icons, AppStream metadata, `install.sh`/`uninstall.sh`.
 - `tests\*.Tests` – xUnit tests; `tests\Release.Tests.ps1` – offline release-script tests.
-- `scripts\` – `Setup.ps1`, `Test.ps1`, `Start-App.ps1`, `Publish.ps1`, `Release.ps1`.
+- `scripts\` – `Setup.ps1`, `Test.ps1`, `Start-App.ps1`, `Publish.ps1` (`-Runtime win-x64|linux-x64`), `Release.ps1` (ZIP, setup.exe, tar.gz, .deb, .rpm).
 - `docs\` – user and maintainer docs (`usage.md`, `releases.md`, `privacy.md`, ...).
 
 ## Build and test (local only)

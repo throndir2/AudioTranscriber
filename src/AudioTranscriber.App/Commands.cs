@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
-using System.Windows;
 using System.Windows.Input;
 
 namespace AudioTranscriber.App;
@@ -19,6 +18,12 @@ public abstract class ObservableObject : INotifyPropertyChanged
 
     protected void Changed([CallerMemberName] string? name = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+}
+
+internal static class CommandManager
+{
+    public static event EventHandler? RequerySuggested;
+    public static void InvalidateRequerySuggested() => RequerySuggested?.Invoke(null, EventArgs.Empty);
 }
 
 public sealed class RelayCommand(Action execute, Func<bool>? canExecute = null) : ICommand
@@ -58,7 +63,6 @@ public sealed class AsyncCommand(Func<Task> execute, Func<bool>? canExecute = nu
         catch (Exception error) { CommandErrors.Show(error); }
         finally { running = false; CommandManager.InvalidateRequerySuggested(); }
     }
-
 }
 
 internal static class CommandErrors
@@ -66,9 +70,9 @@ internal static class CommandErrors
     public static void Show(Exception error)
     {
         AudioTranscriber.Core.AppLog.Error("A command failed.", error);
-        MessageBox.Show(
+        _ = DesktopDialogs.ShowMessageAsync("AudioTranscriber",
             "The action could not complete. Check your selected session, files, and device configuration. Credentials and remote error bodies are not displayed." +
             Environment.NewLine + Environment.NewLine + "Details are in the diagnostic log; use Save diagnostics ZIP on the Privacy / models tab to share them.",
-            "AudioTranscriber", MessageBoxButton.OK, MessageBoxImage.Warning);
+            NativeDialogIcon.Warning);
     }
 }

@@ -41,7 +41,8 @@ public sealed class DiscordBot : IAsyncDisposable
     /// <summary>Raised off the UI thread when status, servers, channels or the joined channel change.</summary>
     public event Action? Changed;
 
-    public static bool VoiceLibraryPresent => File.Exists(Path.Combine(AppContext.BaseDirectory, "libdave.dll"));
+    public static string VoiceLibraryName => OperatingSystem.IsWindows() ? "libdave.dll" : "libdave.so";
+    public static bool VoiceLibraryPresent => File.Exists(Path.Combine(AppContext.BaseDirectory, VoiceLibraryName));
 
     public async Task StartAsync(string token, CancellationToken cancellation = default)
     {
@@ -107,7 +108,7 @@ public sealed class DiscordBot : IAsyncDisposable
     public async Task<DiscordVoiceRecorder> JoinAsync(DiscordVoiceChannel channel, CancellationToken token = default)
     {
         if (Client is not { } current || Status.State != DiscordBotState.Online) throw new InvalidOperationException("Connect the Discord bot first.");
-        if (!VoiceLibraryPresent) throw new InvalidOperationException("libdave.dll (Discord's voice encryption) is missing beside the app; reinstall the app.");
+        if (!VoiceLibraryPresent) throw new InvalidOperationException($"{VoiceLibraryName} (Discord's voice encryption) is missing beside the app; reinstall the app.");
         if (recorder?.Recording == true) throw new InvalidOperationException("Stop the recording before switching channels.");
         await LeaveAsync().ConfigureAwait(false);
         foreach (var state in current.Cache.Guilds.GetValueOrDefault(channel.GuildId)?.VoiceStates.Values ?? [])

@@ -1,6 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Windows.Input;
-using System.Windows.Threading;
+using Avalonia.Threading;
 using AudioTranscriber.Application;
 using AudioTranscriber.Core;
 using AudioTranscriber.Storage;
@@ -97,10 +97,10 @@ public sealed class MainViewModel : ObservableObject
         ImportVttCommand = new AsyncCommand(ImportVttAsync, CanWorkWithSession);
         FetchTeamsCommand = new AsyncCommand(FetchTeamsAsync, CanWorkWithSession);
         InstallModelsCommand = new AsyncCommand(InstallModelsAsync, () => !Busy && !closing && !controller.ModelSetupRunning);
-        ChooseWhisperModelCommand = new RelayCommand(ChooseWhisperModel, () => !Busy && !closing);
+        ChooseWhisperModelCommand = new AsyncCommand(ChooseWhisperModelAsync, () => !Busy && !closing);
         InstallWhisperModelCommand = new AsyncCommand(InstallWhisperModelAsync, () => !Busy && !closing && !controller.ModelSetupRunning);
         InstallParakeetModelCommand = new AsyncCommand(InstallParakeetModelAsync, () => !Busy && !closing && !controller.ModelSetupRunning);
-        UseGpuCommand = new RelayCommand(() => AskGpu(null), () => !closing && controller.GpuParakeetEnabled != true);
+        UseGpuCommand = new AsyncCommand(() => AskGpuAsync(null), () => !closing && controller.GpuParakeetEnabled != true);
         UseCpuCommand = new RelayCommand(() => Guard(() =>
         {
             controller.SetGpuParakeet(false);
@@ -122,7 +122,7 @@ public sealed class MainViewModel : ObservableObject
             "Transcription paused; recording, if active, continues."), () => SelectedSession is not null && !closing);
         ResumeCommand = new RelayCommand(() => SessionAction(controller.ResumeTranscription,
             "Transcription resumed with the session's provider and consent."), () => SelectedSession is not null && !closing);
-        CancelJobsCommand = new RelayCommand(CancelJobs, () => SelectedSession is not null && !closing);
+        CancelJobsCommand = new AsyncCommand(CancelJobsAsync, () => SelectedSession is not null && !closing);
         GrantConsentCommand = new RelayCommand(GrantConsent, () => SelectedSession is not null && SelectedCloudConsent && !closing);
         RevokeConsentCommand = new RelayCommand(() => SessionAction(id => controller.SetCloudConsent(id, false),
             "Cloud consent revoked. Future uploads stop; already sent audio cannot be recalled."), () => SelectedSession is not null && !closing);
@@ -152,27 +152,26 @@ public sealed class MainViewModel : ObservableObject
         RecognizeVoicesCommand = new AsyncCommand(RecognizeVoicesAsync, () => CanWorkWithSession() && Voices.Count > 0);
         RememberSessionVoicesCommand = new AsyncCommand(RememberSessionVoicesAsync, CanWorkWithSession);
         RememberAllVoicesCommand = new AsyncCommand(RememberAllVoicesAsync, () => !Busy && !closing);
-        RenameVoiceCommand = new RelayCommand(RenameVoice, () => SelectedVoice is not null && !closing);
-        ForgetVoiceCommand = new RelayCommand(ForgetVoice, () => SelectedVoice is not null && !closing);
-        ForgetAllVoicesCommand = new RelayCommand(ForgetAllVoices, () => Voices.Count > 0 && !closing);
+        RenameVoiceCommand = new AsyncCommand(RenameVoiceAsync, () => SelectedVoice is not null && !closing);
+        ForgetVoiceCommand = new AsyncCommand(ForgetVoiceAsync, () => SelectedVoice is not null && !closing);
+        ForgetAllVoicesCommand = new AsyncCommand(ForgetAllVoicesAsync, () => Voices.Count > 0 && !closing);
         PlayRowCommand = new AsyncCommand(PlayRowAsync, () => SelectedRow is not null && !Busy && !closing);
         PlayTrackCommand = new AsyncCommand(PlayTrackAsync, () => SelectedSession is not null && SelectedTrack is not null && !Busy && !closing);
         StopPlaybackCommand = new RelayCommand(() => Guard(controller.StopPlayback), () => !closing);
         ExportCommand = new AsyncCommand(ExportAsync, CanWorkWithSession);
         CancelOperationCommand = new RelayCommand(() => operationCancellation?.Cancel(),
             () => Busy && operationCancellation is not null && !closing);
-        BrowseLiveFileCommand = new RelayCommand(() =>
+        BrowseLiveFileCommand = new AsyncCommand(async () =>
         {
-            if (dialogs.SaveLiveTranscript(LiveFilePath) is { } path) LiveFilePath = path;
+            if (await dialogs.SaveLiveTranscriptAsync(LiveFilePath) is { } path) LiveFilePath = path;
         }, () => !closing);
         LiveMirrorSelectedCommand = new RelayCommand(() => { if (SelectedSession is { } s) StartLiveFile(s.Id); },
             () => SelectedSession is not null && !closing);
         StopLiveFileCommand = new RelayCommand(StopLiveFile, () => liveSessionId is not null && !closing);
         ClearActivityCommand = new RelayCommand(() => { ActivityLog.Clear(); lastLogText = null; });
-        CopyActivityCommand = new RelayCommand(() =>
+        CopyActivityCommand = new AsyncCommand(async () =>
         {
-            try { System.Windows.Clipboard.SetText(string.Join(Environment.NewLine, ActivityLog)); }
-            catch (System.Runtime.InteropServices.ExternalException) { SetStatus("The clipboard is busy; try Copy again.", true); }
+            await DesktopDialogs.SetClipboardTextAsync(string.Join(Environment.NewLine, ActivityLog));
         }, () => ActivityLog.Count > 0);
         SaveDiagnosticsCommand = new AsyncCommand(SaveDiagnosticsAsync, () => !closing);
         OpenLogsFolderCommand = new RelayCommand(() => Guard(() =>
@@ -195,8 +194,7 @@ public sealed class MainViewModel : ObservableObject
         controller.Notification += OnNotification;
         controller.LevelsChanged += OnLevelsChanged;
         controller.TranscriptChanged += OnTranscriptChanged;
-        refreshTimer = new DispatcherTimer(TimeSpan.FromSeconds(3), DispatcherPriority.Background,
-            (_, _) => { if (initialized && !closing) { Guard(RefreshLibrary); Guard(RefreshSetup); Guard(PollActivity); UpdateLiveFile(); } }, dispatcher);
+        refreshTimer = NewTimer(TimeSpan.FromSeconds(3), (_, _) => { if (initialized && !closing) { Guard(RefreshLibrary); Guard(RefreshSetup); Guard(PollActivity); UpdateLiveFile(); } });
         refreshTimer.Stop();
         updateStatus = updater.IsSupported
             ? updater.StagedTag is { } staged ? $"{staged} is downloaded and installs when you close the app." : "Updates have not been checked yet."
@@ -205,11 +203,17 @@ public sealed class MainViewModel : ObservableObject
         RestartToUpdateCommand = new RelayCommand(() =>
         {
             updater.RelaunchAfterApply = true;
-            System.Windows.Application.Current.MainWindow?.Close();
+            DesktopDialogs.CloseMainWindow();
         }, () => UpdateReady && !closing);
-        updateTimer = new DispatcherTimer(TimeSpan.FromHours(6), DispatcherPriority.Background,
-            (_, _) => { if (updater.AutoUpdate && !closing) _ = CheckForUpdatesAsync(manual: false); }, dispatcher);
+        updateTimer = NewTimer(TimeSpan.FromHours(6), (_, _) => { if (updater.AutoUpdate && !closing) _ = CheckForUpdatesAsync(manual: false); });
         updateTimer.Stop();
+    }
+
+    private static DispatcherTimer NewTimer(TimeSpan interval, EventHandler tick)
+    {
+        var timer = new DispatcherTimer { Interval = interval };
+        timer.Tick += tick;
+        return timer;
     }
 
     public ICommand CheckForUpdatesCommand { get; }
@@ -219,7 +223,7 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task SaveDiagnosticsAsync()
     {
-        if (dialogs.SaveDiagnostics() is not { } path) return;
+        if (await dialogs.SaveDiagnosticsAsync() is not { } path) return;
         try
         {
             SetStatus("Saving diagnostics ZIP…");
@@ -253,7 +257,7 @@ public sealed class MainViewModel : ObservableObject
         : "Development build: automatic updates are disabled (they apply to release ZIP builds only).";
     public string UpdateStatus { get => updateStatus; private set => Set(ref updateStatus, value); }
     public bool UpdateReady => updater.StagedTag is not null;
-    public string RestartToUpdateLabel => $"⟳  Restart to update ({updater.StagedTag})";
+    public string RestartToUpdateLabel => $"Restart to update ({updater.StagedTag})";
     public bool AutoUpdate
     {
         get => updater.AutoUpdate;
@@ -371,7 +375,7 @@ public sealed class MainViewModel : ObservableObject
         get => localGpuStatus;
         private set { if (Set(ref localGpuStatus, value)) Changed(nameof(ProviderHelp)); }
     }
-    private string localGpuStatus = "Checking for a usable NVIDIA GPU after the default models are ready…";
+    private string localGpuStatus = OperatingSystem.IsWindows() ? "Checking for a usable NVIDIA GPU after the default models are ready…" : "";
     public string ParakeetStatus { get => parakeetStatus; private set => Set(ref parakeetStatus, value); }
     private string parakeetStatus = "";
     private bool shownParakeetReady, gpuOfferAsked;
@@ -447,7 +451,7 @@ public sealed class MainViewModel : ObservableObject
         ? $"{(p.IsCloud
             ? "Hosted on the internet: audio chunks are uploaded to NVIDIA's cloud. Requires this session's upload consent AND an NVIDIA API key. English only."
             : p.Id == "local-parakeet"
-                ? $"Runs locally on this PC (no upload, no key). Uses the CPU by default, or your NVIDIA GPU if enabled in Privacy / models. Now: {LocalGpuStatus} Most accurate local option; 25 European languages, detected automatically."
+                ? (OperatingSystem.IsWindows() ? "Runs locally on this PC (no upload, no key). Uses the CPU by default, or your NVIDIA GPU if enabled in Privacy / models. Now: " : "Runs locally on this PC (no upload, no key) on the CPU. ") + $"{LocalGpuStatus} Most accurate local option; 25 European languages, detected automatically."
                 : "Runs locally on this PC (no upload, no key). Uses your GPU through Vulkan (NVIDIA, AMD, or Intel) when a driver is present, otherwise the CPU (much slower). Any language. English chunks Whisper is unsure about are re-checked by local Parakeet when it's installed, otherwise by hosted Parakeet only if you allow NVIDIA uploads below.")} {p.TimingDescription}."
         : "Choose a transcription provider: Local runs on this PC (CPU or GPU); Internet uploads audio to NVIDIA's cloud.";
     private bool HasNewSessionDetails => !string.IsNullOrWhiteSpace(SessionName) && !string.IsNullOrWhiteSpace(Language) && SelectedProvider is not null;
@@ -690,7 +694,7 @@ public sealed class MainViewModel : ObservableObject
     }
 
     // Mirror new transcript text to the live file as soon as a chunk is recognized, not on the next timer tick.
-    private void OnTranscriptChanged(Guid sessionId) => dispatcher.BeginInvoke(() =>
+    private void OnTranscriptChanged(Guid sessionId) => dispatcher.Post(() =>
     {
         if (!closing && liveSessionId == sessionId) UpdateLiveFile();
     });
@@ -713,7 +717,7 @@ public sealed class MainViewModel : ObservableObject
             var content = LiveTranscriptFile.Render(store, id, out var rows);
             if (content == previous) return (Content: content, Rows: rows, Bytes: -1L);
             return (Content: content, Rows: rows, Bytes: LiveTranscriptFile.Write(path, content));
-        }).ContinueWith(task => dispatcher.InvokeAsync(() =>
+        }).ContinueWith(task => dispatcher.Post(() =>
         {
             if (liveSessionId != id || !string.Equals(LiveFilePath.Trim(), path, StringComparison.Ordinal)) return;
             if (task.IsFaulted)
@@ -734,8 +738,8 @@ public sealed class MainViewModel : ObservableObject
                 Log($"Live file updated: {lines} → {Path.GetFileName(path)}");
             liveFileLoggedWrite = true;
             liveFileFailing = false;
-        }).Task, TaskScheduler.Default).Unwrap();
-        liveWrite.ContinueWith(_ => dispatcher.BeginInvoke(() =>
+        }), TaskScheduler.Default);
+        liveWrite.ContinueWith(_ => dispatcher.Post(() =>
         {
             if (liveWritePending && !closing) UpdateLiveFile();
         }), TaskScheduler.Default);
@@ -743,7 +747,7 @@ public sealed class MainViewModel : ObservableObject
 
     private void Log(string text, ActivityKind kind = ActivityKind.Info, string? group = null, bool persist = true)
     {
-        if (!dispatcher.CheckAccess()) { dispatcher.BeginInvoke(() => Log(text, kind, group, persist)); return; }
+        if (!dispatcher.CheckAccess()) { dispatcher.Post(() => Log(text, kind, group, persist)); return; }
         if (closing || string.IsNullOrWhiteSpace(text)) return;
         if (kind != ActivityKind.Transcript && text == lastLogText) return;
         lastLogText = text;
@@ -926,7 +930,7 @@ public sealed class MainViewModel : ObservableObject
         {
             // Asked once; the answer is saved, and Privacy / models can change it later.
             gpuOfferAsked = true;
-            dispatcher.BeginInvoke(() => AskGpu(offer));
+            dispatcher.Post(() => _ = AskGpuAsync(offer));
         }
         if (controller.ParakeetModelReady != shownParakeetReady || ParakeetStatus.Length == 0)
         {
@@ -970,7 +974,7 @@ public sealed class MainViewModel : ObservableObject
     private async Task ApplyRecommendedAsync()
     {
         if (Plan is not { } plan) return;
-        if (!dialogs.Confirm("Apply the recommended setup for this PC?",
+        if (!await dialogs.ConfirmAsync("Apply the recommended setup for this PC?",
                 HardwareText + "\n\n" + plan.Summary + "\n\nGPU downloads still ask first. You can change each setting afterward."))
             return;
         var done = new List<string>();
@@ -988,7 +992,7 @@ public sealed class MainViewModel : ObservableObject
                 done.Add("Parakeet on the CPU");
             }
         });
-        if (plan.ParakeetOnGpu && controller.GpuParakeetEnabled != true) AskGpu(plan.Gpu?.Name);
+        if (plan.ParakeetOnGpu && controller.GpuParakeetEnabled != true) await AskGpuAsync(plan.Gpu?.Name);
         var whisper = RecommendedWhisper;
         var whisperSelected = controller.SelectInstalledWhisperModel(whisper.Id);
         if (whisperSelected)
@@ -999,7 +1003,7 @@ public sealed class MainViewModel : ObservableObject
         SetStatus("Recommended setup applied: " + string.Join("; ", done) + ".");
         // Download a different Whisper size only when one is already installed; otherwise it downloads when first needed.
         if (!whisperSelected && controller.WhisperModelPath is not null &&
-            dialogs.Confirm("Download the recommended Whisper model?",
+            await dialogs.ConfirmAsync("Download the recommended Whisper model?",
                 $"Whisper {whisper.Id} suits this PC better than the installed model. Download it now ({whisper.Bytes / 1048576d:N0} MiB, SHA256-verified, MIT)?"))
             await RunAsync($"Downloading Whisper {whisper.Id}…", async token =>
             {
@@ -1075,12 +1079,12 @@ public sealed class MainViewModel : ObservableObject
         if (prerequisites.VcRuntimeReady) Guard(controller.RetryBlockedLocalWork);
     }
 
-    private Task InstallVcRuntimeAsync()
+    private async Task InstallVcRuntimeAsync()
     {
-        if (!dialogs.Confirm("Install the Microsoft Visual C++ runtime?",
+        if (!await dialogs.ConfirmAsync("Install the Microsoft Visual C++ runtime?",
             "Download Microsoft's official Visual C++ 2015-2022 runtime installer (x64, about 25 MB) and run it now? Windows will ask for administrator approval."))
-            return Task.CompletedTask;
-        return InstallVcRuntimeCoreAsync();
+            return;
+        await InstallVcRuntimeCoreAsync();
     }
 
     private Task InstallVcRuntimeCoreAsync() => RunAsync("Installing the Microsoft Visual C++ runtime…", async token =>
@@ -1243,22 +1247,22 @@ public sealed class MainViewModel : ObservableObject
         catch (Exception error) when (error is InvalidOperationException or ArgumentException) { SetStatus(error.Message, true); }
     }
 
-    public Task NameMicrophoneLinesAsync()
+    public async Task NameMicrophoneLinesAsync()
     {
-        if (SelectedSession is not { } session) return Task.CompletedTask;
+        if (SelectedSession is not { } session) return;
         if (!controller.Store.GetTracks(session.Id).Any(track => track.Kind == "Microphone"))
         {
             SetStatus("This session has no microphone track, so there are no microphone lines to name.", true);
-            return Task.CompletedTask;
+            return;
         }
         var current = session.MicrophoneSpeakerId is { } id ? Speakers.FirstOrDefault(x => x.Id == id)?.Name : null;
-        var name = dialogs.PromptSpeakerName("Name all microphone lines",
+        var name = await dialogs.PromptSpeakerNameAsync("Name all microphone lines",
             "Every line on this session's microphone track gets this speaker, and so does every microphone line transcribed later " +
             "(including when you continue this recording). Pick an existing name or type a new one." +
             (MicrophoneName.Trim().Length == 0 ? " New recordings will use it too; change that under Record / import." : ""),
             current ?? (MicrophoneName.Trim().Length > 0 ? MicrophoneName.Trim() : ""), SpeakerNames.Where(x => x != UnknownSpeaker), "Name microphone lines");
-        if (string.IsNullOrWhiteSpace(name)) return Task.CompletedTask;
-        return RunForSessionAsync("Naming the microphone lines…", async (sessionId, _) =>
+        if (string.IsNullOrWhiteSpace(name)) return;
+        await RunForSessionAsync("Naming the microphone lines…", async (sessionId, _) =>
         {
             var count = await Task.Run(() => controller.SetMicrophoneSpeaker(sessionId, name));
             if (MicrophoneName.Trim().Length == 0) MicrophoneName = name.Trim();
@@ -1266,34 +1270,34 @@ public sealed class MainViewModel : ObservableObject
         });
     }
 
-    private Task MergeSessionsInteractiveAsync()
+    private async Task MergeSessionsInteractiveAsync()
     {
         var preselected = SelectedSessions.Select(session => session.Id).ToArray();
         if (preselected.Length == 0 && SelectedSession is { } current) preselected = [current.Id];
-        var ids = dialogs.ChooseSessionsToMerge(Sessions.ToArray(), preselected, controller.RecordingSessionId);
-        return ids is { Count: > 1 } ? MergeSessionsAsync(ids) : Task.CompletedTask;
+        var ids = await dialogs.ChooseSessionsToMergeAsync(Sessions.ToArray(), preselected, controller.RecordingSessionId);
+        if (ids is { Count: > 1 }) await MergeSessionsAsync(ids);
     }
 
     public bool CanMergeSelectedSessions => SelectedSessions.Count > 1 && !Busy && !closing && !SelectedSessions.Any(s => IsRecordingSession(s.Id));
 
-    public Task MergeSelectedSessionsAsync()
+    public async Task MergeSelectedSessionsAsync()
     {
-        if (!CanMergeSelectedSessions) return Task.CompletedTask;
+        if (!CanMergeSelectedSessions) return;
         var chosen = SelectedSessions.OrderBy(session => session.CreatedUtc).ToArray();
         var later = string.Join("\n", chosen.Skip(1).Take(12).Select(s => $"  • {s.Name} ({s.CreatedUtc.ToLocalTime():MMM d · HH:mm})")) +
             (chosen.Length > 13 ? $"\n  …and {chosen.Length - 13:N0} more" : "");
-        if (!dialogs.Confirm("Merge sessions?",
+        if (!await dialogs.ConfirmAsync("Merge sessions?",
                 $"Merge {chosen.Length:N0} sessions into \"{chosen[0].Name}\" ({chosen[0].CreatedUtc.ToLocalTime():MMM d · HH:mm})?\n\n" +
                 $"These follow it, in recording order:\n{later}\n\n" +
                 $"Together they run {TranscriptPresentation.Duration(chosen.Sum(s => s.DurationTicks))}. They stop being separate sessions. This cannot be undone."))
-            return Task.CompletedTask;
-        return MergeSessionsAsync(chosen.Select(session => session.Id).ToArray());
+            return;
+        await MergeSessionsAsync(chosen.Select(session => session.Id).ToArray());
     }
 
-    private Task ResplitAsync()
+    private async Task ResplitAsync()
     {
-        if (SelectedSession is not { } session) return Task.CompletedTask;
-        if (!dialogs.Confirm("Re-transcribe this session?",
+        if (SelectedSession is not { } session) return;
+        if (!await dialogs.ConfirmAsync("Re-transcribe this session?",
                 $"Re-transcribe \"{session.Name}\" ({TranscriptPresentation.Duration(session.DurationTicks)})?\n\n" +
                 $"Its audio is cut again into phrases using the current pause setting ({PhrasePauseMilliseconds:N0} ms, on Record / import) " +
                 "and transcribed again from scratch. Speaker analysis then runs again.\n\n" +
@@ -1301,8 +1305,8 @@ public sealed class MainViewModel : ObservableObject
                 "  • Text edits you made to lines are discarded.\n" +
                 "  • Long recordings take a while; lines come back as each phrase is done (see Jobs).\n\n" +
                 "When it finishes, press \"Fill speakers from my labels\" to relabel everything else."))
-            return Task.CompletedTask;
-        return RunForSessionAsync("Re-cutting the audio into phrases…", async (id, token) =>
+            return;
+        await RunForSessionAsync("Re-cutting the audio into phrases…", async (id, token) =>
         {
             try { await controller.ResplitSessionAsync(id, new Progress<string>(message => SetStatus(message)), token); }
             catch (InvalidOperationException error) { SetStatus(error.Message, true); }
@@ -1339,7 +1343,7 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task ImportAudioAsync()
     {
-        var path = dialogs.OpenAudio();
+        var path = await dialogs.OpenAudioAsync();
         if (path is null || SelectedProvider is not { } provider) return;
         var name = TakeSessionName();
         var locale = Language.Trim();
@@ -1349,7 +1353,7 @@ public sealed class MainViewModel : ObservableObject
         {
             var probe = await controller.ProbeMediaAsync(path, token);
             if (probe.Streams.Count == 0) throw new InvalidDataException("This file has no audio stream.");
-            var stream = probe.Streams.Count == 1 ? probe.Streams[0] : dialogs.ChooseStream(probe);
+            var stream = probe.Streams.Count == 1 ? probe.Streams[0] : await dialogs.ChooseStreamAsync(probe);
             if (stream is null) { SetStatus("Import not started."); return; }
             SetStatus($"Importing stream {stream.Index}. Retaining a managed original; preparing audio…");
             NewCloudConsent = false;
@@ -1362,16 +1366,16 @@ public sealed class MainViewModel : ObservableObject
         });
     }
 
-    private Task ImportVttAsync()
+    private async Task ImportVttAsync()
     {
-        var path = dialogs.OpenVtt();
-        return path is null ? Task.CompletedTask :
-            RunForSessionAsync("Importing local WebVTT cues…", (id, token) => controller.ImportVttAsync(id, path, token));
+        var path = await dialogs.OpenVttAsync();
+        if (path is not null)
+            await RunForSessionAsync("Importing local WebVTT cues…", (id, token) => controller.ImportVttAsync(id, path, token));
     }
 
     private async Task FetchTeamsAsync()
     {
-        var request = dialogs.RequestTeamsTranscript();
+        var request = await dialogs.RequestTeamsTranscriptAsync();
         if (request is null) return;
         try
         {
@@ -1382,11 +1386,11 @@ public sealed class MainViewModel : ObservableObject
         finally { dialogs.CloseDeviceSignIn(); }
     }
 
-    private Task InstallModelsAsync()
+    private async Task InstallModelsAsync()
     {
-        if (!dialogs.Confirm("Install local diarization models?",
-            "Download 33,488,994 bytes (about 33.49 MB) of segmentation and speaker-embedding release artifacts?\n\nSegmentation: MIT (CNRS 2023); embedding: CC BY 4.0. Attribution and package notices are retained. These release files need no Hugging Face token; the original Hugging Face segmentation distribution is gated.\n\nNo audio is uploaded. No large Whisper model is included.")) return Task.CompletedTask;
-        return RunAsync("Downloading the explicitly requested local diarization models…", async token =>
+        if (!await dialogs.ConfirmAsync("Install local diarization models?",
+            "Download 33,488,994 bytes (about 33.49 MB) of segmentation and speaker-embedding release artifacts?\n\nSegmentation: MIT (CNRS 2023); embedding: CC BY 4.0. Attribution and package notices are retained. These release files need no Hugging Face token; the original Hugging Face segmentation distribution is gated.\n\nNo audio is uploaded. No large Whisper model is included.")) return;
+        await RunAsync("Downloading the explicitly requested local diarization models…", async token =>
         {
             await controller.InstallDiarizationModelsAsync(new Progress<string>(message => ModelStatus = message), token);
             ModelStatus = controller.DiarizationModelsReady ? "Local diarization models are installed and ready." : "Model installation did not report ready.";
@@ -1394,9 +1398,9 @@ public sealed class MainViewModel : ObservableObject
         });
     }
 
-    private void ChooseWhisperModel()
+    private async Task ChooseWhisperModelAsync()
     {
-        var path = dialogs.OpenWhisperModel();
+        var path = await dialogs.OpenWhisperModelAsync();
         if (path is null) return;
         Guard(() =>
         {
@@ -1409,14 +1413,14 @@ public sealed class MainViewModel : ObservableObject
     private static string DescribeModel(string path) =>
         $"{Path.GetFileName(path)} · {new FileInfo(path).Length / (1024d * 1024d):N1} MiB\n{path}";
 
-    private Task InstallWhisperModelAsync()
+    private async Task InstallWhisperModelAsync()
     {
         var model = RecommendedWhisper;
-        if (!dialogs.Confirm("Install the recommended Whisper model?",
+        if (!await dialogs.ConfirmAsync("Install the recommended Whisper model?",
             $"Download {model.FileName} ({model.Bytes:N0} bytes, about {model.Bytes / 1073741824d:N2} GiB) from the pinned whisper.cpp Hugging Face revision?\n\n" +
             $"Whisper {model.Id} is the size recommended for this PC's hardware. MIT license (OpenAI Whisper; GGML conversion by whisper.cpp contributors). SHA256 is verified before use and the model is selected automatically.\n\nNo audio is uploaded."))
-            return Task.CompletedTask;
-        return RunAsync("Downloading the recommended local Whisper model…", async token =>
+            return;
+        await RunAsync("Downloading the recommended local Whisper model…", async token =>
         {
             await controller.InstallWhisperModelAsync(model.Id, new Progress<string>(message => LocalModel = message), token);
             if (controller.WhisperModelPath is { } path) LocalModel = DescribeModel(path);
@@ -1436,12 +1440,12 @@ public sealed class MainViewModel : ObservableObject
         : "The Parakeet model is not installed yet. It downloads automatically at startup (465 MiB); use the button to retry.";
 
     /// <summary>The one-time GPU question: large NVIDIA download plus license terms. "No" keeps Parakeet on the CPU.</summary>
-    private void AskGpu(string? gpu) => Guard(() =>
+    private async Task AskGpuAsync(string? gpu)
     {
         if (closing) return;
         var download = AudioTranscriber.Diarization.ParakeetGpuPackage.DownloadBytes / 1e9;
         var disk = AudioTranscriber.Diarization.ParakeetGpuPackage.InstalledBytes / 1e9;
-        var yes = dialogs.Confirm("Run Parakeet on your NVIDIA GPU?",
+        var yes = await dialogs.ConfirmAsync("Run Parakeet on your NVIDIA GPU?",
             $"{(gpu is null ? "If this PC has a supported NVIDIA GPU, " : $"This PC has an NVIDIA {gpu}. ")}Parakeet can run on it instead of the CPU: " +
             "several times faster on long imports and with almost no CPU load. Accuracy is the same.\n\n" +
             $"This needs a one-time download of about {download:0.0} GB ({disk:0.0} GB on disk): NVIDIA's CUDA runtime, cuBLAS and cuDNN, " +
@@ -1455,14 +1459,14 @@ public sealed class MainViewModel : ObservableObject
         SetStatus(yes ? "Downloading the GPU runtime for Parakeet in the background; transcription keeps using the CPU until it's ready."
             : "Parakeet keeps using the CPU. You can switch to the GPU later in Privacy / models.");
         CommandManager.InvalidateRequerySuggested();
-    });
+    }
 
     public void SaveKey(string key) => Guard(() =>
     {
         if (string.IsNullOrWhiteSpace(key)) throw new ArgumentException("Enter a NVIDIA API key first.");
         controller.SetNvidiaKey(key, RememberKey);
         Changed(nameof(KeyStatus));
-        SetStatus(RememberKey ? "Key remembered using Windows current-user DPAPI." : "Key kept in memory only.");
+        SetStatus(RememberKey ? $"Key remembered, {AudioTranscriber.Providers.UserSecretProtection.Description}." : "Key kept in memory only.");
     });
 
     private void GrantConsent()
@@ -1472,9 +1476,9 @@ public sealed class MainViewModel : ObservableObject
         SelectedCloudConsent = false;
     }
 
-    private void CancelJobs()
+    private async Task CancelJobsAsync()
     {
-        if (!dialogs.Confirm("Cancel transcription jobs?", "Cancel pending and active transcription jobs for the selected session? Original audio is retained. This is not the recording Stop button.")) return;
+        if (!await dialogs.ConfirmAsync("Cancel transcription jobs?", "Cancel pending and active transcription jobs for the selected session? Original audio is retained. This is not the recording Stop button.")) return;
         SessionAction(controller.CancelTranscription, "Transcription jobs canceled. Recording, if active, is unaffected.");
     }
 
@@ -1489,48 +1493,48 @@ public sealed class MainViewModel : ObservableObject
     public bool IsRecordingSession(Guid sessionId) => controller.RecordingSessionId == sessionId;
     public bool CanDeleteSession(StoredSession session) => !Busy && !closing && !IsRecordingSession(session.Id);
 
-    public Task DeleteSessionAsync(StoredSession session)
+    public async Task DeleteSessionAsync(StoredSession session)
     {
         if (IsRecordingSession(session.Id))
         {
             SetStatus("Stop the recording before deleting its session.", true);
-            return Task.CompletedTask;
+            return;
         }
-        if (!CanDeleteSession(session)) return Task.CompletedTask;
-        if (!dialogs.Confirm("Delete session?",
+        if (!CanDeleteSession(session)) return;
+        if (!await dialogs.ConfirmAsync("Delete session?",
                 $"Permanently delete \"{session.Name}\" ({session.CreatedUtc.ToLocalTime():MMM d, yyyy · HH:mm}, {TranscriptPresentation.Duration(session.DurationTicks)})?\n\n" +
                 "Its transcript, speakers, jobs and retained original audio are removed from this PC. This cannot be undone.\n" +
                 "Exported transcripts and the live transcript file are not touched."))
-            return Task.CompletedTask;
-        return DeleteAsync([session.Id]);
+            return;
+        await DeleteAsync([session.Id]);
     }
 
-    private Task DeleteSessionsInteractiveAsync()
+    private async Task DeleteSessionsInteractiveAsync()
     {
-        var ids = dialogs.ChooseSessionsToDelete(Sessions.ToArray(), controller.RecordingSessionId);
-        return ids is { Count: > 0 } ? DeleteAsync(ids) : Task.CompletedTask;
+        var ids = await dialogs.ChooseSessionsToDeleteAsync(Sessions.ToArray(), controller.RecordingSessionId);
+        if (ids is { Count: > 0 }) await DeleteAsync(ids);
     }
 
     public bool CanDeleteSelectedSessions => SelectedSessions.Count > 0 && !Busy && !closing && !SelectedSessions.Any(s => IsRecordingSession(s.Id));
 
-    public Task DeleteSelectedSessionsAsync()
+    public async Task DeleteSelectedSessionsAsync()
     {
         var chosen = SelectedSessions.ToArray();
-        if (chosen.Length == 1) return DeleteSessionAsync(chosen[0]);
+        if (chosen.Length == 1) { await DeleteSessionAsync(chosen[0]); return; }
         if (chosen.Any(s => IsRecordingSession(s.Id)))
         {
             SetStatus("Stop the recording before deleting its session.", true);
-            return Task.CompletedTask;
+            return;
         }
-        if (!CanDeleteSelectedSessions) return Task.CompletedTask;
+        if (!CanDeleteSelectedSessions) return;
         var list = string.Join("\n", chosen.Take(12).Select(s => $"  • {s.Name} ({s.CreatedUtc.ToLocalTime():MMM d, yyyy · HH:mm})")) +
             (chosen.Length > 12 ? $"\n  …and {chosen.Length - 12:N0} more" : "");
-        if (!dialogs.Confirm("Delete sessions?",
+        if (!await dialogs.ConfirmAsync("Delete sessions?",
                 $"Permanently delete these {chosen.Length:N0} sessions?\n\n{list}\n\n" +
                 "Their transcripts, speakers, jobs and retained original audio are removed from this PC. This cannot be undone.\n" +
                 "Exported transcripts and the live transcript file are not touched."))
-            return Task.CompletedTask;
-        return DeleteAsync(chosen.Select(session => session.Id).ToArray());
+            return;
+        await DeleteAsync(chosen.Select(session => session.Id).ToArray());
     }
 
     private Task DeleteAsync(IReadOnlyCollection<Guid> ids) =>
@@ -1615,7 +1619,7 @@ public sealed class MainViewModel : ObservableObject
         if (SelectedSession is not { } session || speaker is null || string.IsNullOrWhiteSpace(name)) return;
         name = name.Trim();
         var existing = Speakers.FirstOrDefault(x => x.Id != speaker.Id && string.Equals(x.Name.Trim(), name, StringComparison.OrdinalIgnoreCase));
-        if (existing is not null && !dialogs.Confirm("Merge speakers?",
+        if (existing is not null && !await dialogs.ConfirmAsync("Merge speakers?",
                 $"\"{existing.Name}\" already exists. Giving \"{speaker.Name}\" the same name merges them into one speaker:\n\n" +
                 "• every line of both becomes \"" + existing.Name + "\"\n" +
                 "• their voice samples are combined, so future lines match either voice\n" +
@@ -1665,24 +1669,24 @@ public sealed class MainViewModel : ObservableObject
                 : $"Set {lines} to \"{speaker.Name}\".");
     });
 
-    public void AssignSelectionToNewSpeaker()
+    public async void AssignSelectionToNewSpeaker()
     {
         if (SelectedRows.Count == 0) return;
-        var name = dialogs.PromptSpeakerName("Set speaker",
+        var name = await dialogs.PromptSpeakerNameAsync("Set speaker",
             $"Who is speaking in the selected {(SelectedRows.Count == 1 ? "line" : SelectedRows.Count + " lines")}? Type a new name or pick an existing one. " +
             "Using an existing name adds these lines to that speaker.",
             "", Speakers.Select(x => x.Name).Distinct(StringComparer.OrdinalIgnoreCase), "Set speaker");
         if (name is not null) AssignSelection(null, name);
     }
 
-    public Task RenameSpeakerInteractiveAsync(string speakerId)
+    public async Task RenameSpeakerInteractiveAsync(string speakerId)
     {
         var speaker = Speakers.FirstOrDefault(x => x.Id == speakerId);
-        if (speaker is null) return Task.CompletedTask;
-        var name = dialogs.PromptSpeakerName("Rename speaker",
+        if (speaker is null) return;
+        var name = await dialogs.PromptSpeakerNameAsync("Rename speaker",
             $"New name for \"{speaker.Name}\" on every line of this session. Choosing another speaker's name merges the two.",
             speaker.Name, Speakers.Where(x => x.Id != speakerId).Select(x => x.Name).Distinct(StringComparer.OrdinalIgnoreCase), "Rename");
-        return name is null || name == speaker.Name ? Task.CompletedTask : RenameSpeakerAsync(speaker, name);
+        if (name is not null && name != speaker.Name) await RenameSpeakerAsync(speaker, name);
     }
 
     private void RefreshVoices()
@@ -1731,10 +1735,10 @@ public sealed class MainViewModel : ObservableObject
         catch (Exception error) when (error is not OutOfMemoryException) { if (!closing) SetStatus("Could not learn voices from past sessions: " + error.Message, true); }
     }
 
-    private void RenameVoice()
+    private async Task RenameVoiceAsync()
     {
         if (SelectedVoice is not { } voice) return;
-        var name = dialogs.PromptSpeakerName("Rename remembered voice",
+        var name = await dialogs.PromptSpeakerNameAsync("Rename remembered voice",
             $"New name for the remembered voice \"{voice.Name}\". Future recordings use it; past sessions keep their names. " +
             "Choosing another remembered name combines the two voices.",
             voice.Name, Voices.Where(item => item.Id != voice.Id).Select(item => item.Name), "Rename");
@@ -1747,10 +1751,10 @@ public sealed class MainViewModel : ObservableObject
         });
     }
 
-    private void ForgetVoice()
+    private async Task ForgetVoiceAsync()
     {
         if (SelectedVoice is not { } voice) return;
-        if (!dialogs.Confirm("Forget this voice?",
+        if (!await dialogs.ConfirmAsync("Forget this voice?",
                 $"Delete the remembered voice \"{voice.Name}\"?\n\nFuture recordings will no longer name them automatically. " +
                 "Past sessions keep their speaker names and their own in-session voice profiles.")) return;
         Guard(() =>
@@ -1761,9 +1765,9 @@ public sealed class MainViewModel : ObservableObject
         });
     }
 
-    private void ForgetAllVoices()
+    private async Task ForgetAllVoicesAsync()
     {
-        if (!dialogs.Confirm("Forget all voices?",
+        if (!await dialogs.ConfirmAsync("Forget all voices?",
                 $"Delete all {Voices.Count} remembered voice{(Voices.Count == 1 ? "" : "s")}?\n\nFuture recordings will no longer name anyone automatically " +
                 "until you name speakers again. Past sessions keep their speaker names and their own in-session voice profiles.")) return;
         Guard(() =>
@@ -1797,12 +1801,13 @@ public sealed class MainViewModel : ObservableObject
         return RunAsync("Opening the selected original audio track…", token => controller.PlayAsync(session.Id, track.Id, ticks, token));
     }
 
-    private Task ExportAsync()
+    private async Task ExportAsync()
     {
-        if (SelectedSession is not { } session) return Task.CompletedTask;
-        var path = dialogs.SaveExport(session.Name);
-        return path is null ? Task.CompletedTask : RunAsync("Exporting the complete transcript, one bounded page at a time…",
-            token => TranscriptExporter.ExportAsync(controller.Store, session.Id, path, token));
+        if (SelectedSession is not { } session) return;
+        var path = await dialogs.SaveExportAsync(session.Name);
+        if (path is not null)
+            await RunAsync("Exporting the complete transcript, one bounded page at a time…",
+                token => TranscriptExporter.ExportAsync(controller.Store, session.Id, path, token));
     }
 
     private Task RunForSessionAsync(string message, Func<Guid, CancellationToken, Task> action)
@@ -1865,7 +1870,7 @@ public sealed class MainViewModel : ObservableObject
         StatusIsError = error;
         if (error) Log(message, ActivityKind.Error, persist: persist);
     }
-    private void OnNotification(AppNotification notification) => dispatcher.BeginInvoke(() =>
+    private void OnNotification(AppNotification notification) => dispatcher.Post(() =>
     {
         if (!closing)
         {
@@ -1879,7 +1884,7 @@ public sealed class MainViewModel : ObservableObject
     {
         Volatile.Write(ref pendingMeter, levels);
         if (Interlocked.Exchange(ref meterQueued, 1) != 0) return;
-        dispatcher.BeginInvoke(() =>
+        dispatcher.Post(() =>
         {
             Interlocked.Exchange(ref meterQueued, 0);
             var current = Volatile.Read(ref pendingMeter);
