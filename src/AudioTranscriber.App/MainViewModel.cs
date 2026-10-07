@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Windows.Input;
 using System.Windows.Threading;
 using AudioTranscriber.Application;
+using AudioTranscriber.Core;
 using AudioTranscriber.Storage;
 
 namespace AudioTranscriber.App;
@@ -173,6 +174,9 @@ public sealed class MainViewModel : ObservableObject
             try { System.Windows.Clipboard.SetText(string.Join(Environment.NewLine, ActivityLog)); }
             catch (System.Runtime.InteropServices.ExternalException) { SetStatus("The clipboard is busy; try Copy again.", true); }
         }, () => ActivityLog.Count > 0);
+        SaveDiagnosticsCommand = new AsyncCommand(SaveDiagnosticsAsync, () => !closing);
+        OpenLogsFolderCommand = new RelayCommand(() => Guard(() =>
+            AppDiagnostics.OpenFolder(AppLog.Directory ?? AppDiagnostics.LogDirectory(DataRoot))), () => !closing);
         LoadLiveSettings();
         Templates = new TemplatesViewModel(controller, dialogs, dispatcher, () => controller.RecordingSessionId ?? SelectedSession?.Id,
             (text, error) => Log(text, error ? ActivityKind.Error : ActivityKind.Info));
@@ -207,6 +211,25 @@ public sealed class MainViewModel : ObservableObject
     }
 
     public ICommand CheckForUpdatesCommand { get; }
+    public ICommand SaveDiagnosticsCommand { get; }
+    public ICommand OpenLogsFolderCommand { get; }
+    public string LogFolderText => $"Log folder: {AppLog.Directory ?? AppDiagnostics.LogDirectory(DataRoot)}";
+
+    private async Task SaveDiagnosticsAsync()
+    {
+        if (dialogs.SaveDiagnostics() is not { } path) return;
+        try
+        {
+            SetStatus("Saving diagnostics ZIP…");
+            await AppDiagnostics.CreateBundleAsync(path, controller, ActivityLog.ToArray());
+            SetStatus($"Diagnostics saved to {path}. Review it, then attach it to your GitHub issue.");
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            AppLog.Error("Saving the diagnostics ZIP failed.", error);
+            SetStatus("Could not save the diagnostics ZIP: " + error.Message, true);
+        }
+    }
     public TemplatesViewModel Templates { get; }
     public ICommand RestartToUpdateCommand { get; }
     public string CurrentVersionText => updater.IsSupported
@@ -237,8 +260,8 @@ public sealed class MainViewModel : ObservableObject
     /// <summary>Called on application exit: hands a downloaded update to the helper that installs it.</summary>
     public void ApplyPendingUpdate(IReadOnlyList<string> arguments)
     {
-        try { updater.ApplyOnExit(arguments); }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+        try { if (updater.ApplyOnExit(arguments)) AppLog.Info($"Handing update {updater.StagedTag} to the installer helper."); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { AppLog.Error("Starting the update helper failed.", error); }
     }
 
     private async Task CheckForUpdatesAsync(bool manual)
@@ -268,6 +291,7 @@ public sealed class MainViewModel : ObservableObject
         catch (Exception error) when (error is System.Net.Http.HttpRequestException or IOException or InvalidDataException or
             System.Text.Json.JsonException or UnauthorizedAccessException or KeyNotFoundException or InvalidOperationException or TaskCanceledException)
         {
+            AppLog.Warn("Update check failed.", error);
             UpdateStatus = "Update check failed: " + error.Message;
         }
         finally
@@ -701,12 +725,15 @@ public sealed class MainViewModel : ObservableObject
         }), TaskScheduler.Default);
     }
 
-    private void Log(string text, ActivityKind kind = ActivityKind.Info, string? group = null)
+    private void Log(string text, ActivityKind kind = ActivityKind.Info, string? group = null, bool persist = true)
     {
-        if (!dispatcher.CheckAccess()) { dispatcher.BeginInvoke(() => Log(text, kind, group)); return; }
+        if (!dispatcher.CheckAccess()) { dispatcher.BeginInvoke(() => Log(text, kind, group, persist)); return; }
         if (closing || string.IsNullOrWhiteSpace(text)) return;
         if (kind != ActivityKind.Transcript && text == lastLogText) return;
         lastLogText = text;
+        // Transcript lines stay out of the diagnostic log; progress groups would only repeat themselves there.
+        if (persist && kind != ActivityKind.Transcript && group is null)
+            AppLog.Write(kind == ActivityKind.Error ? LogLevel.Error : LogLevel.Info, text, null);
         var entry = new ActivityEntry(DateTime.Now, kind, text, group);
         // Consecutive progress updates of the same kind (copying, audio ready through …) replace each other.
         if (group is not null && ActivityLog.Count > 0 && ActivityLog[^1].Group == group) ActivityLog[^1] = entry;
@@ -719,7 +746,7 @@ public sealed class MainViewModel : ObservableObject
         for (var i = ActivityLog.Count - 1; i >= Math.Max(0, ActivityLog.Count - 50); i--)
             if (ActivityLog[i].Text == message) return;
         var digit = message.AsSpan().IndexOfAnyInRange('0', '9');
-        Log(message, ActivityKind.Info, digit >= 8 ? message[..digit] : null);
+        Log(message, ActivityKind.Info, digit >= 8 ? message[..digit] : null, persist: false);
     }
 
     // Follows the recording, mirrored, or selected session and logs job progress plus each new transcript line.
@@ -1805,6 +1832,7 @@ public sealed class MainViewModel : ObservableObject
     private void Guard(Action action) { try { action(); } catch (Exception error) { Report(error); } }
     private void Report(Exception error)
     {
+        AppLog.Error("Operation failed.", error);
         // Controller notifications carry user-safe service detail; never dump exception bodies or credentials.
         SetStatus(error switch
         {
@@ -1815,17 +1843,18 @@ public sealed class MainViewModel : ObservableObject
             _ => "The operation failed. Review the selected session's jobs and error state; no automatic cloud fallback is used."
         }, true);
     }
-    private void SetStatus(string message, bool error = false)
+    private void SetStatus(string message, bool error = false, bool persist = true)
     {
         Status = message;
         StatusIsError = error;
-        if (error) Log(message, ActivityKind.Error);
+        if (error) Log(message, ActivityKind.Error, persist: persist);
     }
     private void OnNotification(AppNotification notification) => dispatcher.BeginInvoke(() =>
     {
         if (!closing)
         {
-            SetStatus(notification.Message, notification.IsError);
+            // The controller already wrote this notification to the diagnostic log.
+            SetStatus(notification.Message, notification.IsError, persist: false);
             if (!notification.IsError) LogNotification(notification.Message);
             Changed(nameof(IsRecording)); Changed(nameof(CaptureState));
         }

@@ -279,7 +279,7 @@ public sealed class AppController : IAppController
         catch (Exception error)
         {
             Notify("Speaker-labeling models could not be downloaded automatically (" + error.Message +
-                "). Transcription still works; retry from Privacy / models.", true);
+                "). Transcription still works; retry from Privacy / models.", error);
         }
         try
         {
@@ -297,7 +297,7 @@ public sealed class AppController : IAppController
         catch (Exception error)
         {
             Notify("The Parakeet model could not be downloaded automatically (" + error.Message +
-                "). Recording still works; install it from Privacy / models, or choose Local Whisper.", true);
+                "). Recording still works; install it from Privacy / models, or choose Local Whisper.", error);
         }
         finally { setupStatus = null; }
         if (WhisperModelPath is not null) Store.ReleaseProviderJobs("local-whisper");
@@ -333,7 +333,7 @@ public sealed class AppController : IAppController
                 {
                     whisperSetupFailed = true;
                     Notify("The Whisper model could not be downloaded automatically (" + error.Message +
-                        "). Install it from Privacy / models; queued Whisper audio is transcribed afterward.", true);
+                        "). Install it from Privacy / models; queued Whisper audio is transcribed afterward.", error);
                 }
                 finally { whisperSetupStatus = null; }
                 Store.ReleaseProviderJobs("local-whisper");
@@ -427,7 +427,7 @@ public sealed class AppController : IAppController
             HttpRequestException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or ArgumentException)
         {
             localGpuStatus = "Parakeet could not start on the GPU (" + error.Message + "). The CPU model is used instead.";
-            Notify(localGpuStatus, true);
+            Notify(localGpuStatus, error);
         }
         finally { localGpuSetupStatus = null; }
     }
@@ -491,6 +491,7 @@ public sealed class AppController : IAppController
             RequireProvider(providerId);
             var session = Store.CreateSession(name, providerId, language);
             Store.SetConsent(session.Id, cloudConsent);
+            AppLog.Info($"Starting recording {session.Id} (provider {providerId}, language {language}, microphone {microphoneDeviceId is not null}, echo reduction {reduceEcho}, cloud consent {cloudConsent}).");
             return await StartCaptureAsync(session, outputDeviceId, microphoneDeviceId, reduceEcho, 0, 1, cancellationToken);
         }
         finally { captureGate.Release(); }
@@ -609,7 +610,7 @@ public sealed class AppController : IAppController
                 catch (Exception error) when (IsOperational(error))
                 {
                     captureFaulted = true;
-                    Notify("Capture stop reported an error: " + error.Message, true);
+                    Notify("Capture stop reported an error: " + error.Message, error);
                     throw;
                 }
                 finally
@@ -648,6 +649,7 @@ public sealed class AppController : IAppController
             JsonSerializer.Serialize(new MediaCheckpoint(Path.GetFullPath(path), streamIndex, null)));
         Store.AddTrack(track);
         Store.SetConsent(session.Id, cloudConsent);
+        AppLog.Info($"Importing {Path.GetExtension(path)} audio into session {session.Id} (stream {streamIndex}, provider {providerId}, language {language}).");
         await RunMediaAsync(session, token => NormalizeImportedTrackAsync(session, track, token), cancellationToken);
         return Store.GetSession(session.Id);
     }
@@ -1190,7 +1192,7 @@ public sealed class AppController : IAppController
         {
             try { await work(shutdown.Token); }
             catch (OperationCanceledException) when (shutdown.IsCancellationRequested) { }
-            catch (Exception error) when (IsOperational(error)) { Notify("Learning the speaker's voice failed: " + error.Message, true); }
+            catch (Exception error) when (IsOperational(error)) { Notify("Learning the speaker's voice failed: " + error.Message, error); }
             finally { backgroundTasks.TryRemove(id, out _); }
         });
         backgroundTasks[id] = task;
@@ -1868,7 +1870,7 @@ public sealed class AppController : IAppController
             catch (Exception error) when (IsOperational(error))
             {
                 captureFaulted = true;
-                Notify("Normalization paused; originals remain recorded. " + error.Message, true);
+                Notify("Normalization paused; originals remain recorded. " + error.Message, error);
             }
         });
     }
@@ -1903,7 +1905,7 @@ public sealed class AppController : IAppController
         catch (Exception error) when (IsOperational(error))
         {
             captureFaulted = true;
-            Notify("Original audio was sealed, but database indexing failed; recovery is required. " + error.Message, true);
+            Notify("Original audio was sealed, but database indexing failed; recovery is required. " + error.Message, error);
         }
     }
 
@@ -1963,7 +1965,7 @@ public sealed class AppController : IAppController
         catch (Exception error) when (IsOperational(error))
         {
             SetMediaRecoveryState(session.Id, error.Message);
-            Notify("Media processing needs attention: " + error.Message, true);
+            Notify("Media processing needs attention: " + error.Message, error);
             throw;
         }
         finally
@@ -1987,7 +1989,7 @@ public sealed class AppController : IAppController
         try { await RunMediaAsync(session, token => RecoverAndNormalizeAsync(session, token), CancellationToken.None); }
         catch (Exception error) when (IsOperational(error) || error is OperationCanceledException)
         {
-            Notify("Recovery did not finish; its saved checkpoint remains resumable: " + error.Message, true);
+            Notify("Recovery did not finish; its saved checkpoint remains resumable: " + error.Message, error);
         }
     }
 
@@ -2196,7 +2198,7 @@ public sealed class AppController : IAppController
             }
             catch (Exception error) when (IsOperational(error))
             {
-                Notify("Job bookkeeping failed; the scheduler will continue from durable checkpoints: " + error.Message, true);
+                Notify("Job bookkeeping failed; the scheduler will continue from durable checkpoints: " + error.Message, error);
                 try { Store.FailJob(job, error.Message, "RetryWaiting", TimeSpan.FromSeconds(5)); }
                 catch (Exception checkpointError) when (IsOperational(checkpointError))
                 {
@@ -2365,7 +2367,7 @@ public sealed class AppController : IAppController
         catch (Exception error) when (IsOperational(error))
         {
             Store.FailJob(job, error.Message);
-            Notify("Background job failed; retained audio is available: " + error.Message, true);
+            Notify("Background job failed; retained audio is available: " + error.Message, error);
         }
         finally
         {
@@ -2459,7 +2461,7 @@ public sealed class AppController : IAppController
         try { return await EchoReduction.ApplyAsync(window, microphone, reference, cancellationToken); }
         catch (Exception error) when (error is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException or InvalidOperationException)
         {
-            Notify("Echo reduction is unavailable; the microphone is transcribed without it: " + error.Message, true);
+            Notify("Echo reduction is unavailable; the microphone is transcribed without it: " + error.Message, error);
             return false;
         }
     }
@@ -2544,7 +2546,7 @@ public sealed class AppController : IAppController
             RefreshSpeakerAssignments(job.SessionId, job.TrackId, startTicks, endTicks);
             IReadOnlyList<string> recognized = [];
             try { recognized = RecognizeVoicesLocked(job.SessionId, force: false); }
-            catch (Exception error) when (IsOperational(error)) { Notify("Matching remembered voices failed: " + error.Message, true); }
+            catch (Exception error) when (IsOperational(error)) { Notify("Matching remembered voices failed: " + error.Message, error); }
             TranscriptChanged?.Invoke(job.SessionId);
             if (recognized.Count > 0) Notify($"Recognized {string.Join(", ", recognized)} by voice from the voice library.");
             // Routine markers (algorithm version, short-tail padding, silence) are kept in the raw attempt, not announced.
@@ -2672,7 +2674,17 @@ public sealed class AppController : IAppController
         ?? throw new InvalidDataException("The native chunk manifest is invalid.");
     private static MediaCheckpoint ReadImport(StoredTrack track) => JsonSerializer.Deserialize<MediaCheckpoint>(track.MetadataJson ?? "")
         ?? throw new InvalidDataException("The managed import checkpoint is invalid.");
-    private void Notify(string message, bool error = false) => Notification?.Invoke(new(message, error));
+    private void Notify(string message, bool error = false)
+    {
+        AppLog.Write(error ? LogLevel.Error : LogLevel.Info, message, null);
+        Notification?.Invoke(new(message, error));
+    }
+
+    private void Notify(string message, Exception exception)
+    {
+        AppLog.Error(message, exception);
+        Notification?.Invoke(new(message, true));
+    }
     private void UpdateSettings(Func<LocalSettings, LocalSettings> update)
     {
         lock (settingsGate)

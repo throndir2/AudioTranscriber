@@ -826,6 +826,17 @@
                                     </Border>
                                     <Border Style="{StaticResource Card}">
                                         <StackPanel>
+                                            <ContentControl Style="{StaticResource SectionHeader}" Content="Diagnostics and bug reports" />
+                                            <TextBlock Style="{StaticResource Help}" Text="The app keeps a local diagnostic log of what it did and any errors (the last 14 days). Something went wrong? Save diagnostics as a ZIP and attach it to a GitHub issue. The ZIP holds the logs, the update log, the Activity panel, and a system summary (Windows, .NET, GPU, prerequisites, model status). It never includes audio, transcript text, your library database, or keys; your Windows user name is replaced. Open it to review before sharing." />
+                                            <TextBlock Text="{Binding LogFolderText}" Style="{StaticResource Caption}" TextWrapping="Wrap" />
+                                            <WrapPanel>
+                                                <Button Content="Save diagnostics ZIP…" Command="{Binding SaveDiagnosticsCommand}" AutomationProperties.Name="Save diagnostics ZIP" />
+                                                <Button Content="Open log folder" Command="{Binding OpenLogsFolderCommand}" />
+                                            </WrapPanel>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource Card}">
+                                        <StackPanel>
                                             <ContentControl Style="{StaticResource SectionHeader}" Content="Local Parakeet (default transcription)" />
                                             <TextBlock Style="{StaticResource Help}" Text="NVIDIA Parakeet TDT 0.6B v3 (CC BY 4.0), int8 ONNX export from sherpa-onnx: 465 MiB download, about 640 MB on disk, downloaded and SHA256-verified automatically on first start. It runs on the CPU (about 14–20× real time on a desktop CPU, ~1 GB RAM), needs no key, and uploads nothing. In testing it made about a third fewer word errors than Whisper large-v3-turbo while using far less CPU. 25 European languages, detected automatically; choose Local Whisper for other languages." />
                                             <TextBlock Text="{Binding ParakeetStatus}" TextWrapping="Wrap" FontWeight="SemiBold" />

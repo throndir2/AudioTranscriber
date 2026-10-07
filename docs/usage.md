@@ -500,6 +500,23 @@ Live Teams audio needs a separate Azure media-bot deployment and policies.
 Discord live receive is deferred pending an authorized visible guild bot and
 validated DAVE-compatible receive implementation; no fake connector is shown.
 
+## Diagnostics and bug reports
+
+The app writes a local diagnostic log to `logs\audiotranscriber-YYYYMMDD.log` in
+the data root (one file per day, kept 14 days, capped at 10 MB per day). It records
+startup details (version, Windows, .NET, CPU/RAM), status and error messages, failed
+operations with their exception details, recording/import starts, and update
+activity. MCP sessions log into their own data root.
+
+To report a problem, open **Privacy / models → Diagnostics and bug reports** and
+choose **Save diagnostics ZIP…**. The ZIP contains the log files, the updater's
+`update.log`, the Activity panel (without transcript lines), and `summary.txt`
+(app version, install and data folders, Windows/.NET, NVIDIA GPU, FFmpeg and Visual
+C++ status, model and GPU status, device and session counts). Your Windows profile
+path and user name are replaced with placeholders. Open the ZIP to review it, then
+attach it to a GitHub issue. **Open log folder** shows the raw logs. If the app
+cannot start, the startup error names the log folder.
+
 ## Closing safely
 
 Closing while recording or doing foreground work asks for confirmation. The

@@ -57,6 +57,21 @@ public sealed class DesktopDialogs(Func<Window> owner)
         return dialog.ShowDialog(owner()) == true ? dialog.FileName : null;
     }
 
+    public string? SaveDiagnostics()
+    {
+        var dialog = new SaveFileDialog
+        {
+            Title = "Save diagnostics for a bug report",
+            FileName = $"AudioTranscriber-diagnostics-{DateTime.Now:yyyyMMdd-HHmmss}",
+            Filter = "ZIP archive|*.zip",
+            DefaultExt = ".zip",
+            AddExtension = true,
+            OverwritePrompt = true,
+            InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)
+        };
+        return dialog.ShowDialog(owner()) == true ? dialog.FileName : null;
+    }
+
     public string? SaveLiveTranscript(string currentPath)
     {
         var dialog = new SaveFileDialog
