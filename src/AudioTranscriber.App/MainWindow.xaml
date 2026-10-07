@@ -677,9 +677,11 @@
                                                     <Button Content="Save key" Click="SaveLlmKeyClick" />
                                                     <Button Content="Remove key" Click="ClearLlmKeyClick" />
                                                     <Button Content="Test" Command="{Binding TestConnectionCommand}" />
+                                                    <Button Content="Check image support" Command="{Binding CheckImageSupportCommand}" />
                                                 </WrapPanel>
                                                 <TextBlock Text="{Binding ConnectionStatus}" TextWrapping="Wrap" FontWeight="SemiBold" Foreground="{StaticResource Accent}" AutomationProperties.LiveSetting="Polite" />
-                                                <TextBlock Style="{StaticResource Caption}" Text="Keys are encrypted for your Windows account (DPAPI) in the library folder and only sent to this connection's URL. Models must support tool calling to read the context folder; others still get the transcript and always-included files." />
+                                                <TextBlock Text="{Binding SelectedConnection.ImageSupportStatus}" Style="{StaticResource Caption}" />
+                                                <TextBlock Style="{StaticResource Caption}" Text="Keys are encrypted for your Windows account (DPAPI) in the library folder and only sent to this connection's URL. Models must support tool calling to read the context folder; others still get the transcript and always-included files. Test also asks the server whether the model reads images (needed for screenshots); Ollama's default gemma4:e4b does." />
                                             </StackPanel>
                                         </StackPanel>
                                     </Border>
