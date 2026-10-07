@@ -188,7 +188,7 @@ public sealed class OutputTemplate : ObservableObject
         var movement = new OutputTemplate
         {
             Name = "Table: movement",
-            UseScreenshot = false, UseTranscript = false, UseReferences = false, IncludePrevious = true,
+            UseScreenshot = false, UseTranscript = false, UseReferences = false, IncludePrevious = true, KeepVersions = false,
             AutoUpdate = true, IntervalSeconds = 20,
             InputTemplateIds = [tokens.Id],
             Prompt = "The input \"Table: token positions\" is the battle map as it looks right now. Your previous output, if any, ends with a " +
@@ -204,7 +204,7 @@ public sealed class OutputTemplate : ObservableObject
         var health = new OutputTemplate
         {
             Name = "Table: health and conditions",
-            UseScreenshot = true, UseTranscript = false, UseReferences = false, IncludePrevious = false,
+            UseScreenshot = true, UseTranscript = false, UseReferences = false, IncludePrevious = false, KeepVersions = false,
             AutoUpdate = true, IntervalSeconds = 30,
             Prompt = "Look ONLY at hit points and status in this virtual tabletop screenshot: health bars or numbers on tokens, status marker icons " +
                      "on tokens, and any visible party, character sheet or combat tracker HP. Ignore everything else.\n" +
@@ -216,7 +216,7 @@ public sealed class OutputTemplate : ObservableObject
         var rolls = new OutputTemplate
         {
             Name = "Table: dice rolls",
-            UseScreenshot = true, UseTranscript = false, UseReferences = false, IncludePrevious = false,
+            UseScreenshot = true, UseTranscript = false, UseReferences = false, IncludePrevious = false, KeepVersions = false,
             AutoUpdate = true, IntervalSeconds = 20,
             Prompt = "Look ONLY at the chat log / dice roll panel in this virtual tabletop screenshot. Ignore the map and everything else.\n" +
                      "List the most recent dice rolls you can read, oldest first, at most 8, one per line: who rolled, what for (attack, damage, save, " +
@@ -227,7 +227,7 @@ public sealed class OutputTemplate : ObservableObject
         var scene = new OutputTemplate
         {
             Name = "Table: scene and map",
-            UseScreenshot = true, UseTranscript = false, UseReferences = false, IncludePrevious = false,
+            UseScreenshot = true, UseTranscript = false, UseReferences = false, IncludePrevious = false, KeepVersions = false,
             AutoUpdate = true, IntervalSeconds = 120,
             Prompt = "Look ONLY at the map in this virtual tabletop screenshot (not the tokens, chat or menus) and describe the scene in at most 8 short bullets: " +
                      "what kind of place it is, lighting and unrevealed (fog of war) areas, doors and exits, notable terrain, cover, hazards and objects, " +
