@@ -306,6 +306,15 @@ included (**Add starter templates** brings them back).
 - **Output:** always shown on the right (with **Copy**). **Also write the output to
   a file** rewrites a `.md`/`.txt` file on every update without locking it, so VS
   Code, Obsidian or a browser can keep it open.
+- **Versions:** **Save a versioned copy of each update** (on by default) keeps each
+  changed output as a timestamped file, in a `<file name> versions` folder next to the
+  output file, or in `template-versions` in the library folder. **Keep only the latest
+  N versions** deletes older copies (0 keeps all); untick it to keep only the latest
+  output. **Open versions folder** shows them.
+- **TTRPG template library:** pick a ready-made tabletop RPG template (recap, quest
+  log, combat tracker, rulings, lore, locations, calendar, mysteries, spotlight,
+  quotes, in-character journal, player handout, next session prep, XP, character
+  changes, improv NPCs) and choose **Add**, or **Add all**.
 
 **Reference files** are shared by all templates (untick **Reference files** in a
 template's inputs). The **context folder** is browsable by the model through

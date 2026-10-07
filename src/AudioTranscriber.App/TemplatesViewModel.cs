@@ -29,6 +29,7 @@ public sealed class TemplatesViewModel : ObservableObject
     private LlmConnection? selectedConnection;
     private OutputTemplate? selectedTemplate;
     private LlmPreset selectedPreset = LlmPreset.All[0];
+    private TemplateBlueprint? selectedBlueprint = OutputTemplate.TtrpgLibrary[0];
     private string contextFolder = "", pinnedFiles = "", connectionStatus = "", targetDescription = "No session selected.";
     private string captureTarget = "", captureCaption = "No screenshot taken yet.";
     private int captureMaxWidth = ScreenCapture.DefaultMaxWidth;
@@ -54,6 +55,9 @@ public sealed class TemplatesViewModel : ObservableObject
         DeleteTemplateCommand = new AsyncCommand(DeleteTemplateAsync, () => SelectedTemplate is not null);
         AddStartersCommand = new RelayCommand(() => { foreach (var t in OutputTemplate.Starters()) AddTemplate(t); });
         AddTableStartersCommand = new RelayCommand(AddTableStarters);
+        AddBlueprintCommand = new RelayCommand(() => { if (SelectedBlueprint is { } b) AddTemplate(b.Create()); }, () => SelectedBlueprint is not null);
+        AddAllTtrpgCommand = new RelayCommand(() => { foreach (var b in TtrpgLibrary) AddTemplate(b.Create()); });
+        OpenVersionsCommand = new RelayCommand(OpenVersions, () => SelectedTemplate is not null);
         RunTemplateCommand = new RelayCommand(() => { if (SelectedTemplate is { } t) _ = RunAsync(t, manual: true); },
             () => SelectedTemplate is { IsRunning: false });
         StopTemplateCommand = new RelayCommand(() => { if (SelectedTemplate is { } t && running.TryGetValue(t.Id, out var c)) c.Cancel(); },
@@ -104,6 +108,16 @@ public sealed class TemplatesViewModel : ObservableObject
     public ICommand DeleteTemplateCommand { get; }
     public ICommand AddStartersCommand { get; }
     public ICommand AddTableStartersCommand { get; }
+    public ICommand AddBlueprintCommand { get; }
+    public ICommand AddAllTtrpgCommand { get; }
+    public ICommand OpenVersionsCommand { get; }
+    public IReadOnlyList<TemplateBlueprint> TtrpgLibrary => OutputTemplate.TtrpgLibrary;
+    public TemplateBlueprint? SelectedBlueprint
+    {
+        get => selectedBlueprint;
+        set { if (Set(ref selectedBlueprint, value)) Changed(nameof(BlueprintDescription)); }
+    }
+    public string BlueprintDescription => SelectedBlueprint?.Description ?? "Pick a ready-made tabletop RPG template to add.";
     public ICommand RunTemplateCommand { get; }
     public ICommand StopTemplateCommand { get; }
     public ICommand BrowseOutputCommand { get; }
@@ -424,8 +438,19 @@ public sealed class TemplatesViewModel : ObservableObject
         {
             Name = source.Name + " (copy)", Prompt = source.Prompt, ConnectionId = source.ConnectionId, IntervalSeconds = source.IntervalSeconds,
             IncludePrevious = source.IncludePrevious, UseReferences = source.UseReferences, MaxTranscriptChars = source.MaxTranscriptChars,
-            UseTranscript = source.UseTranscript, InputTemplateIds = [.. source.InputTemplateIds], UseScreenshot = source.UseScreenshot
+            UseTranscript = source.UseTranscript, InputTemplateIds = [.. source.InputTemplateIds], UseScreenshot = source.UseScreenshot,
+            KeepVersions = source.KeepVersions, MaxVersions = source.MaxVersions
         });
+    }
+
+    private void OpenVersions()
+    {
+        if (SelectedTemplate is not { } template) return;
+        try { AppDiagnostics.OpenFolder(TemplateVersions.Folder(template, controller.Store.RootDirectory)); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or System.ComponentModel.Win32Exception)
+        {
+            template.Status = "Could not open the versions folder: " + error.Message;
+        }
     }
 
     private async Task DeleteTemplateAsync()
@@ -609,6 +634,19 @@ public sealed class TemplatesViewModel : ObservableObject
             {
                 var bytes = await Task.Run(() => LiveTranscriptFile.Write(path, result + Environment.NewLine));
                 status += $" · {bytes:N0} bytes → {path}";
+            }
+            if (template.KeepVersions)
+            {
+                var root = controller.Store.RootDirectory;
+                try
+                {
+                    if (await Task.Run(() => TemplateVersions.Save(template, root, result + Environment.NewLine, DateTime.Now)) is { } version)
+                        status += $" · version saved: {Path.GetFileName(version)}";
+                }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException)
+                {
+                    status += " · version not saved: " + error.Message;
+                }
             }
             template.Status = status;
             log($"Template \"{template.Name}\" updated ({seconds:0.#} s).", false);
