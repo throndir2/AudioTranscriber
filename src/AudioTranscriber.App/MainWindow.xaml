@@ -594,17 +594,34 @@
                                                 <StackPanel Grid.Column="2">
                                                     <Label Content="Every (seconds)" Target="{Binding ElementName=TemplateIntervalInput}" />
                                                     <TextBox x:Name="TemplateIntervalInput" Text="{Binding SelectedTemplate.IntervalSeconds, UpdateSourceTrigger=LostFocus}" Margin="0,3,0,8"
-                                                             AutomationProperties.Name="Minimum seconds between automatic updates" ToolTip="Minimum time between automatic updates (10 or more). Updates only happen when the transcript changed." />
+                                                             AutomationProperties.Name="Minimum seconds between automatic updates" ToolTip="Minimum time between automatic updates (10 or more). Updates only happen when its inputs changed." />
                                                 </StackPanel>
                                                 <StackPanel Grid.Column="4">
                                                     <Label Content="Transcript characters" Target="{Binding ElementName=TemplateCharsInput}" />
-                                                    <TextBox x:Name="TemplateCharsInput" Text="{Binding SelectedTemplate.MaxTranscriptChars, UpdateSourceTrigger=LostFocus}" Margin="0,3,0,8"
+                                                    <TextBox x:Name="TemplateCharsInput" Text="{Binding SelectedTemplate.MaxTranscriptChars, UpdateSourceTrigger=LostFocus}" Margin="0,3,0,8" IsEnabled="{Binding SelectedTemplate.UseTranscript}"
                                                              AutomationProperties.Name="Maximum transcript characters sent" ToolTip="Only the most recent part of a long transcript is sent (about 4 characters per token). Lower it for small local models." />
                                                 </StackPanel>
                                             </Grid>
-                                            <CheckBox IsChecked="{Binding SelectedTemplate.AutoUpdate}" FontWeight="SemiBold" Content="Keep updating as the transcript grows" />
-                                            <CheckBox IsChecked="{Binding SelectedTemplate.IncludePrevious}" Content="Build on the previous output (update it instead of starting over)" />
-                                            <CheckBox IsChecked="{Binding SelectedTemplate.UseReferences}" Content="Use the reference files below" ToolTip="Sends the always-included files and lets the model search and read the context folder." />
+                                            <CheckBox IsChecked="{Binding SelectedTemplate.AutoUpdate}" FontWeight="SemiBold" Content="Keep updating when its inputs change" />
+                                            <Border BorderBrush="{StaticResource Dim}" BorderThickness="1" CornerRadius="4" Padding="10,6" Margin="0,8,0,4">
+                                                <StackPanel>
+                                                    <TextBlock Text="Context (inputs)" FontWeight="SemiBold" />
+                                                    <TextBlock Style="{StaticResource Caption}" Text="What this template's model gets. Small local models do best with one narrow job each; chain templates and combine their outputs in a final one." />
+                                                    <CheckBox IsChecked="{Binding SelectedTemplate.UseTranscript}" Content="Transcript (most recent part of the session)" ToolTip="Untick for templates that only work from other inputs; they then run without a session." />
+                                                    <CheckBox IsChecked="{Binding SelectedTemplate.UseReferences}" Content="Reference files (below)" ToolTip="Sends the always-included files and lets the model search and read the context folder." />
+                                                    <CheckBox IsChecked="{Binding SelectedTemplate.IncludePrevious}" Content="Previous output (update it instead of starting over)" />
+                                                    <!-- Screenshot input checkbox (OutputTemplate.UseScreenshot) belongs here. -->
+                                                    <TextBlock Text="Outputs of other templates" Margin="0,6,0,2" />
+                                                    <ItemsControl ItemsSource="{Binding TemplateInputs}" AutomationProperties.Name="Other templates used as inputs">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <CheckBox IsChecked="{Binding IsSelected}" IsEnabled="{Binding IsEnabled}" Content="{Binding Template.Name}"
+                                                                          ToolTip="{Binding Hint}" ToolTipService.ShowOnDisabled="True" />
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </StackPanel>
+                                            </Border>
                                             <CheckBox IsChecked="{Binding SelectedTemplate.WriteToFile}" Content="Also write the output to a file" Margin="0,6,0,2" />
                                             <DockPanel IsEnabled="{Binding SelectedTemplate.WriteToFile}">
                                                 <Button DockPanel.Dock="Right" Content="Browse…" Command="{Binding BrowseOutputCommand}" Margin="0,3,0,8" />

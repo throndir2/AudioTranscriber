@@ -286,21 +286,29 @@ for example "Give me DM guidance for the current scene based on the PDFs", a run
 session summary, or a list of NPCs, places or items. Four starter templates are
 included (**Add starter templates** brings them back).
 
-- **Which session:** templates run on the session being recorded, otherwise on the
-  session selected on the left.
-- **Keep updating as the transcript grows:** the template re-runs whenever new or
-  corrected lines arrive, at most once per **Every (seconds)**. Nothing runs while
-  the transcript is unchanged. **Update now** runs it once; **Stop** cancels.
-- **Build on the previous output:** the model gets its last answer for the same
-  session and updates it, which keeps lists and summaries stable.
+- **Which session:** templates that use the transcript run on the session being
+  recorded, otherwise on the session selected on the left.
+- **Keep updating when its inputs change:** the template re-runs whenever its inputs
+  change (new or corrected transcript lines, or a new output from a template it
+  uses), at most once per **Every (seconds)**. Nothing runs while the inputs are
+  unchanged. **Update now** runs it once with the current inputs; **Stop** cancels.
+- **Context (inputs):** choose what the model gets: the **Transcript**, the
+  **Reference files**, its **Previous output** (it updates its last answer, which
+  keeps lists and summaries stable), and the **Outputs of other templates**. A
+  template without the transcript runs without any session selected.
+- **Chaining:** a template that uses other templates' outputs waits while any of
+  them is updating, then re-runs on their fresh results. Templates that would form
+  a loop can't be selected. Tip for small local models: give each template one
+  narrow job (for example only the turn order, or only the open story beats) and
+  combine their outputs in a final template that writes the suggestions.
 - **Transcript characters:** only the most recent part of a long transcript is sent
   (about 4 characters per token); lower it for small local models.
 - **Output:** always shown on the right (with **Copy**). **Also write the output to
   a file** rewrites a `.md`/`.txt` file on every update without locking it, so VS
   Code, Obsidian or a browser can keep it open.
 
-**Reference files** are shared by all templates (untick **Use the reference files
-below** per template). The **context folder** is browsable by the model through
+**Reference files** are shared by all templates (untick **Reference files** in a
+template's inputs). The **context folder** is browsable by the model through
 read-only tools (list, search, read) covering PDF, DOCX, Markdown, text, JSON, CSV
 and similar files in it and its subfolders; it cannot reach anything outside the
 folder. **Always-included files** are sent in full with every update (about 60,000
