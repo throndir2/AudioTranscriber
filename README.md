@@ -89,7 +89,9 @@ The release-only workflow builds one self-contained Windows x64 ZIP on Ubuntu
 when a valid `vMAJOR.MINOR.PATCH` tag (optionally a prerelease) is pushed. It uses
 the pinned SDK, cached locked packages, and a single app/worker build graph; it
 does not run tests, benchmarks, or ordinary branch/PR CI. The ZIP and SHA256 file
-are published directly to the matching GitHub Release. See `docs\releases.md`
+are published directly to the matching GitHub Release. Each release's notes come
+from its section in [`CHANGELOG.md`](CHANGELOG.md); a release fails before tagging
+if that section is missing. See `docs\releases.md`
 for tag/rerun instructions, safeguards, and the locally verified Linux build.
 
 Installed release builds update themselves from the latest GitHub release: they

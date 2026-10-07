@@ -22,6 +22,30 @@ function Get-ReleaseVersion([string]$Value) {
     return [pscustomobject]@{ Tag = $Value; Prerelease = $Matches.pre.Length -gt 0 }
 }
 
+function Get-ReleaseNotes([string]$VersionTag, [string]$Path = (Join-Path $PSScriptRoot '..\CHANGELOG.md')) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "CHANGELOG.md not found at $Path." }
+    $lines = [IO.File]::ReadAllLines($Path)
+    $start = -1
+    for ($i = 0; $i -lt $lines.Length; $i++) {
+        if ($lines[$i] -cmatch "^## $([regex]::Escape($VersionTag))(\s|$)") { $start = $i + 1; break }
+    }
+    if ($start -lt 0) {
+        throw "CHANGELOG.md has no '## $VersionTag - YYYY-MM-DD' section. Move the Unreleased entries under that heading and merge it before releasing."
+    }
+    $section = for ($i = $start; $i -lt $lines.Length -and $lines[$i] -notmatch '^## '; $i++) { $lines[$i] }
+    $notes = ($section -join "`n").Trim()
+    if (-not $notes) { throw "CHANGELOG.md section for $VersionTag is empty." }
+    return $notes
+}
+
+function Get-ReleaseBody([string]$VersionTag, [string]$SourceCommit) {
+    return "$(Get-ReleaseMarker $VersionTag $SourceCommit)`n`n$(Get-ReleaseNotes $VersionTag)`n`n---`n`n" +
+        "Windows x64 self-contained application and speaker worker. Download ``AudioTranscriber-$VersionTag-win-x64.zip``, " +
+        "extract it, and run ``AudioTranscriber.App.exe``. Installed copies update themselves from inside the app.`n`n" +
+        "FFmpeg/FFprobe (LGPL build) are bundled in the ffmpeg folder. Optional model weights are downloaded from inside the app. " +
+        "See the included README and licenses.`n`nSource commit: $SourceCommit"
+}
+
 function Get-CheckedOutCommit([string]$Expected) {
     $head = & git rev-parse --verify HEAD
     if ($LASTEXITCODE -ne 0 -or $head -cnotmatch '^[0-9a-f]{40}$') { throw 'Checkout does not identify a commit.' }
@@ -243,7 +267,7 @@ function Publish-OwnedRelease([object]$Version, [string]$SourceCommit, [string]$
             $release = Invoke-ReleaseApi -Method POST -Route 'releases' -Body @{
                 tag_name = $Version.Tag; target_commitish = $SourceCommit; name = "AudioTranscriber $($Version.Tag)"
                 draft = $true; prerelease = $Version.Prerelease; make_latest = 'false'
-                body = "$(Get-ReleaseMarker $Version.Tag $SourceCommit)`n`nWindows x64 self-contained application and speaker worker.`n`nSource commit: $SourceCommit`n`nFFmpeg/FFprobe (LGPL build) are bundled in the ffmpeg folder. Optional model weights are downloaded from inside the app. See the included README and licenses."
+                body = Get-ReleaseBody $Version.Tag $SourceCommit
             }
         }
         # Only these two named assets of our matching draft may be replaced after an interrupted upload.
@@ -276,6 +300,7 @@ $version = Get-ReleaseVersion $Tag
 $sourceCommit = Get-CheckedOutCommit $Commit
 switch ($Phase) {
     'Prepare' {
+        [void](Get-ReleaseNotes $version.Tag)
         Assert-RemoteReleaseTag $version.Tag $sourceCommit $EventSha
         $release = Get-OwnedRelease $version $sourceCommit
         $complete = Test-CompleteReleaseAssets $release (Get-AssetNames $version.Tag)

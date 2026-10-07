@@ -55,7 +55,7 @@ try {
         $runtimeConfig = Get-Content (Join-Path $destination "$name.runtimeconfig.json") -Raw | ConvertFrom-Json
         if (-not $runtimeConfig.runtimeOptions.includedFrameworks) { throw "$name was not published self-contained." }
     }
-    Copy-Item -LiteralPath (Join-Path $root 'README.md') -Destination $destination -Force
+    Copy-Item -LiteralPath (Join-Path $root 'README.md'), (Join-Path $root 'CHANGELOG.md') -Destination $destination -Force
     Copy-Item -LiteralPath (Join-Path $root 'docs') -Destination $destination -Recurse -Force
     $licenses = Join-Path $destination 'licenses'
     New-Item -ItemType Directory -Force $licenses | Out-Null
