@@ -247,6 +247,7 @@ public sealed class TemplatesViewModel : ObservableObject
                 Templates = OutputTemplate.Starters().ToList()
             };
             dirty = true;
+            freshDefaults = true;
         }
         contextFolder = saved.ContextFolder ?? "";
         pinnedFiles = saved.PinnedFiles ?? "";
@@ -453,6 +454,39 @@ public sealed class TemplatesViewModel : ObservableObject
 
     private LlmConnection? ConnectionFor(OutputTemplate template) =>
         Connections.FirstOrDefault(c => c.Id == template.ConnectionId) ?? Connections.FirstOrDefault();
+
+    // ---------- hardware-aware defaults ----------
+
+    private bool freshDefaults;
+
+    private static bool IsOnThisPc(LlmConnection connection) =>
+        Uri.TryCreate(connection.BaseUrl.Trim(), UriKind.Absolute, out var uri) && uri.IsLoopback;
+
+    /// <summary>True when templates run on an LLM server on this PC, which then needs GPU memory.</summary>
+    public bool UsesLocalLlm => Templates.Count == 0 ? Connections.Any(IsOnThisPc)
+        : Templates.Any(t => ConnectionFor(t) is { } c && IsOnThisPc(c));
+
+    /// <summary>True once, when the connections were just created with the app's defaults (first start).</summary>
+    public bool TakeFreshDefaults()
+    {
+        var fresh = freshDefaults;
+        freshDefaults = false;
+        return fresh;
+    }
+
+    /// <summary>Points Ollama connections on this PC that use a stock Gemma 4 size (or none) at <paramref name="model"/>.</summary>
+    public IReadOnlyList<string> UseRecommendedLlm(string model)
+    {
+        var changed = new List<string>();
+        foreach (var connection in Connections.Where(c => IsOnThisPc(c) && c.Kind == "Ollama" && c.Model != model &&
+                     (c.Model.Length == 0 || AudioTranscriber.Providers.HardwareAdvisor.LlmLadder.Any(m => m.Model == c.Model))))
+        {
+            connection.Model = model;
+            changed.Add(connection.Name);
+        }
+        if (changed.Count > 0) dirty = true;
+        return changed;
+    }
 
     // ---------- running ----------
 

@@ -28,6 +28,8 @@ public sealed class AppController : IAppController
     private Task? whisperSetup;
     private volatile string? whisperSetupStatus;
     private volatile bool whisperSetupFailed;
+    private Task? hardwareProbe;
+    private volatile HardwareProfile? hardware;
     private const int LiveChunkMaxSeconds = 6;
     private const int LivePauseSplitAfterMilliseconds = 1500;
     // Re-cut phrases may run longer than live ones: there is no latency to keep low, and longer context recognizes better.
@@ -130,8 +132,9 @@ public sealed class AppController : IAppController
             : Path.Combine(checkout, ".models", "diarization");
         if (settings.WhisperModelPath is null || !File.Exists(settings.WhisperModelPath))
         {
-            var recommended = Path.Combine(WhisperModelDirectory, LocalWhisperModelCatalog.Recommended.FileName);
-            if (File.Exists(recommended)) settings = settings with { WhisperModelPath = recommended };
+            var installed = LocalWhisperModelCatalog.All.OrderByDescending(model => model.Bytes)
+                .Select(model => Path.Combine(WhisperModelDirectory, model.FileName)).FirstOrDefault(File.Exists);
+            if (installed is not null) settings = settings with { WhisperModelPath = installed };
         }
         if (File.Exists(credentialPath))
         {
@@ -155,6 +158,39 @@ public sealed class AppController : IAppController
             player.PlaybackFailed += error => Notify("Playback failed: " + error.Message, true);
         scheduler = Task.Run(() => SchedulerAsync(speechLane, null, DiarizationProvider));
         speakerScheduler = Task.Run(() => SchedulerAsync(speakerLane, DiarizationProvider, null));
+        if (providerOverride is null) hardwareProbe = RecheckHardwareAsync();
+    }
+
+    /// <summary>Whether templates use an LLM on this PC (Ollama, LM Studio), so the plan keeps GPU memory for it.</summary>
+    public bool LocalLlmExpected { get; set; } = true;
+
+    /// <summary>What fits on this PC (null until the hardware check finishes).</summary>
+    public HardwarePlan? HardwarePlan => hardware is { } profile ? HardwareAdvisor.Plan(profile, LocalLlmExpected) : null;
+
+    public async Task<HardwarePlan?> RecheckHardwareAsync()
+    {
+        try { hardware = await Task.Run(() => HardwareProbe.ProbeAsync(shutdown.Token)); }
+        catch (OperationCanceledException) { }
+        return HardwarePlan;
+    }
+
+    /// <summary>Whisper runs on the GPU (Vulkan) unless the user or the recommended setup chose the CPU.</summary>
+    public bool WhisperOnGpu => settings.WhisperUseGpu ?? HardwarePlan?.WhisperOnGpu ?? true;
+
+    public void SetWhisperGpu(bool enabled)
+    {
+        UpdateSettings(current => current with { WhisperUseGpu = enabled });
+        Notify(enabled ? "Local Whisper uses the GPU (Vulkan) from its next chunk." : "Local Whisper uses the CPU from its next chunk.");
+    }
+
+    /// <summary>Selects an installed catalog Whisper model; false when it isn't downloaded yet.</summary>
+    public bool SelectInstalledWhisperModel(string modelId)
+    {
+        var model = LocalWhisperModelCatalog.All.SingleOrDefault(item => item.Id == modelId);
+        var path = model is null ? null : Path.Combine(WhisperModelDirectory, model.FileName);
+        if (path is null || !File.Exists(path)) return false;
+        if (!string.Equals(WhisperModelPath, Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase)) SetLocalWhisperModel(path);
+        return true;
     }
 
     public IReadOnlyList<DeviceChoice> GetOutputDevices() => capture.GetOutputDevices()
@@ -279,7 +315,8 @@ public sealed class AppController : IAppController
             whisperSetup = Task.Run(async () =>
             {
                 var token = shutdown.Token;
-                var model = LocalWhisperModelCatalog.Recommended;
+                var model = LocalWhisperModelCatalog.All.FirstOrDefault(item => item.Id == HardwarePlan?.WhisperModelId)
+                            ?? LocalWhisperModelCatalog.Recommended;
                 var totalMiB = model.Bytes / 1048576;
                 try
                 {
@@ -289,7 +326,7 @@ public sealed class AppController : IAppController
                             $"Downloading the Whisper transcription model: {bytes * 100 / model.Bytes}% ({bytes / 1048576:N0} / {totalMiB:N0} MiB). " +
                             "Queued Whisper audio is transcribed as soon as it finishes."), token);
                     if (WhisperModelPath is null) UpdateSettings(current => current with { WhisperModelPath = path });
-                    Notify("Whisper large-v3-turbo downloaded and verified. Queued Whisper audio is being transcribed.");
+                    Notify($"Whisper {model.Id} downloaded and verified. Queued Whisper audio is being transcribed.");
                 }
                 catch (OperationCanceledException) when (token.IsCancellationRequested) { }
                 catch (Exception error)
@@ -351,6 +388,13 @@ public sealed class AppController : IAppController
             var parent = Path.GetDirectoryName(modelDirectory)!;
             if (settings.UseGpuParakeet is null)
             {
+                if (hardwareProbe is { } probing) await probing;
+                if (HardwarePlan is { ParakeetOnGpu: false } plan)
+                {
+                    localGpuStatus = $"{gpu.Name} can run Parakeet, but the recommended setup keeps it on the CPU: {plan.ParakeetReason} " +
+                                     "Use the button here to switch anyway.";
+                    return;
+                }
                 gpuOffer = $"{gpu.Name} ({gpu.MemoryMiB / 1024.0:0.#} GB)";
                 localGpuStatus = $"{gpuOffer} can run Parakeet. Waiting for your choice; Parakeet uses the CPU meanwhile.";
                 return;
@@ -2592,7 +2636,7 @@ public sealed class AppController : IAppController
 
     private ITranscriptionProvider CreateProvider(string id)
     {
-        var cacheKey = id == "local-whisper" ? id + ":" + settings.WhisperModelPath : id;
+        var cacheKey = id == "local-whisper" ? id + ":" + settings.WhisperModelPath + ":" + (WhisperOnGpu ? "gpu" : "cpu") : id;
         if (providerCache.TryGetValue(cacheKey, out var existing)) return existing;
         if (id == "local-whisper")
         {
@@ -2615,7 +2659,7 @@ public sealed class AppController : IAppController
             if (string.IsNullOrWhiteSpace(settings.WhisperModelPath))
                 throw new TranscriptionProviderException(new(ProviderErrorCode.ModelUnavailable,
                     "No local Whisper model is installed yet. Install the recommended model from Privacy / models; this audio is transcribed automatically afterward. No cloud fallback was used."));
-            return new LocalWhisperProvider(settings.WhisperModelPath);
+            return new LocalWhisperProvider(settings.WhisperModelPath, WhisperOnGpu);
         }
         if (id == SherpaParakeetProvider.ProviderId)
             return new SherpaParakeetProvider(ParakeetModelDirectory, gpu: () => parakeetGpu, gpuFailed: OnGpuFailed);
@@ -2734,7 +2778,7 @@ public sealed class AppController : IAppController
     }
 
     private sealed record LocalSettings(string? WhisperModelPath, string? CloudBlockReason = null, double? FallbackBelowConfidence = null,
-        bool? UseGpuParakeet = null, bool? RememberVoices = null, bool? VoiceLibraryBackfilled = null);
+        bool? UseGpuParakeet = null, bool? RememberVoices = null, bool? VoiceLibraryBackfilled = null, bool? WhisperUseGpu = null);
     private sealed record MicrophoneOptions(Guid? EchoReferenceTrackId);
     // SessionOffsetTicks places an import that was merged into a later part of another session.
     private sealed record MediaCheckpoint(string SourcePath, int StreamIndex, ImportedMedia? Imported, long SessionOffsetTicks = 0);
