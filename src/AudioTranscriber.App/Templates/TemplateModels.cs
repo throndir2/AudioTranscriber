@@ -151,7 +151,7 @@ public sealed class OutputTemplate : ObservableObject
     ];
 
     /// <summary>
-    /// Virtual tabletop (DM assistant) chain: two narrow screenshot readers feed one reminders template.
+    /// Virtual tabletop (DM assistant) chain: narrow screenshot readers feed text-only combiners (movement, combat log, reminders).
     /// Each call does one small job so small vision models (e.g. gemma4:e4b) stay accurate. The last item is the reminders template.
     /// </summary>
     public static IReadOnlyList<OutputTemplate> TableStarters()
@@ -181,23 +181,87 @@ public sealed class OutputTemplate : ObservableObject
                      "If no battle map is visible, reply exactly: No battle map visible.\n" +
                      "Reply with the list only, nothing else."
         };
+        var movement = new OutputTemplate
+        {
+            Name = "Table: movement",
+            UseScreenshot = false, UseTranscript = false, UseReferences = false, IncludePrevious = true,
+            AutoUpdate = true, IntervalSeconds = 20,
+            InputTemplateIds = [tokens.Id],
+            Prompt = "The input \"Table: token positions\" is the battle map as it looks right now. Your previous output, if any, ends with a " +
+                     "\"Positions:\" list of where the tokens were last time.\n" +
+                     "Compare the two and write \"Moved:\" followed by one line per change:\n" +
+                     "- \"Name: old location -> new location\" for a token that moved,\n" +
+                     "- \"Name: appeared at location\" for a new token,\n" +
+                     "- \"Name: no longer visible\" for a token that is gone.\n" +
+                     "Wording of locations can vary a little between readings; only count a token as moved when its location is clearly different. " +
+                     "If nothing changed, write \"Moved: nothing\".\n" +
+                     "Then write \"Positions:\" and copy the current token list from the input unchanged. Reply with these two parts only."
+        };
+        var health = new OutputTemplate
+        {
+            Name = "Table: health and conditions",
+            UseScreenshot = true, UseTranscript = false, UseReferences = false, IncludePrevious = false,
+            AutoUpdate = true, IntervalSeconds = 30,
+            Prompt = "Look ONLY at hit points and status in this virtual tabletop screenshot: health bars or numbers on tokens, status marker icons " +
+                     "on tokens, and any visible party, character sheet or combat tracker HP. Ignore everything else.\n" +
+                     "One line per creature: name or label, HP as shown (for example \"12/30\" or \"bar about half\"), then any conditions or status markers " +
+                     "(name them if labelled, otherwise describe the icon briefly, e.g. \"red skull icon\"). Write \"DOWN\" for 0 HP or a dead/unconscious marker.\n" +
+                     "Only list what you can actually see. If no health or status information is visible, reply exactly: No health information visible.\n" +
+                     "Reply with the list only, nothing else."
+        };
+        var rolls = new OutputTemplate
+        {
+            Name = "Table: dice rolls",
+            UseScreenshot = true, UseTranscript = false, UseReferences = false, IncludePrevious = false,
+            AutoUpdate = true, IntervalSeconds = 20,
+            Prompt = "Look ONLY at the chat log / dice roll panel in this virtual tabletop screenshot. Ignore the map and everything else.\n" +
+                     "List the most recent dice rolls you can read, oldest first, at most 8, one per line: who rolled, what for (attack, damage, save, " +
+                     "check, initiative, spell, or the roll's title), and the total. Add \"natural 20\" or \"natural 1\" when shown.\n" +
+                     "Only list rolls you can actually read. If no chat log or rolls are visible, reply exactly: No dice rolls visible.\n" +
+                     "Reply with the list only, nothing else."
+        };
+        var scene = new OutputTemplate
+        {
+            Name = "Table: scene and map",
+            UseScreenshot = true, UseTranscript = false, UseReferences = false, IncludePrevious = false,
+            AutoUpdate = true, IntervalSeconds = 120,
+            Prompt = "Look ONLY at the map in this virtual tabletop screenshot (not the tokens, chat or menus) and describe the scene in at most 8 short bullets: " +
+                     "what kind of place it is, lighting and unrevealed (fog of war) areas, doors and exits, notable terrain, cover, hazards and objects, " +
+                     "and the map's rough size in grid squares if a grid is shown.\n" +
+                     "Only describe what is actually visible. If no map is visible, reply exactly: No map visible.\n" +
+                     "Reply with the bullets only, nothing else."
+        };
+        var combatLog = new OutputTemplate
+        {
+            Name = "Table: combat log",
+            UseScreenshot = false, UseTranscript = true, UseReferences = false, IncludePrevious = true,
+            MaxTranscriptChars = 8000, AutoUpdate = true, IntervalSeconds = 60,
+            InputTemplateIds = [turnOrder.Id, rolls.Id, health.Id],
+            Prompt = "Keep a running log of the current fight from the turn order, dice rolls and health read from the virtual tabletop and the recent table talk.\n" +
+                     "Use a \"## Round N\" heading per round (a new round starts when the turn order wraps back to the top) and one short bullet per action: " +
+                     "who acted, what they did, hits, misses and damage, who went down, and conditions applied or ended.\n" +
+                     "Keep your previous log as it is and only append new events; never repeat an event. " +
+                     "When the turn order shows no combat any more, add \"Combat ended.\"; when a new turn order appears later, start a new \"# Encounter\" section.\n" +
+                     "Only use facts from the inputs. Reply with the log only."
+        };
         var reminders = new OutputTemplate
         {
             Name = "Table: DM reminders",
             UseScreenshot = false, UseTranscript = true, UseReferences = true, IncludePrevious = false,
             MaxTranscriptChars = 12000, AutoUpdate = true, IntervalSeconds = 45,
-            InputTemplateIds = [turnOrder.Id, tokens.Id],
-            Prompt = "I am the GM running this game right now. You get: the turn order and token positions read from my virtual tabletop, " +
-                     "the recent transcript of the table talk, and my notes / adventure (reference files).\n" +
+            InputTemplateIds = [turnOrder.Id, movement.Id, health.Id, scene.Id],
+            Prompt = "I am the GM running this game right now. You get: the turn order, token positions and movement, health and conditions, " +
+                     "and the scene read from my virtual tabletop, the recent transcript of the table talk, and my notes / adventure (reference files).\n" +
                      "Give short real-time reminders as Markdown bullets, most urgent first, at most 8 bullets:\n" +
                      "- Whose turn it is now and who is next.\n" +
-                     "- For monsters acting soon: one tactical suggestion based on the token positions.\n" +
+                     "- For monsters acting soon: one tactical suggestion based on the token positions, their health and the terrain.\n" +
+                     "- Creatures that are low on HP, down, or whose conditions need tracking.\n" +
                      "- Rules reminders that apply right now (conditions, opportunity attacks, concentration, etc.).\n" +
                      "- Story beats, clues or NPC moments from my notes for the current scene that have NOT been presented yet in the transcript, " +
                      "phrased like \"Don't forget to present …\".\n" +
                      "Each bullet one short line. Only use facts from the inputs; skip a point if there is nothing for it. No introduction or closing text."
         };
-        return [turnOrder, tokens, reminders];
+        return [turnOrder, tokens, movement, health, rolls, scene, combatLog, reminders];
     }
 }
 
