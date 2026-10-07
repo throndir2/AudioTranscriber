@@ -1,205 +1,221 @@
-# <img src="src/AudioTranscriber.App/Assets/AppIcon.png" alt="" width="40" align="top"> AudioTranscriber
+<div align="center">
 
-Native Windows and Linux x64 recording and transcription with a .NET 10 desktop interface, durable local audio, searchable transcripts, and optional NVIDIA ASR.
+<img src="src/AudioTranscriber.App/Assets/AppIcon.png" alt="AudioTranscriber icon" width="112">
 
-Record the **selected output device** (WASAPI loopback on Windows; the PulseAudio/PipeWire monitor of the output on Linux), optionally with a separately
-timestamped microphone, or import a long audio/video recording. Transcription
-never sits in the capture callback: slow inference or an unavailable network
-leaves the original recording on disk.
+# AudioTranscriber
 
-| Workflow | First-version behavior |
+### Everything your PC hears, turned into a searchable transcript that knows who said what.
+
+[![Latest release](https://img.shields.io/github/v/release/throndir2/AudioTranscriber?style=for-the-badge&color=c9a227&label=latest)](https://github.com/throndir2/AudioTranscriber/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/throndir2/AudioTranscriber/total?style=for-the-badge&color=a67c00)](https://github.com/throndir2/AudioTranscriber/releases)
+![Windows x64](https://img.shields.io/badge/Windows-x64-8d6e1f?style=for-the-badge&logo=windows&logoColor=white)
+![Linux x64](https://img.shields.io/badge/Linux-x64-8d6e1f?style=for-the-badge&logo=linux&logoColor=white)
+![Runs locally](https://img.shields.io/badge/runs-100%25%20local-6b5414?style=for-the-badge)
+![Free](https://img.shields.io/badge/price-free-4e3d0e?style=for-the-badge)
+
+<a href="https://github.com/throndir2/AudioTranscriber/releases/latest"><img src="https://img.shields.io/badge/Download-for%20Windows-c9a227?style=for-the-badge&logo=windows&logoColor=white" alt="Download AudioTranscriber for Windows" height="44"></a>
+&nbsp;
+<a href="https://github.com/throndir2/AudioTranscriber/releases/latest"><img src="https://img.shields.io/badge/Download-for%20Linux-c9a227?style=for-the-badge&logo=linux&logoColor=white" alt="Download AudioTranscriber for Linux" height="44"></a>
+&nbsp;
+<a href="https://www.buymeacoffee.com/throndir" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="44"></a>
+
+[Features](#-everything-it-does) · [Screenshots](#-take-a-look) · [Get started](#-up-and-running-in-a-minute) · [Wiki](https://github.com/throndir2/AudioTranscriber/wiki)
+
+</div>
+
+<br>
+
+<img src="docs/images/transcript.png" alt="AudioTranscriber showing a tabletop game session transcript, with every line labeled Dungeon Master or Lyra (rogue)">
+
+<p align="center"><i>A game night, transcribed on the PC with every speaker named. Fill in two lines yourself and the app labels the rest by voice.</i></p>
+
+---
+
+## 🎧 Never take notes again
+
+Press **Record** and AudioTranscriber captures whatever your PC is playing (a
+call, a stream, a game session, a lecture) plus your own microphone. It writes
+the words down **live** as people talk, figures out **who is talking**, and
+keeps everything in a library you can search.
+
+It runs **on your own PC**: no account, no API key, no upload, no subscription.
+The speech model downloads by itself the first time you start the app.
+
+<table>
+<tr>
+<td align="center" width="25%">🔴<br><b>One click</b><br>Every setting has a working default</td>
+<td align="center" width="25%">⚡<br><b>Fast</b><br>14–20× real time on a desktop CPU</td>
+<td align="center" width="25%">🗣️<br><b>Knows voices</b><br>Speakers get named and remembered</td>
+<td align="center" width="25%">🔒<br><b>Private</b><br>Nothing leaves your PC unless you allow it</td>
+</tr>
+</table>
+
+## 💡 Made for
+
+> 🎲 **Tabletop game night.** Record the whole session, ask an AI for *"DM guidance for the current scene"* from your own adventure PDFs, and get a list of NPCs and loot that updates as you play. Running Roll20 or Foundry? The **VTT assistant** reads the turn order and battle map from a screenshot and reminds you whose turn it is, what the monsters should do, and which clues you haven't revealed yet.
+
+> 💼 **Meetings and calls.** Teams, Zoom, Discord, whatever your PC plays. Your microphone is its own track and echo reduction means no headset is needed.
+
+> 🎮 **Discord servers.** Invite your own bot to a voice channel and every line is named after the Discord user who said it, no speaker guessing needed.
+
+> 🎓 **Lectures and long recordings.** Import hours of audio or video and come back to a timestamped, searchable transcript. Click any line to hear it.
+
+> 🎬 **Subtitles.** Export SRT or WebVTT with timestamps, or plain text and JSON.
+
+> 🤖 **AI agents.** Built-in MCP servers let Copilot, Claude and other agents record, transcribe and read transcripts for you.
+
+## ✨ Everything it does
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### 🎙️ Record anything
+- Captures the **output device** you pick (WASAPI on Windows, PulseAudio/PipeWire on Linux), so it hears everything your PC plays.
+- Records **Discord server voice channels** through your own bot, with every line named after the Discord user who said it.
+- Adds your **microphone as a separate track**, with **echo reduction** so the call isn't transcribed twice.
+- **Import** long audio or video files (FFmpeg is bundled).
+- **Continue** a session later, or **merge** sessions that got split.
+- The original audio is saved first, so a slow PC never loses a word.
+
+</td>
+<td width="50%" valign="top">
+
+### ⚡ Fast, accurate, local
+- **NVIDIA Parakeet TDT v3** on your CPU by default: 25 European languages, detected automatically.
+- In testing it made **about a third fewer word errors** than Whisper large-v3-turbo and used far less CPU.
+- Have an **NVIDIA GPU**? On Windows the app offers to run Parakeet on it instead.
+- **Recommended setup for this PC** reads your CPU, RAM and graphics card and fits the speech models and a local AI model to them.
+- **Local Whisper** for any other language.
+- Optional **NVIDIA cloud** models, only when you allow it for a session.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 🗣️ Knows who's talking
+- **Automatic speaker labels**, worked out on your PC.
+- Right-click a line to **name the speaker**. Name a few lines and **Fill speakers** labels the rest by voice.
+- The **voice library** remembers people, so the next recording names them for you.
+- Gave someone two names? Use the same name twice and they **merge**.
+- Name your **microphone** once and every mic line follows.
+
+</td>
+<td valign="top">
+
+### 🔎 A transcript you can use
+- **Live text** while you record, with a pause setting for short or long lines.
+- **Search** every line, **filter by speaker**, **jump** to a time.
+- **Double-click** a line to play the audio.
+- **Fix mistakes** without losing what the model originally heard.
+- **Re-transcribe** a session with a different phrase pause.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 🧠 AI notes that keep up
+- **Output templates**: write a prompt once (*session summary*, *DM guidance*, *NPCs*, *action items*) and an AI keeps the answer current as the transcript grows.
+- Works with **OpenRouter, NVIDIA Build, OpenAI**, or a model on your own PC with **Ollama or LM Studio**.
+- Point it at a folder of **PDFs and notes** to use as reference.
+- **Chain templates** together, and let vision models see a **screenshot of your virtual tabletop** (Roll20, Foundry or any window). A ready-made **VTT assistant** turns it into live DM reminders.
+- Results show up in the app and can be written to a file.
+
+</td>
+<td valign="top">
+
+### 📤 Takes your words anywhere
+- Export **text, JSON, SRT and WebVTT**.
+- A **live transcript file** that refreshes as you talk. Keep it open in VS Code or any other app.
+- Import **WebVTT** files and **Microsoft Teams** meeting transcripts.
+- **MCP servers** for AI agents, both headless and driving the real window.
+
+</td>
+</tr>
+</table>
+
+**Plus the small things:** automatic updates from GitHub releases (checked
+against SHA-256 before installing), a live activity log that shows what's
+happening, a jobs view with pause, resume and cancel, bulk-deleting old sessions,
+safe recovery after a crash, a one-click **diagnostics ZIP** for bug reports (with
+your user name scrubbed), and a dark gold theme.
+
+## 📸 Take a look
+
+<table>
+<tr>
+<td width="50%"><img src="docs/images/record.png" alt="Record / import tab with Start recording, new-session settings and live activity"><p align="center"><b>Press Start and go</b><br>Sensible defaults, live activity on the side.</p></td>
+<td width="50%"><img src="docs/images/speakers.png" alt="Speaker names panel for renaming, merging and remembering voices"><p align="center"><b>Name a voice once</b><br>Rename, merge and remember speakers.</p></td>
+</tr>
+<tr>
+<td><img src="docs/images/templates.png" alt="Output templates with DM guidance, session summary, NPCs and items"><p align="center"><b>Output templates</b><br>Your prompts, updated from the live transcript.</p></td>
+<td><img src="docs/images/privacy-models.png" alt="Privacy / models tab with cloud consent off, local Parakeet and local speaker analysis"><p align="center"><b>You stay in control</b><br>Local models, consent per session, no key needed.</p></td>
+</tr>
+</table>
+
+## 🚀 Up and running in a minute
+
+1. **[Download the latest release](https://github.com/throndir2/AudioTranscriber/releases/latest)** for your system:
+
+   | System | Download | Install |
+   | --- | --- | --- |
+   | **Windows 10/11 x64** | `AudioTranscriber-<version>-win-x64-setup.exe` | Run it. Installs for your user only (no admin) with a Start menu shortcut and an uninstaller. Prefer no installer? Extract the `win-x64.zip` and run `AudioTranscriber.App.exe`. |
+   | **Ubuntu / Debian / Mint** | `audiotranscriber_<version>_amd64.deb` | `sudo apt install ./audiotranscriber_<version>_amd64.deb` |
+   | **Fedora / openSUSE** | `audiotranscriber-<version>-1.x86_64.rpm` | `sudo dnf install ./audiotranscriber-<version>-1.x86_64.rpm` |
+   | **Any other Linux** | `AudioTranscriber-<version>-linux-x64.tar.gz` | Extract it and run `./install.sh` (installs to your home folder; `--system` for `/opt`). |
+
+2. Start **AudioTranscriber** from the Start menu or your app launcher. The speech and
+   speaker models download and verify themselves on first start (you can record while
+   they download).
+3. Click **Start recording**. That's it. 🎉
+
+> [!NOTE]
+> AudioTranscriber runs on 64-bit Windows and Linux. Everything it needs, including
+> FFmpeg and the .NET runtime, is bundled. On Linux, `apt`/`dnf` install the few system
+> libraries it uses (PulseAudio/PipeWire client, ICU, X11, fontconfig) automatically, and
+> `install.sh` offers to install them with your distro's package manager. On Windows the
+> installer isn't code-signed, so SmartScreen may ask you to confirm; if the Microsoft
+> Visual C++ runtime is missing, the installer and app run Microsoft's installer for you.
+> GPU Parakeet is Windows-only for now; Linux runs Parakeet on the CPU.
+
+New to it? The **[First Steps](https://github.com/throndir2/AudioTranscriber/wiki/First-Steps)**
+page in the wiki walks through your first session.
+
+## 🔒 Private by design
+
+- **Local by default.** Recording, transcription and speaker labels all run on your PC.
+- **Nothing uploads without your say-so.** Cloud models need consent for each session, and it's off by default.
+- **Keys stay out of files.** An NVIDIA key is kept in memory unless you ask the app to remember it, encrypted for your user account.
+- **Your audio is safe.** Originals stay on disk with checksums, so transcripts can be rebuilt at any time.
+
+More in [Privacy and Uploads](https://github.com/throndir2/AudioTranscriber/wiki/Privacy-and-Uploads).
+
+## ☕ Support AudioTranscriber
+
+Made by one person. If it saves you some note-taking, a coffee helps keep it going!
+
+<a href="https://www.buymeacoffee.com/throndir" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="44"></a>
+
+## 📚 Learn more
+
+The **[AudioTranscriber Wiki](https://github.com/throndir2/AudioTranscriber/wiki)** has
+a guide for every feature, troubleshooting, known limits, and everything for
+developers:
+
+| Using it | Building it |
 | --- | --- |
-| Recording | Visible Start/Stop, selected WASAPI endpoint, separate optional mic, native-format rotated WAVs, explicit gaps/overflow/disk errors |
-| Long imports | FFprobe audio-stream selection, managed original copy, continuous FFmpeg normalization, resumable durable work |
-| Recognition | Local Parakeet TDT v3 by default (CPU, auto-downloaded, 25 European languages); optional local Whisper large-v3-turbo for any language, whose unsure chunks are re-checked by local Parakeet; three optional NVIDIA Riva routes; source-language ASR, no translation or automatic fallback on errors |
-| Speakers | Local segmentation plus clean-turn embeddings and persistent IDs; editable names; overlap/short-turn uncertainty |
-| Transcript | SQLite FTS, bounded pages, speaker filtering, corrections separate from source text, timestamp seek and playback |
-| Exchange | Text, JSON, SRT, WebVTT; local voice-tag VTT import; configured delegated Teams transcript retrieval |
-| Output templates | Your own prompts (DM guidance, session summary, NPC/item lists…) kept up to date from the live transcript by any OpenAI-compatible LLM: OpenRouter, NVIDIA Build, OpenAI, Ollama/LM Studio on this or another PC; can read a folder of PDFs/notes; shown in the app and optionally written to an unlocked file |
+| [First Steps](https://github.com/throndir2/AudioTranscriber/wiki/First-Steps) · [Recording and Importing](https://github.com/throndir2/AudioTranscriber/wiki/Recording-and-Importing) · [Transcripts and Search](https://github.com/throndir2/AudioTranscriber/wiki/Transcripts-and-Search) · [Speakers and Voice Library](https://github.com/throndir2/AudioTranscriber/wiki/Speakers-and-Voice-Library) · [Output Templates](https://github.com/throndir2/AudioTranscriber/wiki/Output-Templates) · [Transcription Providers](https://github.com/throndir2/AudioTranscriber/wiki/Transcription-Providers) · [Troubleshooting](https://github.com/throndir2/AudioTranscriber/wiki/Troubleshooting-FAQ) | [Developer Guide](https://github.com/throndir2/AudioTranscriber/wiki/Developer-Guide) · [Architecture](https://github.com/throndir2/AudioTranscriber/wiki/Architecture-and-Conventions) · [MCP Hooks](https://github.com/throndir2/AudioTranscriber/wiki/MCP-Hooks) · [Validation and Testing](https://github.com/throndir2/AudioTranscriber/wiki/Validation-and-Testing) · [Benchmarks](https://github.com/throndir2/AudioTranscriber/wiki/Benchmarks) · [Releasing](https://github.com/throndir2/AudioTranscriber/wiki/Releasing) |
 
-New sessions do not upload audio unless explicitly permitted. NVIDIA's current
-terms and finite trial quota apply; personal or confidential material may not be
-permitted. Recording and local processing do not require an API key. See
-`docs\privacy.md` before enabling uploads.
+The wiki's source lives in [`docs/wiki`](docs/wiki), and detailed reference docs
+are in [`docs`](docs).
 
-## Local setup
-
-Use PowerShell from the repository root on Windows x64:
+**Building from source** (PowerShell on Windows x64; `Publish.ps1 -Runtime linux-x64` cross-builds Linux):
 
 ```powershell
-.\scripts\Setup.ps1
-.\scripts\Start-App.ps1
-.\scripts\Start-App.ps1 -Smoke
-.\scripts\Test.ps1
-.\scripts\Publish.ps1
+.\scripts\Setup.ps1      # pinned .NET 10 SDK into .tools, nothing global
+.\scripts\Start-App.ps1  # run the app
+.\scripts\Test.ps1       # run the tests
+.\scripts\Publish.ps1    # build artifacts\publish\win-x64 (-Runtime linux-x64 for Linux)
 ```
-
-`Setup.ps1` installs **SDK 10.0.401** only into `.tools\dotnet`; it never performs
-a global installation or changes your machine's PATH. `global.json` disallows
-SDK roll-forward. The setup script discovers the exact Windows x64 ZIP in
-[Microsoft's official .NET 10 release metadata](https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json),
-accepts only approved Microsoft HTTPS download hosts, verifies the archive's
-SHA-512 against that metadata before extraction, and reuses an already installed
-pinned local SDK. Downloads, the local CLI home and NuGet cache remain in `.tools`.
-Package lock files are retained; test and publish scripts use locked restore.
-Development startup, workers, and VSTest use the explicit pinned local `dotnet`
-host. Native apphost/image-loading failures were observed intermittently on the
-development machine despite valid on-disk bytes; this is not evidence of a model
-or source-code defect. Published executables are a separate validation target.
-
-FFmpeg and FFprobe are resolved from the bundled `ffmpeg` folder of a release,
-then PATH (including the current registry PATH), then WinGet/Scoop/Chocolatey
-locations. Release ZIPs bundle a pinned, SHA-256-verified LGPL FFmpeg build, so a
-clean PC needs no separate install; for development, `Setup.ps1` warns when FFmpeg
-is not on PATH. Local Whisper also needs the Microsoft Visual C++ 2015-2022 x64
-runtime; the app checks it on startup and runs Microsoft's official installer if
-it is missing. Setup itself requires no model weights, API keys, recording, or
-cloud upload; the desktop app downloads its default models on first start.
-
-Targeted validation and direct local SDK invocation:
-
-```powershell
-.\scripts\Test.ps1 -Project .\tests\AudioTranscriber.Storage.Tests\AudioTranscriber.Storage.Tests.csproj
-.\.tools\dotnet\dotnet.exe build .\src\AudioTranscriber.Core\AudioTranscriber.Core.csproj -c Release
-```
-
-Publish output is `artifacts\publish\win-x64` by default; use `.\scripts\Publish.ps1 -Runtime linux-x64` for Linux output in `artifacts\publish\linux-x64`. Launch `AudioTranscriber.App.exe` on Windows or `AudioTranscriber.App` on Linux. Keep the complete output directory together, including the worker and
-native runtime libraries. FFmpeg/FFprobe are bundled in the `ffmpeg` folder
-(LGPL build; license and provenance under `licenses`).
-The package includes documentation, model notices, dependency license files,
-and a package inventory under `licenses`.
-
-`Start-App.ps1 -Smoke` uses a fresh isolated directory under `artifacts\smoke`
-and reports its `app-smoke.json` path. `-DataRoot PATH` selects a custom data root;
-smoke mode rejects nonempty roots rather than running previously queued work.
-
-## MCP hooks for agents
-
-The app exposes two stdio MCP servers for driving and testing it: `--mcp` (headless engine: record,
-import, transcribe, diarize, read transcripts) and `audiotranscriber-ui` (separate Windows-only UI MCP tool that launches the real Avalonia window and clicks through it via UI Automation, with snapshots and screenshots). `.mcp.json` registers both through
-`scripts\Start-Mcp.ps1`; `scripts\New-SpeechFixture.ps1` generates two-speaker test audio. See
-`docs\mcp.md`.
-
-## GitHub releases
-
-The release-only workflow builds Windows and Linux x64 release assets on Ubuntu when a valid `vMAJOR.MINOR.PATCH` tag (optionally a prerelease) is pushed: the legacy Windows ZIP, a per-user Windows setup `.exe`, a Linux tarball, `.deb`, `.rpm`, and SHA256 files. It does not run tests, benchmarks, or ordinary branch/PR CI. See `docs\releases.md` for tag/rerun instructions, safeguards, and local package fallback.
-
-Installed release builds update themselves from the latest GitHub release: Windows downloads and SHA-256-verifies the legacy ZIP; writable Linux installs use the Linux tarball; `/opt` Linux package installs stage the `.deb` or `.rpm` and prompt for a privileged package install on exit. See `docs\usage.md` → Updates.
-
-## First session
-
-Windows: download and run `AudioTranscriber-vX.Y.Z-win-x64-setup.exe` (unsigned, per-user), or extract the ZIP and run `AudioTranscriber.App.exe`. Linux: install `sudo apt install ./audiotranscriber_X.Y.Z_amd64.deb`, `sudo dnf install ./audiotranscriber-X.Y.Z-1.x86_64.rpm`, or extract `AudioTranscriber-vX.Y.Z-linux-x64.tar.gz` and run `./install.sh` (use `--yes` for non-interactive prerequisite install offers). Then start AudioTranscriber and click **Start recording**. Everything has a working default:
-
-- Output: the default output device. Microphone: your default microphone
-  as a separate track when one exists. Echo reduction is on, so no headset is needed:
-  speaker audio the mic picks up is removed before transcription instead of being
-  transcribed twice.
-- Transcription: local **Parakeet TDT v3** on the CPU, in English (it also detects
-  24 other European languages). The model (465 MiB) and the small speaker-labeling
-  models (33.49 MB) download and verify automatically on first start; you can record
-  meanwhile and queued audio is transcribed as soon as they are ready. In testing it
-  made about a third fewer word errors than Whisper large-v3-turbo and ran 14–20×
-  real time with a fraction of Whisper's CPU use. Local Whisper remains available
-  for other languages; its model downloads the first time you use it.
-- On a PC with an NVIDIA GPU (GTX 10-series or newer, 4 GB+), the app asks once
-  whether to download NVIDIA's CUDA runtime (about 4.4 GB, NVIDIA licence terms) so
-  Parakeet runs on the GPU instead. If you decline, it stays on the CPU. (GPU Parakeet is
-  Windows-only for now; Linux runs Parakeet on the CPU and Whisper via Vulkan.)
-- Windows: if the Microsoft Visual C++ runtime is missing, its official installer runs on
-  startup (approve the Windows prompt).
-- No cloud upload, key, or consent is needed. Provider, language, and microphone
-  choices are remembered from your last recording.
-
-Optional: pick an NVIDIA provider, supply a memory-only key (or per-user encrypted
-persistence), and grant session upload consent only for permitted audio. Stop
-seals original audio; transcription continues afterward. Pause, Cancel, and
-Resume control durable processing separately from recording. Search the
-transcript, right-click lines to set who is speaking (labeled lines teach the voice
-model, and giving two speakers the same name merges them), edit corrections, and
-double-click a row to play it.
-An unknown or overlapping voice is not a confirmed identity.
-
-Other Whisper weights can be installed with `scripts\Install-WhisperModel.ps1`
-(sizes and licenses are listed there) and selected in the desktop settings.
-See `docs\providers.md`.
-
-## What the initial public comparison showed
-
-One live run submitted two complete public LibriSpeech clips to all three NVIDIA
-routes: **six attempts, 32.010 seconds of submitted audio, no retries**. Five calls
-succeeded; one Parakeet request timed out. Parakeet returned real word timestamps
-on its successful clip; Canary and hosted Whisper returned coarse text.
-
-The tiny single-speaker read-speech sample does **not** identify a best D&D model.
-Whisper's measured word-error differences were only `Mr.` versus `MISTER`
-normalization. Details, failures, settings, hashes, and immutable sanitized public
-outputs are retained in `docs\benchmarks\2026-09-11`.
-
-Reproduction consumes new account quota; do not repeatedly run it after a
-nonzero exit or treat a failed request as a quality score. The optional credential
-bridge takes a configuration **path**, never a key argument:
-
-```powershell
-.\scripts\Compare-Models.ps1 -PrepareOnly
-.\scripts\Compare-Models.ps1 -ApprovePublicAudioCloud -ProductionConfigPath 'C:\authorized\production.json'
-```
-
-## Limits and integration setup
-
-The NVIDIA catalog's selected routes do not claim hosted native diarization.
-Word, segment, and coarse chunk timing remain distinct; coarse text cannot
-support fabricated word-level seek or certain attribution across several turns.
-Local diarization is not source separation. Its segmentation model has three
-local voice slots per ten-second window and at most two simultaneous voices,
-although the persistent registry can contain more session speakers.
-
-Teams retrieval requires a configured public-client application, work/school
-tenant consent, meeting identifiers, and permitted transcript access. It respects
-tenant attribution restrictions and is not live Teams media capture. Imported
-display names are source labels, not invented participant identifiers.
-
-Discord live receive is deferred pending real bot/DAVE permission, rekey,
-reconnect, and packet-loss validation. Universal loopback remains usable without
-Discord bot credentials. No user-token/selfbot integration is provided.
-
-## Data and recovery
-
-The data root contains `library.sqlite3`, session folders, original chunks or
-managed imports, normalized derivatives, provider evidence, and speaker state.
-Back up the whole data root rather than only an exported text file. Do not edit
-retained originals or move their individual files behind the app.
-
-Capture rotates at both duration and byte limits, avoiding classic WAV's 4 GiB
-per-file limit. Overflow, device loss, write failure, and unavailable audio are
-reported rather than silently dropping the oldest data. Periodic disk flushing
-reduces exposure; no application can guarantee the last unflushed samples survive
-power loss. Recovery verifies manifests and hashes and can replay a continuity
-run to reproduce the same resampler state, which takes extra decoding time.
-
-Only one application instance can own a data root. Use `-DataRoot PATH` for an
-isolated library. Never point a smoke run at a populated personal library.
-
-See `docs\usage.md`, `docs\audio.md`, `docs\diarization.md`,
-`docs\providers.md`, and `docs\privacy.md` for operational details and limitations.
-The shipped SQLite native library's exact provenance and hash are in
-`src\AudioTranscriber.Storage\NativeSqlite\README.md`.
-
-## Core conventions
-
-`AudioTranscriber.Core` has no UI, capture, inference, or native dependencies.
-Native frames, track-global normalized samples, and session-relative 100 ns
-ticks are distinct 64-bit coordinates. Normalized ASR files are headerless
-little-endian signed PCM16, mono, 16 kHz; a request owns a non-overlapping core
-within a maximum 30-second context window. Provider timestamps are integer
-milliseconds **relative to supplied audio**, and timing granularity and nullable
-confidence must reflect actual provider output. Preserve raw recognition
-separately from corrections. Loopback and optional microphone are separate tracks.
-
-No hardware capture test is started automatically. Tests use controlled
-synthetic/public data; a physical WASAPI capture check requires separate explicit
-consent to a controlled sound source. Tenant-dependent Graph access also requires
-real tenant setup.
-
-
-
-

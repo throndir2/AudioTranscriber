@@ -130,6 +130,11 @@
           "Avalonia.Skia": "11.3.22"
         }
       },
+      "Concentus": {
+        "type": "Transitive",
+        "resolved": "2.2.2",
+        "contentHash": "2B9YmHPKO+k7YpAAnqmiXwiMJnfjfj1C868RszOll2iZWLnGTAiC1q21L/d7CvTan7T+hyqU8dR0Dcy3cpjVfQ=="
+      },
       "Google.Protobuf": {
         "type": "Transitive",
         "resolved": "3.36.1",
@@ -242,6 +247,11 @@
         "dependencies": {
           "NAudio.Core": "2.2.1"
         }
+      },
+      "NetCord": {
+        "type": "Transitive",
+        "resolved": "1.0.0-beta.28",
+        "contentHash": "yTNehgXwYrSYAt4PbQsnnEVUiupSm27MsHZ9T18QfrUv0SJEma7QzI4239JQ77+kZbla/19x0jcaeJ63YuxSJA=="
       },
       "org.k2fsa.sherpa.onnx": {
         "type": "Transitive",
@@ -436,6 +446,14 @@
           "SharpZipLib": "[1.4.2, )",
           "org.k2fsa.sherpa.onnx": "[1.13.8, )",
           "org.k2fsa.sherpa.onnx.runtime.win-x64": "[1.13.8, )"
+        }
+      },
+      "audiotranscriber.discord": {
+        "type": "Project",
+        "dependencies": {
+          "AudioTranscriber.Audio": "[1.0.0, )",
+          "Concentus": "[2.2.2, )",
+          "NetCord": "[1.0.0-beta.28, )"
         }
       },
       "audiotranscriber.integrations": {

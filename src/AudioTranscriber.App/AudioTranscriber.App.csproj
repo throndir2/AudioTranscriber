@@ -19,9 +19,9 @@
     <PackageReference Include="Avalonia" Version="11.3.22" />
     <PackageReference Include="Avalonia.Desktop" Version="11.3.22" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.22" />
-    
     <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.22" />
     <PackageReference Include="Avalonia.Controls.DataGrid" Version="11.3.13" />
+    <ProjectReference Include="..\AudioTranscriber.Discord\AudioTranscriber.Discord.csproj" />
     <PackageReference Include="Whisper.net.Runtime.Vulkan" Version="1.9.1" />
     <PackageReference Include="PdfPig" Version="0.1.16" />
   </ItemGroup>

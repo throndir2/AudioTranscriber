@@ -168,8 +168,80 @@ public sealed class CaptureSession : IAsyncDisposable
         public float TakePeak() => Interlocked.Exchange(ref peak, 0);
         public float TakeRms() => Interlocked.Exchange(ref rms, 0);
 
+        private void RunExternal(IExternalAudioSource source)
+        {
+            Task? writer = null;
+            var sourceStarted = false;
+            var format = source.Format;
+            try
+            {
+                Info = new(choice.TrackId, source.Name, choice.DeviceId, true, format);
+                archive = new(new(options.RootDirectory, options.SessionId, choice.TrackId, format, origin,
+                    choice.DeviceId, true, options.QueueByteLimit, options.MaxChunkBytes,
+                    options.MaxChunkSeconds, MinimumFreeBytes: options.MinimumFreeBytes,
+                    PauseSplitAfterMilliseconds: options.PauseSplitAfterMilliseconds, PauseMilliseconds: options.PauseMilliseconds));
+                archive.ChunkSealed += sealedChunk;
+                archive.Gap += gap;
+                writer = Task.Run(WritePacketsAsync);
+                source.Start(new(options.SessionId, choice.TrackId, origin, (data, frames, qpc) => PushExternal(data, frames, qpc, format)));
+                sourceStarted = true;
+                started.TrySetResult();
+                stop.Wait();
+            }
+            catch (Exception exception)
+            {
+                captureFailed = true;
+                started.TrySetException(exception);
+                ReportFault("CaptureDeviceFailure", exception.Message);
+            }
+            finally
+            {
+                if (sourceStarted)
+                {
+                    try { source.Stop(); }
+                    catch (Exception exception) { captureFailed = true; ReportFault("StopDrainFailure", exception.Message); }
+                }
+                queue.Complete();
+                try { writer?.GetAwaiter().GetResult(); }
+                catch (Exception exception) { writerFailed = true; ReportFault("ArchiveFailure", exception.Message); }
+                try
+                {
+                    if (!writerFailed) archive?.Finish(Qpc100ns() - origin, !captureFailed);
+                }
+                catch (Exception exception) { ReportFault("ArchiveSealFailure", exception.Message); }
+                archive?.Dispose();
+                queue.Dispose();
+                complete.TrySetResult();
+            }
+        }
+
+        // Called on the source's thread; the source stops calling before Stop returns.
+        private void PushExternal(byte[] data, int frames, long qpc, NativeWaveFormat format)
+        {
+            if (writerFailed || stop.IsSet || frames <= 0) return;
+            var count = checked(frames * format.BlockAlign);
+            if (data.Length < count) throw new ArgumentException("The packet is shorter than its frame count.");
+            var written = queue.TryWrite(count, sourceFrame, frames, sourceFrame, qpc, PacketFlags.None, memory =>
+            {
+                data.AsSpan(0, count).CopyTo(memory.Span);
+                var level = SampleMeter.Measure(memory.Span, format);
+                Interlocked.Exchange(ref peak, Math.Max(peak, level.Peak));
+                Interlocked.Exchange(ref rms, Math.Max(rms, level.Rms));
+            });
+            if (!written)
+            {
+                captureFailed = true;
+                ReportFault("QueueOverflow", "Byte-bounded capture queue exhausted; external audio was not archived.");
+                stop.Set();
+                return;
+            }
+            sourceFrame = checked(sourceFrame + frames);
+            Interlocked.Exchange(ref acceptedThrough, sourceFrame);
+        }
+
         private void Run()
         {
+            if (ExternalAudioSources.TryGet(choice.DeviceId, out var external)) { RunExternal(external); return; }
             Task? writer = null;
             AudioClient? client = null;
             AudioCaptureClient? capture = null;

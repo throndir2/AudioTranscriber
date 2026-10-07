@@ -305,6 +305,7 @@ public sealed class HeadlessMcpTools
                 : "development worker (dotnet host)",
             controller.IsRecording, controller.RecordingSessionId,
             controller.DiarizationModelsReady, controller.ParakeetModelReady, controller.WhisperModelPath, controller.HasNvidiaKey, localGpu = controller.LocalGpuStatus, gpuOffer = controller.GpuOffer,
+            hardware = controller.HardwarePlan?.Hardware.Describe(), recommendedSetup = controller.HardwarePlan?.Summary, whisperOnGpu = controller.WhisperOnGpu,
             prerequisites.FFmpeg, prerequisites.FFprobe, prerequisites.VcRuntimeReady, linuxAudioReady = Prerequisites.LinuxAudioReady,
             recentErrors = notifications.Where(item => item.IsError).TakeLast(5)
         };

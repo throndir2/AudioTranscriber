@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\AudioTranscriber.Audio\AudioTranscriber.Audio.csproj" />
+    <!-- MIT Discord gateway and voice (DAVE end-to-end encryption through libdave). -->
+    <PackageReference Include="NetCord" Version="1.0.0-beta.28" />
+    <!-- Managed Opus decoder (BSD), so no native opus ships. -->
+    <PackageReference Include="Concentus" Version="2.2.2" />
+  </ItemGroup>
+  <!-- Discord voice is end-to-end encrypted (DAVE). NetCord calls libdave, so Discord's official unmodified libdave v1.2.1
+       Windows x64 and Linux x64 builds ship beside the app (notices: DISCORD-VOICE-NOTICES.txt). The build downloads each
+       release archive once into obj, checks its pinned SHA-256 and only then unpacks the library. Both are copied to the
+       output; scripts\Publish.ps1 keeps only the target platform's. -->
+  <PropertyGroup>
+    <LibDaveCache>$(BaseIntermediateOutputPath)libdave\</LibDaveCache>
+    <LibDaveUrl>https://github.com/discord/libdave/releases/download/v1.2.1%2Fcpp/libdave-Windows-X64-boringssl.zip</LibDaveUrl>
+    <LibDaveSha256>eb4a7bbcd755b916d306cc6364a64de63c62355296e3779b262f9a6afae8ea2f</LibDaveSha256>
+    <LibDaveLinuxCache>$(BaseIntermediateOutputPath)libdave-linux\</LibDaveLinuxCache>
+    <LibDaveLinuxUrl>https://github.com/discord/libdave/releases/download/v1.2.1%2Fcpp/libdave-Linux-X64-boringssl.zip</LibDaveLinuxUrl>
+    <LibDaveLinuxSha256>7fdf10a7df894406291463130a322c04d7de58085b602500866a11874e8907b4</LibDaveLinuxSha256>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="$(LibDaveCache)bin\libdave.dll" Link="libdave.dll" CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" Visible="false" />
+    <None Include="$(LibDaveLinuxCache)lib\libdave.so" Link="libdave.so" CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" Visible="false" />
+    <None Include="DISCORD-VOICE-NOTICES.txt" Link="licenses\DISCORD-VOICE-NOTICES.txt" CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="DownloadLibDave" BeforeTargets="PrepareForBuild;GetCopyToOutputDirectoryItems"
+          Condition="!Exists('$(LibDaveCache)bin\libdave.dll')">
+    <DownloadFile SourceUrl="$(LibDaveUrl)" DestinationFolder="$(LibDaveCache)" DestinationFileName="libdave.zip.partial"
+                  SkipUnchangedFiles="false" Retries="3" />
+    <VerifyFileHash File="$(LibDaveCache)libdave.zip.partial" Algorithm="SHA256" Hash="$(LibDaveSha256)" />
+    <Unzip SourceFiles="$(LibDaveCache)libdave.zip.partial" DestinationFolder="$(LibDaveCache)" OverwriteReadOnlyFiles="true" />
+    <Delete Files="$(LibDaveCache)libdave.zip.partial" />
+  </Target>
+  <Target Name="DownloadLibDaveLinux" BeforeTargets="PrepareForBuild;GetCopyToOutputDirectoryItems"
+          Condition="!Exists('$(LibDaveLinuxCache)lib\libdave.so')">
+    <DownloadFile SourceUrl="$(LibDaveLinuxUrl)" DestinationFolder="$(LibDaveLinuxCache)" DestinationFileName="libdave.zip.partial"
+                  SkipUnchangedFiles="false" Retries="3" />
+    <VerifyFileHash File="$(LibDaveLinuxCache)libdave.zip.partial" Algorithm="SHA256" Hash="$(LibDaveLinuxSha256)" />
+    <Unzip SourceFiles="$(LibDaveLinuxCache)libdave.zip.partial" DestinationFolder="$(LibDaveLinuxCache)" OverwriteReadOnlyFiles="true" />
+    <Delete Files="$(LibDaveLinuxCache)libdave.zip.partial" />
+  </Target>
+</Project>

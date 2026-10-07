@@ -6,6 +6,7 @@
   <Project Path="src\AudioTranscriber.Worker\AudioTranscriber.Worker.csproj" />
   <Project Path="src\AudioTranscriber.Storage\AudioTranscriber.Storage.csproj" />
   <Project Path="src\AudioTranscriber.Integrations\AudioTranscriber.Integrations.csproj" />
+  <Project Path="src\AudioTranscriber.Discord\AudioTranscriber.Discord.csproj" />
   <Project Path="src\AudioTranscriber.Application\AudioTranscriber.Application.csproj" />
   <Project Path="src\AudioTranscriber.App\AudioTranscriber.App.csproj" />
   <Project Path="tools\AudioTranscriber.UiMcp\AudioTranscriber.UiMcp.csproj" />

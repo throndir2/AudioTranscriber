@@ -2,6 +2,24 @@
 
 `.github\workflows\release.yml` builds releases only. It has **one Ubuntu 24.04 job**, a 25-minute timeout, and no matrix, PR/branch-push checks, schedules, tests, lint, benchmarks, model downloads, or deployment. It installs only NSIS and rpm packaging tools before building release assets.
 
+## Release notes (CHANGELOG.md)
+
+Release notes come from `CHANGELOG.md`. Every user-facing change adds a bullet
+under `## Unreleased` in the same pull request. To release, move those entries
+under a new `## vX.Y.Z - YYYY-MM-DD` heading (leave an empty `## Unreleased`
+above it), merge that to `main`, then dispatch with the same version:
+
+```powershell
+gh workflow run release.yml --ref main -f version=vX.Y.Z
+```
+
+`Release.ps1` copies that section into the GitHub Release body (below the
+ownership marker, followed by download/licensing notes and the source commit).
+The manual-run tag step and the `Prepare` phase fail before creating a tag or
+building if the version has no non-empty section, so a release can never ship
+with missing notes. To correct notes on an already-published release, edit the
+release body on GitHub and keep the marker line; also fix `CHANGELOG.md`.
+
 ## Trigger
 
 After these changes are pushed, create and push a version tag on the exact commit

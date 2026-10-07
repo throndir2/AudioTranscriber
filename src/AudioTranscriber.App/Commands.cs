@@ -39,7 +39,7 @@ public sealed class RelayCommand(Action execute, Func<bool>? canExecute = null) 
     {
         if (!CanExecute(parameter)) return;
         try { execute(); }
-        catch { CommandErrors.Show(); }
+        catch (Exception error) { CommandErrors.Show(error); }
     }
 }
 
@@ -60,14 +60,19 @@ public sealed class AsyncCommand(Func<Task> execute, Func<bool>? canExecute = nu
         running = true;
         CommandManager.InvalidateRequerySuggested();
         try { await execute(); }
-        catch { CommandErrors.Show(); }
+        catch (Exception error) { CommandErrors.Show(error); }
         finally { running = false; CommandManager.InvalidateRequerySuggested(); }
     }
 }
 
 internal static class CommandErrors
 {
-    public static void Show() => _ = DesktopDialogs.ShowMessageAsync("AudioTranscriber",
-        "The action could not complete. Check your selected session, files, and device configuration. Credentials and remote error bodies are not displayed.",
-        NativeDialogIcon.Warning);
+    public static void Show(Exception error)
+    {
+        AudioTranscriber.Core.AppLog.Error("A command failed.", error);
+        _ = DesktopDialogs.ShowMessageAsync("AudioTranscriber",
+            "The action could not complete. Check your selected session, files, and device configuration. Credentials and remote error bodies are not displayed." +
+            Environment.NewLine + Environment.NewLine + "Details are in the diagnostic log; use Save diagnostics ZIP on the Privacy / models tab to share them.",
+            NativeDialogIcon.Warning);
+    }
 }

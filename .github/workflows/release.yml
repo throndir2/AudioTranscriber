@@ -59,6 +59,7 @@ jobs:
           }
           if (-not $tag.StartsWith('v')) { $tag = "v$tag" }
           [void](Get-ReleaseVersion $tag)
+          [void](Get-ReleaseNotes $tag)
           $existing = gh api "repos/$repo/git/ref/tags/$tag" --jq '.object.sha' 2>$null
           if ("$existing" -notmatch '^[0-9a-f]{40}$') {
             gh api -X POST "repos/$repo/git/refs" -f "ref=refs/tags/$tag" -f "sha=$env:GITHUB_SHA" | Out-Null

@@ -286,21 +286,29 @@ for example "Give me DM guidance for the current scene based on the PDFs", a run
 session summary, or a list of NPCs, places or items. Four starter templates are
 included (**Add starter templates** brings them back).
 
-- **Which session:** templates run on the session being recorded, otherwise on the
-  session selected on the left.
-- **Keep updating as the transcript grows:** the template re-runs whenever new or
-  corrected lines arrive, at most once per **Every (seconds)**. Nothing runs while
-  the transcript is unchanged. **Update now** runs it once; **Stop** cancels.
-- **Build on the previous output:** the model gets its last answer for the same
-  session and updates it, which keeps lists and summaries stable.
+- **Which session:** templates that use the transcript run on the session being
+  recorded, otherwise on the session selected on the left.
+- **Keep updating when its inputs change:** the template re-runs whenever its inputs
+  change (new or corrected transcript lines, or a new output from a template it
+  uses), at most once per **Every (seconds)**. Nothing runs while the inputs are
+  unchanged. **Update now** runs it once with the current inputs; **Stop** cancels.
+- **Context (inputs):** choose what the model gets: the **Transcript**, the
+  **Reference files**, its **Previous output** (it updates its last answer, which
+  keeps lists and summaries stable), and the **Outputs of other templates**. A
+  template without the transcript runs without any session selected.
+- **Chaining:** a template that uses other templates' outputs waits while any of
+  them is updating, then re-runs on their fresh results. Templates that would form
+  a loop can't be selected. Tip for small local models: give each template one
+  narrow job (for example only the turn order, or only the open story beats) and
+  combine their outputs in a final template that writes the suggestions.
 - **Transcript characters:** only the most recent part of a long transcript is sent
   (about 4 characters per token); lower it for small local models.
 - **Output:** always shown on the right (with **Copy**). **Also write the output to
   a file** rewrites a `.md`/`.txt` file on every update without locking it, so VS
   Code, Obsidian or a browser can keep it open.
 
-**Reference files** are shared by all templates (untick **Use the reference files
-below** per template). The **context folder** is browsable by the model through
+**Reference files** are shared by all templates (untick **Reference files** in a
+template's inputs). The **context folder** is browsable by the model through
 read-only tools (list, search, read) covering PDF, DOCX, Markdown, text, JSON, CSV
 and similar files in it and its subfolders; it cannot reach anything outside the
 folder. **Always-included files** are sent in full with every update (about 60,000
@@ -308,12 +316,47 @@ characters in total), so keep them short: a campaign summary, roster or cheat sh
 Files are read without locking them. The folder tools need a model with tool
 (function) calling; other models still get the transcript and always-included files.
 
+**Table screenshot** (shared by all templates) lets templates see your virtual
+tabletop. Pick your Roll20 or Foundry browser window, or a whole screen, from the
+**Capture** list (**Refresh** reloads it; a shortened title such as `Roll20` matches
+any window whose title contains it), set the **max width** (default 1280 px), and use
+**Test capture** to preview. Window capture works while other windows cover it, but
+not while it is minimized. Tick **Include a screenshot of the table** on a template to
+attach a fresh JPEG on each update; templates updating together share the same frame,
+and they also re-run when the screen changes even if the transcript did not. This
+needs a vision model (for example Ollama `gemma4:e4b`); keep each template to one
+narrow job, such as turn order or token positions.
+
+### Virtual tabletop assistant
+
+**Add table (VTT) templates** adds three linked templates that show the
+one-narrow-job-per-call design for small vision models:
+
+- **Table: turn order** reads only the initiative tracker from the table screenshot.
+- **Table: token positions** reads only the battle map: tokens, PC or monster, where
+  they are and who is next to whom.
+- **Table: DM reminders** uses both outputs plus the recent transcript and your
+  reference files to give up to 8 short reminders: whose turn is now and next,
+  monster tactics, rules to remember, and story beats or clues from your notes not
+  presented yet ("Don't forget to present …").
+
+Setup: pick your Roll20 (or Foundry) browser window in **Table screenshot**, use a
+vision model such as Ollama `gemma4:e4b` for the connection, and point the
+**context folder** at your adventure PDF and notes. All three keep updating on
+their own; the reminders re-run whenever the turn order, tokens or transcript change.
+
 **LLM connections** use the OpenAI-compatible `/v1/chat/completions` API. Pick a
 type and choose **Add**: OpenRouter (`https://openrouter.ai/api/v1`), NVIDIA Build
 (`https://integrate.api.nvidia.com/v1`), OpenAI, Ollama (`http://localhost:11434/v1`,
 or `http://other-pc:11434/v1` for Ollama on another machine started with
-`OLLAMA_HOST=0.0.0.0`), LM Studio, or any custom server. **Load models** lists what
-the server offers; **Test** sends a one-line check. API keys are encrypted with
+`OLLAMA_HOST=0.0.0.0`), LM Studio, or any custom server. The Ollama preset defaults
+to `gemma4:e4b` (Gemma 4 E4B: reads text and images, supports tool calling, runs
+locally; install it with `ollama pull gemma4:e4b`). **Load models** lists what
+the server offers; **Test** sends a one-line check and also asks the server whether
+the model accepts images (Ollama `/api/show` capabilities, LM Studio model type, or
+the OpenRouter-style `/models` input modalities). **Check image support** runs just
+that check; the result shows under the connection as supported, not supported, or
+unknown, and resets when you change the model. API keys are encrypted with
 Windows DPAPI for your account in the library's `templates.json` and sent only to
 that connection's URL. Running a template sends the transcript text, and any
 reference text the model reads, to that endpoint; Ollama and LM Studio keep it on
@@ -349,6 +392,32 @@ removes the active and remembered key. The UI never binds the secret into a view
 model string property, logs it, exports it, or accepts it as an argument.
 
 ## Local models
+
+### Recommended setup for this PC
+
+**Privacy / models > Recommended setup for this PC** reads the CPU, RAM and each
+graphics card's memory (nvidia-smi for NVIDIA, the Windows display driver for
+others; integrated GPUs don't count) and plans what fits:
+
+1. Keep 10% of the card (at least 0.8 GB) for Windows.
+2. If templates use an LLM on this PC (Ollama or LM Studio), give it the GPU
+   first: the largest Gemma 4 (26B, 12B, E4B, E2B) whose weights plus about
+   1.5 GB of runtime and context fit. With no room it falls back to E2B on the
+   CPU (16 GB+ RAM, slow) or a hosted connection.
+3. Put Parakeet on an NVIDIA CUDA 12 GPU only if about 3 GB is still free;
+   otherwise it stays on the CPU, which already runs ~15× real time. On an 8 GB
+   card with a local LLM, transcription runs on the CPU.
+4. Give Whisper the leftover: large-v3-turbo on the GPU if 2.5 GB is free,
+   on the CPU with 12+ threads, otherwise small or base.
+
+Figures are planning estimates, not measurements. Until you choose otherwise,
+the plan is the default: the one-time Parakeet GPU question is asked only when
+the plan puts Parakeet on the GPU, Whisper's first download uses the planned
+size and device, and a fresh Ollama connection uses the planned model.
+**Apply recommended settings** applies all of it (GPU downloads still ask
+first). **Re-check hardware** probes again.
+
+### Models
 
 The small speaker models (approximately 33.49 MB, 33,488,994 bytes of official
 release artifacts: MIT CNRS 2023 segmentation and CC BY 4.0 embedding, with
@@ -428,8 +497,83 @@ permits it. No identities are reconstructed to bypass attribution restrictions.
 Graph integration is **configuration-required**, not a claim of live tenant
 validation. This is retrieval of an existing transcript, not live Teams audio.
 Live Teams audio needs a separate Azure media-bot deployment and policies.
-Discord live receive is deferred pending an authorized visible guild bot and
-validated DAVE-compatible receive implementation; no fake connector is shown.
+Discord server voice channels are recorded live on the **Discord** tab (below).
+
+## Discord server voice channels
+
+The **Discord** tab records a voice channel in a Discord server (a "guild") through
+**your own Discord bot**. Discord sends each person's voice as a separate stream, so
+every transcript line is named after the Discord user who said it (their server
+nickname, else their display name, else their username). Those names behave like
+names you set by hand: speaker analysis never overrides them, and with the speaker
+models installed and **Remember voices** on, each person's voice print is learned
+from their own lines (after 3, 10 and 30 lines) and saved to the voice library
+under their Discord name, so later recordings from any source recognize them.
+
+Discord has no API that creates an application, so the tab walks you through it:
+
+1. **Open the Discord Developer Portal**
+   (<https://discord.com/developers/applications>) and choose **New Application**.
+2. On **Bot**, choose **Reset Token**, copy the token, paste it into the tab and
+   choose **Save and connect**. The token is encrypted for your Windows account
+   (DPAPI) in `discord.json` in the library folder and is only sent to Discord.
+   You may turn off **Public Bot**. No privileged gateway intents are needed: the
+   bot only asks for servers and voice states.
+3. **Add the bot to a server** opens Discord's invite page with only **View
+   Channels** and **Connect** (`scope=bot`). You need **Manage Server** there, or
+   send the copied link to someone who has it.
+4. Pick the server and voice channel, then **Join and record**. This starts a new
+   session from the Record / import settings (provider, language, live file) with the
+   Discord channel as its output track and no microphone track (Discord already
+   carries everyone, including you). **Join only** joins without recording; the
+   channel then appears as an output choice on Record / import, so **Continue
+   recording** works too. Stop with **Stop recording**; **Leave** is available once
+   the recording stops.
+
+Everyone in the channel sees the bot join. Tell people they are being recorded and
+get their consent. Bots cannot join DM or group-DM calls; record Windows output
+for those. The bot connects automatically when the app starts if it was connected
+when the app closed.
+
+Audio is end-to-end encrypted by Discord (DAVE) and decrypted on this PC by
+Discord's official `libdave.dll`, which ships beside the app (notices in
+`licenses\DISCORD-VOICE-NOTICES.txt`). Opus is decoded in managed code. The streams
+are mixed into one 48 kHz stereo original track and then follow the normal archive
+and transcription path.
+
+### Network: firewall, UPnP and port forwarding
+
+Voice audio arrives over UDP on one fixed local port (**50505** by default, set on
+the tab). Because the bot sends to Discord first, most networks need nothing. The
+voice status says **audio arriving** once packets come in; if it says Discord
+reports people talking but **no audio arrives**, UDP is blocked. Work down the list:
+
+- **Allow in Windows Firewall** adds an inbound rule *AudioTranscriber Discord voice
+  (UDP)* for this app on that port, for all network profiles, after one UAC prompt.
+- **UPnP** (on by default) asks the router to forward the port to this PC each time
+  the bot joins; the mapping is removed when the app closes. **Try UPnP now** shows
+  the router's answer.
+- **Forward the port by hand**: the tab shows the steps with this PC's LAN address
+  and the router's admin page (default gateway): add a UDP rule from that external
+  port to the same internal port on this PC, reserve the PC's IP in DHCP, then leave
+  and join again. Carrier-grade NAT can't be forwarded.
+
+## Diagnostics and bug reports
+
+The app writes a local diagnostic log to `logs\audiotranscriber-YYYYMMDD.log` in
+the data root (one file per day, kept 14 days, capped at 10 MB per day). It records
+startup details (version, Windows, .NET, CPU/RAM), status and error messages, failed
+operations with their exception details, recording/import starts, and update
+activity. MCP sessions log into their own data root.
+
+To report a problem, open **Privacy / models → Diagnostics and bug reports** and
+choose **Save diagnostics ZIP…**. The ZIP contains the log files, the updater's
+`update.log`, the Activity panel (without transcript lines), and `summary.txt`
+(app version, install and data folders, Windows/.NET, NVIDIA GPU, FFmpeg and Visual
+C++ status, model and GPU status, device and session counts). Your Windows profile
+path and user name are replaced with placeholders. Open the ZIP to review it, then
+attach it to a GitHub issue. **Open log folder** shows the raw logs. If the app
+cannot start, the startup error names the log folder.
 
 ## Closing safely
 

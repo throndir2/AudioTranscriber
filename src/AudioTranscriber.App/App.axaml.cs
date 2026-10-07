@@ -36,6 +36,7 @@ public partial class App : Avalonia.Application
         try
         {
             options = StartupOptions.Parse(args);
+            AppDiagnostics.Start(options);
             if (options.Mcp == McpMode.Ui)
             {
                 Console.Error.WriteLine("AudioTranscriber --mcp-ui moved to tools\\AudioTranscriber.UiMcp. Use scripts\\Start-Mcp.ps1 -Mode ui.");
@@ -129,5 +130,4 @@ public partial class App : Avalonia.Application
         }
     }
 }
-
 

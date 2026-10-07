@@ -16,7 +16,7 @@ internal static class Program
         try
         {
             var options = StartupOptions.Parse(args);
-            if (options.Mcp == McpMode.Headless) return RunHeadlessMcpAsync(options).GetAwaiter().GetResult();
+            if (options.Mcp == McpMode.Headless) { AppDiagnostics.Start(options); return RunHeadlessMcpAsync(options).GetAwaiter().GetResult(); }
             if (options.Mcp == McpMode.Ui)
             {
                 Console.Error.WriteLine("AudioTranscriber --mcp-ui moved to tools\\AudioTranscriber.UiMcp. Use scripts\\Start-Mcp.ps1 -Mode ui.");

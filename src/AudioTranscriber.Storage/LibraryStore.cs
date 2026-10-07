@@ -634,6 +634,44 @@ public sealed class LibraryStore
     public void CorrectSegment(string id, string? correction) =>
         Write("UPDATE segments SET correction=$text WHERE id=$id", ("$text", correction), ("$id", id));
 
+    /// <summary>
+    /// Records who was speaking on a track over a time range (for example a Discord user). Lines already transcribed there that
+    /// you didn't label get this speaker now; lines transcribed later get it when they arrive. Returns the lines labeled now.
+    /// </summary>
+    public IReadOnlyList<string> AddSpeakerHint(Guid trackId, long startTicks, long endTicks, string speakerId)
+    {
+        if (endTicks <= startTicks) return [];
+        lock (gate)
+        {
+            using var connection = Open();
+            using var transaction = connection.BeginTransaction();
+            Execute(connection, "INSERT INTO speaker_hints(track_id,start_ticks,end_ticks,speaker_id) VALUES($track,$start,$end,$speaker)",
+                ("$track", trackId), ("$start", startTicks), ("$end", endTicks), ("$speaker", speakerId));
+            var rows = new List<(string Id, long Start, long End)>();
+            using (var command = Command(connection,
+                       "SELECT id,start_ticks,end_ticks FROM segments WHERE track_id=$track AND manual_speaker=0 AND start_ticks<=$end AND end_ticks>=$start",
+                       ("$track", trackId), ("$start", startTicks), ("$end", endTicks)))
+            using (var reader = command.ExecuteReader())
+                while (reader.Read()) rows.Add((reader.GetString(0), reader.GetInt64(1), reader.GetInt64(2)));
+            var labeled = new List<string>();
+            foreach (var row in rows)
+            {
+                var overlap = Math.Min(row.End, endTicks) - Math.Max(row.Start, startTicks);
+                if (row.End > row.Start ? overlap * 2 < row.End - row.Start : row.Start < startTicks || row.Start > endTicks) continue;
+                Execute(connection, "UPDATE segments SET speaker_id=$speaker,uncertain=0,manual_speaker=1,voice_fill=0 WHERE id=$id",
+                    ("$speaker", speakerId), ("$id", row.Id));
+                labeled.Add(row.Id);
+            }
+            transaction.Commit();
+            return labeled;
+        }
+    }
+
+    /// <summary>Lines of a track labeled with this speaker by you or by a speaker hint.</summary>
+    public IReadOnlyList<string> GetLabeledSegmentIds(Guid trackId, string speakerId) =>
+        Read("SELECT id FROM segments WHERE track_id=$track AND speaker_id=$speaker AND manual_speaker=1 ORDER BY start_ticks",
+            r => r.GetString(0), ("$track", trackId), ("$speaker", speakerId));
+
     public void AssignSpeaker(string id, string? speakerId) =>
         Write("UPDATE segments SET speaker_id=$speaker,uncertain=0,manual_speaker=1,voice_fill=0 WHERE id=$id", ("$speaker", speakerId), ("$id", id));
 

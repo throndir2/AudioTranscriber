@@ -9,6 +9,7 @@ namespace AudioTranscriber.Providers;
 public sealed class LocalWhisperProvider : ITranscriptionProvider
 {
     private readonly string modelPath;
+    private readonly bool useGpu;
     private readonly SemaphoreSlim gate = new(1, 1);
     private WhisperFactory? factory;
     private string? modelHash;
@@ -18,10 +19,11 @@ public sealed class LocalWhisperProvider : ITranscriptionProvider
         "local-whisper", "Local Whisper (optional model)", "user-installed-whisper.cpp",
         false, TimingGranularity.Segment, 30, DefaultLanguage: "en");
 
-    public LocalWhisperProvider(string modelPath)
+    public LocalWhisperProvider(string modelPath, bool useGpu = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(modelPath);
         this.modelPath = Path.GetFullPath(modelPath);
+        this.useGpu = useGpu;
     }
 
     public async Task<TranscriptionResult> TranscribeAsync(TranscriptionRequest request,
@@ -47,7 +49,7 @@ public sealed class LocalWhisperProvider : ITranscriptionProvider
                 var catalogModel = LocalWhisperModelCatalog.All.FirstOrDefault(m => m.FileName == Path.GetFileName(modelPath));
                 if (catalogModel is not null && (catalogModel.Bytes != file.Length || catalogModel.Sha256 != modelHash))
                     throw new ProviderException(ProviderFailureKind.LocalModelMissing, "local-model-integrity-mismatch");
-                factory = WhisperFactory.FromPath(modelPath, new WhisperFactoryOptions { UseGpu = true, UseFlashAttention = true });
+                factory = WhisperFactory.FromPath(modelPath, new WhisperFactoryOptions { UseGpu = useGpu, UseFlashAttention = useGpu });
                 runtime = Whisper.net.LibraryLoader.RuntimeOptions.LoadedLibrary?.ToString() ?? "unknown";
             }
             if (!WhisperFactory.GetSupportedLanguages().Contains(language))

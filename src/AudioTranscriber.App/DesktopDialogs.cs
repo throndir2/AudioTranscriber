@@ -37,6 +37,10 @@ public sealed class DesktopDialogs(Func<Window> owner)
     public Task<string?> SaveTemplateOutputAsync(string currentPath, string templateName) => SaveFileAsync("Choose the file this template keeps updated (kept unlocked so other apps can read it)",
         string.IsNullOrWhiteSpace(currentPath) ? Safe(templateName, "template") + ".md" : Path.GetFileName(currentPath), ["*.md", "*.txt", "*.*"], StartFolder(currentPath));
 
+    public Task<string?> SaveDiagnosticsAsync() => SaveFileAsync("Save diagnostics for a bug report",
+        $"AudioTranscriber-diagnostics-{DateTime.Now:yyyyMMdd-HHmmss}.zip", ["*.zip"],
+        Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory));
+
     public async Task<string?> ChooseFolderAsync(string currentFolder)
     {
         var result = await owner().StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions

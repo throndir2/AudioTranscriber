@@ -24,6 +24,35 @@ function Get-ReleaseVersion([string]$Value) {
     return [pscustomobject]@{ Tag = $Value; SemVer = $Value.Substring(1); Prerelease = $Matches.pre.Length -gt 0 }
 }
 
+function Get-ReleaseNotes([string]$VersionTag, [string]$Path = (Join-Path $PSScriptRoot '..\CHANGELOG.md')) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "CHANGELOG.md not found at $Path." }
+    $lines = [IO.File]::ReadAllLines($Path)
+    $start = -1
+    for ($i = 0; $i -lt $lines.Length; $i++) {
+        if ($lines[$i] -cmatch "^## $([regex]::Escape($VersionTag))(\s|$)") { $start = $i + 1; break }
+    }
+    if ($start -lt 0) {
+        throw "CHANGELOG.md has no '## $VersionTag - YYYY-MM-DD' section. Move the Unreleased entries under that heading and merge it before releasing."
+    }
+    $section = for ($i = $start; $i -lt $lines.Length -and $lines[$i] -notmatch '^## '; $i++) { $lines[$i] }
+    $notes = ($section -join "`n").Trim()
+    if (-not $notes) { throw "CHANGELOG.md section for $VersionTag is empty." }
+    return $notes
+}
+
+function Get-ReleaseBody([string]$VersionTag, [string]$SourceCommit) {
+    $semver = $VersionTag.Substring(1)
+    return "$(Get-ReleaseMarker $VersionTag $SourceCommit)`n`n$(Get-ReleaseNotes $VersionTag)`n`n---`n`n" +
+        "### Install`n`n" +
+        "- **Windows x64:** run ``AudioTranscriber-$VersionTag-win-x64-setup.exe`` (per-user, no admin; unsigned, so SmartScreen may ask you to confirm), " +
+        "or extract ``AudioTranscriber-$VersionTag-win-x64.zip`` and run ``AudioTranscriber.App.exe``.`n" +
+        "- **Ubuntu / Debian:** ``sudo apt install ./audiotranscriber_${semver}_amd64.deb`` (prerequisites are installed automatically).`n" +
+        "- **Fedora / openSUSE:** ``sudo dnf install ./audiotranscriber-$semver-1.x86_64.rpm``.`n" +
+        "- **Other Linux:** extract ``AudioTranscriber-$VersionTag-linux-x64.tar.gz`` and run ``./install.sh`` (offers to install prerequisites).`n`n" +
+        "Installed copies update themselves from inside the app. FFmpeg/FFprobe (LGPL build) are bundled. Optional model weights are downloaded " +
+        "from inside the app. See the included README and licenses.`n`nSource commit: $SourceCommit"
+}
+
 function Get-CheckedOutCommit([string]$Expected) {
     $head = & git rev-parse --verify HEAD
     if ($LASTEXITCODE -ne 0 -or $head -cnotmatch '^[0-9a-f]{40}$') { throw 'Checkout does not identify a commit.' }
@@ -343,7 +372,7 @@ function Publish-OwnedRelease([object]$Version, [string]$SourceCommit, [string]$
         Test-LocalAssetSet $Version $AssetDirectory
         $zipPath = Join-Path $AssetDirectory $names.WinZip; $archive = [IO.Compression.ZipFile]::OpenRead($zipPath)
         try { $entry = $archive.GetEntry('BUILD-PROVENANCE.json'); if ($null -eq $entry) { throw 'Release ZIP has no build provenance.' }; $reader = [IO.StreamReader]::new($entry.Open()); try { $provenance = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }; if ($provenance.tag -cne $Version.Tag -or $provenance.commit -cne $SourceCommit -or $provenance.runtime -cne 'win-x64') { throw 'Release ZIP identifies a different tag, commit, or platform.' } } finally { $archive.Dispose() }
-        if ($null -eq $release) { $release = Invoke-ReleaseApi -Method POST -Route 'releases' -Body @{ tag_name = $Version.Tag; target_commitish = $SourceCommit; name = "AudioTranscriber $($Version.Tag)"; draft = $true; prerelease = $Version.Prerelease; make_latest = 'false'; body = "$(Get-ReleaseMarker $Version.Tag $SourceCommit)`n`nWindows and Linux x64 self-contained applications with Windows setup, Linux tarball, DEB, and RPM packages.`n`nSource commit: $SourceCommit`n`nFFmpeg/FFprobe (LGPL build) are bundled in the ffmpeg folder. Optional model weights are downloaded from inside the app. See the included README and licenses." } }
+        if ($null -eq $release) { $release = Invoke-ReleaseApi -Method POST -Route 'releases' -Body @{ tag_name = $Version.Tag; target_commitish = $SourceCommit; name = "AudioTranscriber $($Version.Tag)"; draft = $true; prerelease = $Version.Prerelease; make_latest = 'false'; body = Get-ReleaseBody $Version.Tag $SourceCommit } }
         foreach ($asset in @($release.assets | Where-Object { $_.name -in $names.Files })) { Invoke-ReleaseApi -Method DELETE -Route "releases/assets/$([long]$asset.id)" | Out-Null }
         foreach ($assetName in $names.Files) { $file = Join-Path $AssetDirectory $assetName; $labelHash = if ($assetName.EndsWith('.sha256', [StringComparison]::Ordinal)) { $target = $assetName.Substring(0, $assetName.Length - '.sha256'.Length); (Get-FileHash -LiteralPath (Join-Path $AssetDirectory $target) -Algorithm SHA256).Hash.ToLowerInvariant() } else { (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() }; $name = [Uri]::EscapeDataString($assetName); $label = [Uri]::EscapeDataString("sha256:$labelHash"); Invoke-ReleaseApi -Method POST -Route "releases/$([long]$release.id)/assets?name=$name&label=$label" -UploadFile $file -ContentType (Get-AssetContentType $file) | Out-Null }
         $release = Get-OwnedRelease $Version $SourceCommit; if (-not (Test-CompleteReleaseAssets $release $names)) { throw 'GitHub did not confirm all uploaded asset digests. The draft is retained for a rerun.' }
@@ -357,7 +386,7 @@ if ($MyInvocation.InvocationName -eq '.') { return }
 if (-not $Phase) { throw 'Choose Prepare, Package, or Publish.' }
 $version = Get-ReleaseVersion $Tag; $sourceCommit = Get-CheckedOutCommit $Commit
 switch ($Phase) {
-    'Prepare' { Assert-RemoteReleaseTag $version.Tag $sourceCommit $EventSha; $release = Get-OwnedRelease $version $sourceCommit; $complete = Test-CompleteReleaseAssets $release (Get-AssetNames $version.Tag); if ($null -ne $release -and -not $release.draft -and -not $complete) { throw 'An inconsistent published release requires explicit intervention; it will not be rebuilt over.' }; Write-ReleaseOutput 'commit' $sourceCommit; Write-ReleaseOutput 'needs-build' (-not $complete).ToString().ToLowerInvariant(); Write-ReleaseOutput 'needs-publish' ($null -eq $release -or [bool]$release.draft).ToString().ToLowerInvariant(); if ($complete) { Write-Output 'Matching release assets already verified; SDK setup and build are skipped.' } }
+    'Prepare' { [void](Get-ReleaseNotes $version.Tag); Assert-RemoteReleaseTag $version.Tag $sourceCommit $EventSha; $release = Get-OwnedRelease $version $sourceCommit; $complete = Test-CompleteReleaseAssets $release (Get-AssetNames $version.Tag); if ($null -ne $release -and -not $release.draft -and -not $complete) { throw 'An inconsistent published release requires explicit intervention; it will not be rebuilt over.' }; Write-ReleaseOutput 'commit' $sourceCommit; Write-ReleaseOutput 'needs-build' (-not $complete).ToString().ToLowerInvariant(); Write-ReleaseOutput 'needs-publish' ($null -eq $release -or [bool]$release.draft).ToString().ToLowerInvariant(); if ($complete) { Write-Output 'Matching release assets already verified; SDK setup and build are skipped.' } }
     'Package' { New-ReleasePackage $version $sourceCommit $PublishDirectory $LinuxPublishDirectory $AssetDirectory | Format-Table -AutoSize }
     'Publish' { Publish-OwnedRelease $version $sourceCommit $ZipPath $ChecksumPath $AssetDirectory }
 }

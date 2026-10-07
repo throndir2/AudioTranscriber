@@ -28,6 +28,8 @@ public sealed class AppController : IAppController
     private Task? whisperSetup;
     private volatile string? whisperSetupStatus;
     private volatile bool whisperSetupFailed;
+    private Task? hardwareProbe;
+    private volatile HardwareProfile? hardware;
     private const int LiveChunkMaxSeconds = 6;
     private const int LivePauseSplitAfterMilliseconds = 1500;
     // Re-cut phrases may run longer than live ones: there is no latency to keep low, and longer context recognizes better.
@@ -54,6 +56,9 @@ public sealed class AppController : IAppController
     private readonly ConcurrentDictionary<Guid, Task> mediaTasks = new();
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> mediaCancellation = new();
     private readonly ConcurrentDictionary<Guid, CaptureFeed> captureFeeds = new();
+    // Speakers named by their source (Discord users) per track, and how many of their lines their voice was last learned from.
+    private readonly ConcurrentDictionary<(Guid Session, Guid Track, string Speaker), int> namedVoiceProgress = new();
+    private static readonly int[] NamedVoiceSteps = [3, 10, 30];
     private readonly Dictionary<string, ITranscriptionProvider> providerCache = new();
     private readonly System.Diagnostics.Stopwatch recordingClock = new();
     // A continued recording starts at this point of its session's timeline.
@@ -132,8 +137,9 @@ public sealed class AppController : IAppController
             : Path.Combine(checkout, ".models", "diarization");
         if (settings.WhisperModelPath is null || !File.Exists(settings.WhisperModelPath))
         {
-            var recommended = Path.Combine(WhisperModelDirectory, LocalWhisperModelCatalog.Recommended.FileName);
-            if (File.Exists(recommended)) settings = settings with { WhisperModelPath = recommended };
+            var installed = LocalWhisperModelCatalog.All.OrderByDescending(model => model.Bytes)
+                .Select(model => Path.Combine(WhisperModelDirectory, model.FileName)).FirstOrDefault(File.Exists);
+            if (installed is not null) settings = settings with { WhisperModelPath = installed };
         }
         if (File.Exists(credentialPath))
         {
@@ -157,6 +163,39 @@ public sealed class AppController : IAppController
             player.PlaybackFailed += error => Notify("Playback failed: " + error.Message, true);
         scheduler = Task.Run(() => SchedulerAsync(speechLane, null, DiarizationProvider));
         speakerScheduler = Task.Run(() => SchedulerAsync(speakerLane, DiarizationProvider, null));
+        if (providerOverride is null) hardwareProbe = RecheckHardwareAsync();
+    }
+
+    /// <summary>Whether templates use an LLM on this PC (Ollama, LM Studio), so the plan keeps GPU memory for it.</summary>
+    public bool LocalLlmExpected { get; set; } = true;
+
+    /// <summary>What fits on this PC (null until the hardware check finishes).</summary>
+    public HardwarePlan? HardwarePlan => hardware is { } profile ? HardwareAdvisor.Plan(profile, LocalLlmExpected, parakeetGpuSupported: OperatingSystem.IsWindows()) : null;
+
+    public async Task<HardwarePlan?> RecheckHardwareAsync()
+    {
+        try { hardware = await Task.Run(() => HardwareProbe.ProbeAsync(shutdown.Token)); }
+        catch (OperationCanceledException) { }
+        return HardwarePlan;
+    }
+
+    /// <summary>Whisper runs on the GPU (Vulkan) unless the user or the recommended setup chose the CPU.</summary>
+    public bool WhisperOnGpu => settings.WhisperUseGpu ?? HardwarePlan?.WhisperOnGpu ?? true;
+
+    public void SetWhisperGpu(bool enabled)
+    {
+        UpdateSettings(current => current with { WhisperUseGpu = enabled });
+        Notify(enabled ? "Local Whisper uses the GPU (Vulkan) from its next chunk." : "Local Whisper uses the CPU from its next chunk.");
+    }
+
+    /// <summary>Selects an installed catalog Whisper model; false when it isn't downloaded yet.</summary>
+    public bool SelectInstalledWhisperModel(string modelId)
+    {
+        var model = LocalWhisperModelCatalog.All.SingleOrDefault(item => item.Id == modelId);
+        var path = model is null ? null : Path.Combine(WhisperModelDirectory, model.FileName);
+        if (path is null || !File.Exists(path)) return false;
+        if (!string.Equals(WhisperModelPath, Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase)) SetLocalWhisperModel(path);
+        return true;
     }
 
     public IReadOnlyList<DeviceChoice> GetOutputDevices() => capture.GetOutputDevices()
@@ -245,7 +284,7 @@ public sealed class AppController : IAppController
         catch (Exception error)
         {
             Notify("Speaker-labeling models could not be downloaded automatically (" + error.Message +
-                "). Transcription still works; retry from Privacy / models.", true);
+                "). Transcription still works; retry from Privacy / models.", error);
         }
         try
         {
@@ -263,7 +302,7 @@ public sealed class AppController : IAppController
         catch (Exception error)
         {
             Notify("The Parakeet model could not be downloaded automatically (" + error.Message +
-                "). Recording still works; install it from Privacy / models, or choose Local Whisper.", true);
+                "). Recording still works; install it from Privacy / models, or choose Local Whisper.", error);
         }
         finally { setupStatus = null; }
         if (WhisperModelPath is not null) Store.ReleaseProviderJobs("local-whisper");
@@ -281,7 +320,8 @@ public sealed class AppController : IAppController
             whisperSetup = Task.Run(async () =>
             {
                 var token = shutdown.Token;
-                var model = LocalWhisperModelCatalog.Recommended;
+                var model = LocalWhisperModelCatalog.All.FirstOrDefault(item => item.Id == HardwarePlan?.WhisperModelId)
+                            ?? LocalWhisperModelCatalog.Recommended;
                 var totalMiB = model.Bytes / 1048576;
                 try
                 {
@@ -291,14 +331,14 @@ public sealed class AppController : IAppController
                             $"Downloading the Whisper transcription model: {bytes * 100 / model.Bytes}% ({bytes / 1048576:N0} / {totalMiB:N0} MiB). " +
                             "Queued Whisper audio is transcribed as soon as it finishes."), token);
                     if (WhisperModelPath is null) UpdateSettings(current => current with { WhisperModelPath = path });
-                    Notify("Whisper large-v3-turbo downloaded and verified. Queued Whisper audio is being transcribed.");
+                    Notify($"Whisper {model.Id} downloaded and verified. Queued Whisper audio is being transcribed.");
                 }
                 catch (OperationCanceledException) when (token.IsCancellationRequested) { }
                 catch (Exception error)
                 {
                     whisperSetupFailed = true;
                     Notify("The Whisper model could not be downloaded automatically (" + error.Message +
-                        "). Install it from Privacy / models; queued Whisper audio is transcribed afterward.", true);
+                        "). Install it from Privacy / models; queued Whisper audio is transcribed afterward.", error);
                 }
                 finally { whisperSetupStatus = null; }
                 Store.ReleaseProviderJobs("local-whisper");
@@ -358,6 +398,13 @@ public sealed class AppController : IAppController
             var parent = Path.GetDirectoryName(modelDirectory)!;
             if (settings.UseGpuParakeet is null)
             {
+                if (hardwareProbe is { } probing) await probing;
+                if (HardwarePlan is { ParakeetOnGpu: false } plan)
+                {
+                    localGpuStatus = $"{gpu.Name} can run Parakeet, but the recommended setup keeps it on the CPU: {plan.ParakeetReason} " +
+                                     "Use the button here to switch anyway.";
+                    return;
+                }
                 gpuOffer = $"{gpu.Name} ({gpu.MemoryMiB / 1024.0:0.#} GB)";
                 localGpuStatus = $"{gpuOffer} can run Parakeet. Waiting for your choice; Parakeet uses the CPU meanwhile.";
                 return;
@@ -390,7 +437,7 @@ public sealed class AppController : IAppController
             HttpRequestException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or ArgumentException)
         {
             localGpuStatus = "Parakeet could not start on the GPU (" + error.Message + "). The CPU model is used instead.";
-            Notify(localGpuStatus, true);
+            Notify(localGpuStatus, error);
         }
         finally { localGpuSetupStatus = null; }
     }
@@ -454,6 +501,7 @@ public sealed class AppController : IAppController
             RequireProvider(providerId);
             var session = Store.CreateSession(name, providerId, language);
             Store.SetConsent(session.Id, cloudConsent);
+            AppLog.Info($"Starting recording {session.Id} (provider {providerId}, language {language}, microphone {microphoneDeviceId is not null}, echo reduction {reduceEcho}, cloud consent {cloudConsent}).");
             return await StartCaptureAsync(session, outputDeviceId, microphoneDeviceId, reduceEcho, 0, 1, cancellationToken);
         }
         finally { captureGate.Release(); }
@@ -486,8 +534,9 @@ public sealed class AppController : IAppController
         if (session.ProviderId == "local-whisper") StartWhisperDownload();
         var suffix = part > 1 ? $" (part {part})" : "";
         var outputId = Guid.NewGuid();
+        var external = ExternalAudioSources.TryGet(outputDeviceId, out var source) ? source.Name : null;
         microphoneTrackId = microphoneDeviceId is null ? null : Guid.NewGuid();
-        Store.AddTrack(new(outputId, session.Id, "Loopback", "Windows output" + suffix, null, 0, null));
+        Store.AddTrack(new(outputId, session.Id, "Loopback", (external ?? "Windows output") + suffix, null, 0, null));
         if (microphoneTrackId is { } mic)
             Store.AddTrack(new(mic, session.Id, "Microphone", "Local microphone" + suffix, null, 0,
                 reduceEcho ? JsonSerializer.Serialize(new MicrophoneOptions(outputId)) : null));
@@ -510,7 +559,8 @@ public sealed class AppController : IAppController
                 PauseMilliseconds: PhrasePauseMilliseconds), cancellationToken);
             Store.SetSessionState(session.Id, "Recording");
             Notify((offsetTicks > 0 ? $"Continuing \"{session.Name}\" at {Clock(offsetTicks)}: recording" : "Recording") +
-                " selected Windows output" + (microphoneDeviceId is null ? ". Local microphone is not captured." : " and a separate microphone track."));
+                (external is null ? " selected Windows output" : " " + external) +
+                (microphoneDeviceId is null ? ". Local microphone is not captured." : " and a separate microphone track."));
         }
         catch
         {
@@ -572,7 +622,7 @@ public sealed class AppController : IAppController
                 catch (Exception error) when (IsOperational(error))
                 {
                     captureFaulted = true;
-                    Notify("Capture stop reported an error: " + error.Message, true);
+                    Notify("Capture stop reported an error: " + error.Message, error);
                     throw;
                 }
                 finally
@@ -611,6 +661,7 @@ public sealed class AppController : IAppController
             JsonSerializer.Serialize(new MediaCheckpoint(Path.GetFullPath(path), streamIndex, null)));
         Store.AddTrack(track);
         Store.SetConsent(session.Id, cloudConsent);
+        AppLog.Info($"Importing {Path.GetExtension(path)} audio into session {session.Id} (stream {streamIndex}, provider {providerId}, language {language}).");
         await RunMediaAsync(session, token => NormalizeImportedTrackAsync(session, track, token), cancellationToken);
         return Store.GetSession(session.Id);
     }
@@ -682,11 +733,37 @@ public sealed class AppController : IAppController
         return count;
     }
 
+    public void LabelTrackSpeech(Guid sessionId, Guid trackId, string name, long startTicks, long endTicks)
+    {
+        if (string.IsNullOrWhiteSpace(name) || endTicks <= startTicks) return;
+        var speaker = GetOrCreateSpeaker(sessionId, name);
+        var labeled = Store.AddSpeakerHint(trackId, startTicks, endTicks, speaker.Id);
+        namedVoiceProgress.TryAdd((sessionId, trackId, speaker.Id), 0);
+        if (labeled.Count > 0) TranscriptChanged?.Invoke(sessionId);
+        LearnNamedVoices(sessionId);
+    }
+
+    // Learns each named speaker's voice print from their own lines once they have a few, then again as more arrive.
+    private void LearnNamedVoices(Guid sessionId)
+    {
+        if (!DiarizationModelsReady) return;
+        foreach (var key in namedVoiceProgress.Keys.Where(item => item.Session == sessionId))
+        {
+            var ids = Store.GetLabeledSegmentIds(key.Track, key.Speaker);
+            var learned = namedVoiceProgress.GetValueOrDefault(key);
+            var step = NamedVoiceSteps.LastOrDefault(value => ids.Count >= value);
+            if (step <= learned || !namedVoiceProgress.TryUpdate(key, step, learned)) continue;
+            if (Store.GetSpeakers(sessionId).FirstOrDefault(item => item.Id == key.Speaker) is not { } speaker ||
+                !Guid.TryParse(speaker.Id, out var guid)) continue;
+            var recent = ids.TakeLast(40).ToArray();
+            StartBackground(token => LearnVoiceAsync(sessionId, speaker, guid, recent, token));
+        }
+    }
+
     public void AssignSpeaker(Guid sessionId, IReadOnlyCollection<string> segmentIds, string? speakerId)
     {
         ArgumentNullException.ThrowIfNull(segmentIds);
-        if (segmentIds.Count == 0) return;
-        var speaker = speakerId is null ? null : Store.GetSpeakers(sessionId).FirstOrDefault(item => item.Id == speakerId)
+        if (segmentIds.Count == 0) return;        var speaker = speakerId is null ? null : Store.GetSpeakers(sessionId).FirstOrDefault(item => item.Id == speakerId)
             ?? throw new ArgumentException("Choose a speaker from this session.");
         Store.AssignSpeaker(sessionId, segmentIds, speakerId);
         TranscriptChanged?.Invoke(sessionId);
@@ -1153,7 +1230,7 @@ public sealed class AppController : IAppController
         {
             try { await work(shutdown.Token); }
             catch (OperationCanceledException) when (shutdown.IsCancellationRequested) { }
-            catch (Exception error) when (IsOperational(error)) { Notify("Learning the speaker's voice failed: " + error.Message, true); }
+            catch (Exception error) when (IsOperational(error)) { Notify("Learning the speaker's voice failed: " + error.Message, error); }
             finally { backgroundTasks.TryRemove(id, out _); }
         });
         backgroundTasks[id] = task;
@@ -1831,7 +1908,7 @@ public sealed class AppController : IAppController
             catch (Exception error) when (IsOperational(error))
             {
                 captureFaulted = true;
-                Notify("Normalization paused; originals remain recorded. " + error.Message, true);
+                Notify("Normalization paused; originals remain recorded. " + error.Message, error);
             }
         });
     }
@@ -1866,7 +1943,7 @@ public sealed class AppController : IAppController
         catch (Exception error) when (IsOperational(error))
         {
             captureFaulted = true;
-            Notify("Original audio was sealed, but database indexing failed; recovery is required. " + error.Message, true);
+            Notify("Original audio was sealed, but database indexing failed; recovery is required. " + error.Message, error);
         }
     }
 
@@ -1926,7 +2003,7 @@ public sealed class AppController : IAppController
         catch (Exception error) when (IsOperational(error))
         {
             SetMediaRecoveryState(session.Id, error.Message);
-            Notify("Media processing needs attention: " + error.Message, true);
+            Notify("Media processing needs attention: " + error.Message, error);
             throw;
         }
         finally
@@ -1950,7 +2027,7 @@ public sealed class AppController : IAppController
         try { await RunMediaAsync(session, token => RecoverAndNormalizeAsync(session, token), CancellationToken.None); }
         catch (Exception error) when (IsOperational(error) || error is OperationCanceledException)
         {
-            Notify("Recovery did not finish; its saved checkpoint remains resumable: " + error.Message, true);
+            Notify("Recovery did not finish; its saved checkpoint remains resumable: " + error.Message, error);
         }
     }
 
@@ -2159,7 +2236,7 @@ public sealed class AppController : IAppController
             }
             catch (Exception error) when (IsOperational(error))
             {
-                Notify("Job bookkeeping failed; the scheduler will continue from durable checkpoints: " + error.Message, true);
+                Notify("Job bookkeeping failed; the scheduler will continue from durable checkpoints: " + error.Message, error);
                 try { Store.FailJob(job, error.Message, "RetryWaiting", TimeSpan.FromSeconds(5)); }
                 catch (Exception checkpointError) when (IsOperational(checkpointError))
                 {
@@ -2298,6 +2375,7 @@ public sealed class AppController : IAppController
                         segment.EndMilliseconds ?? (window.SampleCount * 1000L / 16000), segment.Timing.ToString())), turns, provenance);
             }
             Store.CompleteJob(job, rows, evidence, modelIdentity);
+            if (!namedVoiceProgress.IsEmpty) LearnNamedVoices(job.SessionId);
             // Speaker analysis runs in its own lane; re-apply any turns it stored meanwhile to the new rows.
             RefreshSpeakerAssignments(job.SessionId, job.TrackId, chunk.StartTicks,
                 chunk.StartTicks + chunk.SampleCount * TimeSpan.TicksPerSecond / 16000L);
@@ -2328,7 +2406,7 @@ public sealed class AppController : IAppController
         catch (Exception error) when (IsOperational(error))
         {
             Store.FailJob(job, error.Message);
-            Notify("Background job failed; retained audio is available: " + error.Message, true);
+            Notify("Background job failed; retained audio is available: " + error.Message, error);
         }
         finally
         {
@@ -2422,7 +2500,7 @@ public sealed class AppController : IAppController
         try { return await EchoReduction.ApplyAsync(window, microphone, reference, cancellationToken); }
         catch (Exception error) when (error is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException or InvalidOperationException)
         {
-            Notify("Echo reduction is unavailable; the microphone is transcribed without it: " + error.Message, true);
+            Notify("Echo reduction is unavailable; the microphone is transcribed without it: " + error.Message, error);
             return false;
         }
     }
@@ -2507,7 +2585,7 @@ public sealed class AppController : IAppController
             RefreshSpeakerAssignments(job.SessionId, job.TrackId, startTicks, endTicks);
             IReadOnlyList<string> recognized = [];
             try { recognized = RecognizeVoicesLocked(job.SessionId, force: false); }
-            catch (Exception error) when (IsOperational(error)) { Notify("Matching remembered voices failed: " + error.Message, true); }
+            catch (Exception error) when (IsOperational(error)) { Notify("Matching remembered voices failed: " + error.Message, error); }
             TranscriptChanged?.Invoke(job.SessionId);
             if (recognized.Count > 0) Notify($"Recognized {string.Join(", ", recognized)} by voice from the voice library.");
             // Routine markers (algorithm version, short-tail padding, silence) are kept in the raw attempt, not announced.
@@ -2599,7 +2677,7 @@ public sealed class AppController : IAppController
 
     private ITranscriptionProvider CreateProvider(string id)
     {
-        var cacheKey = id == "local-whisper" ? id + ":" + settings.WhisperModelPath : id;
+        var cacheKey = id == "local-whisper" ? id + ":" + settings.WhisperModelPath + ":" + (WhisperOnGpu ? "gpu" : "cpu") : id;
         if (providerCache.TryGetValue(cacheKey, out var existing)) return existing;
         if (id == "local-whisper")
         {
@@ -2622,7 +2700,7 @@ public sealed class AppController : IAppController
             if (string.IsNullOrWhiteSpace(settings.WhisperModelPath))
                 throw new TranscriptionProviderException(new(ProviderErrorCode.ModelUnavailable,
                     "No local Whisper model is installed yet. Install the recommended model from Privacy / models; this audio is transcribed automatically afterward. No cloud fallback was used."));
-            return new LocalWhisperProvider(settings.WhisperModelPath);
+            return new LocalWhisperProvider(settings.WhisperModelPath, WhisperOnGpu);
         }
         if (id == SherpaParakeetProvider.ProviderId)
             return new SherpaParakeetProvider(ParakeetModelDirectory, gpu: () => parakeetGpu, gpuFailed: OnGpuFailed);
@@ -2635,7 +2713,17 @@ public sealed class AppController : IAppController
         ?? throw new InvalidDataException("The native chunk manifest is invalid.");
     private static MediaCheckpoint ReadImport(StoredTrack track) => JsonSerializer.Deserialize<MediaCheckpoint>(track.MetadataJson ?? "")
         ?? throw new InvalidDataException("The managed import checkpoint is invalid.");
-    private void Notify(string message, bool error = false) => Notification?.Invoke(new(message, error));
+    private void Notify(string message, bool error = false)
+    {
+        AppLog.Write(error ? LogLevel.Error : LogLevel.Info, message, null);
+        Notification?.Invoke(new(message, error));
+    }
+
+    private void Notify(string message, Exception exception)
+    {
+        AppLog.Error(message, exception);
+        Notification?.Invoke(new(message, true));
+    }
     private void UpdateSettings(Func<LocalSettings, LocalSettings> update)
     {
         lock (settingsGate)
@@ -2742,7 +2830,7 @@ public sealed class AppController : IAppController
     }
 
     private sealed record LocalSettings(string? WhisperModelPath, string? CloudBlockReason = null, double? FallbackBelowConfidence = null,
-        bool? UseGpuParakeet = null, bool? RememberVoices = null, bool? VoiceLibraryBackfilled = null);
+        bool? UseGpuParakeet = null, bool? RememberVoices = null, bool? VoiceLibraryBackfilled = null, bool? WhisperUseGpu = null);
     private sealed record MicrophoneOptions(Guid? EchoReferenceTrackId);
     // SessionOffsetTicks places an import that was merged into a later part of another session.
     private sealed record MediaCheckpoint(string SourcePath, int StreamIndex, ImportedMedia? Imported, long SessionOffsetTicks = 0);

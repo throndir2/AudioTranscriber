@@ -147,10 +147,10 @@ try {
         $runtimeConfig = Get-Content (Join-Path $destination "$name.runtimeconfig.json") -Raw | ConvertFrom-Json
         if (-not $runtimeConfig.runtimeOptions.includedFrameworks) { throw "$name was not published self-contained." }
     }
-    # The storage library is RID-agnostic and copies both vendored SQLite natives; keep only this platform's.
-    $otherSqlite = if ($Runtime -eq 'win-x64') { 'libe_sqlite3.so' } else { 'e_sqlite3.dll' }
-    Remove-Item -LiteralPath (Join-Path $destination $otherSqlite) -Force -ErrorAction SilentlyContinue
-    Copy-Item -LiteralPath (Join-Path $root 'README.md') -Destination $destination -Force
+    # RID-agnostic libraries copy both platforms' vendored natives (SQLite, Discord libdave); keep only this platform's.
+    $otherNatives = if ($Runtime -eq 'win-x64') { @('libe_sqlite3.so', 'libdave.so') } else { @('e_sqlite3.dll', 'libdave.dll') }
+    foreach ($native in $otherNatives) { Remove-Item -LiteralPath (Join-Path $destination $native) -Force -ErrorAction SilentlyContinue }
+    Copy-Item -LiteralPath (Join-Path $root 'README.md'), (Join-Path $root 'CHANGELOG.md') -Destination $destination -Force
     Copy-Item -LiteralPath (Join-Path $root 'docs') -Destination $destination -Recurse -Force
     $licenses = Join-Path $destination 'licenses'
     New-Item -ItemType Directory -Force $licenses | Out-Null

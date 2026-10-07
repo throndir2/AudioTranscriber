@@ -80,7 +80,9 @@ public sealed class WasapiAudioCaptureService : Core.IAudioCaptureService
     public event Action<AudioGap>? Gap;
     public event Action<AudioFault>? DetailedFault;
     public RecordingState State => capture?.State ?? RecordingState.Recorded;
-    public IReadOnlyList<Core.AudioDeviceInfo> GetOutputDevices() => Devices(true);
+    public IReadOnlyList<Core.AudioDeviceInfo> GetOutputDevices() => Devices(true)
+        .Concat(ExternalAudioSources.All.Select(item => new Core.AudioDeviceInfo(item.Id, item.Source.Name, Core.TrackKind.Loopback, false, true)))
+        .ToArray();
     public IReadOnlyList<Core.AudioDeviceInfo> GetMicrophoneDevices() => Devices(false);
     private static IReadOnlyList<Core.AudioDeviceInfo> Devices(bool loopback)
     {

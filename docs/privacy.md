@@ -78,6 +78,15 @@ NVIDIA credentials are attached only to the explicitly approved NVIDIA transport
 authority. Microsoft Graph uses its own Microsoft sign-in token and fixed Graph
 authority. Endpoint overrides must not redirect credentials to arbitrary servers.
 
+## Diagnostic logs
+
+The diagnostic log (`logs\` in the data root) stays on this PC and is never
+uploaded. It holds app events, status/error messages, and exception details; these
+can include file paths, session and template names, device names, and provider
+error text. It never records audio, transcript lines, LLM output, or keys. The
+**Save diagnostics ZIP** export adds a system summary and replaces your Windows
+profile path and user name; review it before attaching it to a public issue.
+
 ## Output templates (LLM connections)
 
 Output templates never run until you choose **Update now** or tick **Keep updating**
@@ -89,6 +98,11 @@ local. Template API keys are saved only when you choose **Save key**, encrypted 
 DPAPI for the current Windows user in `templates.json`, and sent only to the
 connection's own base URL. The model's file tools are read-only and limited to the
 chosen context folder and always-included files.
+
+Templates with **Include a screenshot of the table** also send a screenshot (JPEG) of
+the window or screen chosen under **Table screenshot** with every run, so anything
+visible there goes to that template's LLM connection. With Ollama or LM Studio the
+screenshot stays on your machines. Screenshots are kept in memory only, not saved.
 
 ## Participant metadata
 
@@ -102,9 +116,15 @@ consent, meeting access, and tenant policy. Respect denied transcript access and
 speaker-attribution restrictions. Unattributed access is not permission to
 reconstruct identities that the tenant prohibited.
 
-Discord live receive is not supported in this first version. A future connector
-requires a visible authorized bot and verified DAVE-compatible receive/rekey/
-reconnect behavior. User-token/selfbot access is not an acceptable substitute.
+Discord server voice channels are recorded through the user's own visible bot
+(never a user token or selfbot). Everyone in the channel sees the bot join; get
+their consent. The bot token is encrypted for the Windows user (DPAPI) in
+`discord.json` and sent only to Discord. Voice stays end-to-end encrypted (DAVE)
+until this PC decrypts it; the audio is archived and transcribed like any other
+track, following the session's provider and consent. Discord display names become
+speaker names, and with Remember voices on their voice prints (embeddings, never
+audio) are saved in the local voice library. Optional network help adds a Windows
+Firewall rule (UAC) and a router UPnP mapping for the voice UDP port only.
 
 ## Public comparison
 
