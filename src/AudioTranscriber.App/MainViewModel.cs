@@ -375,7 +375,7 @@ public sealed class MainViewModel : ObservableObject
         get => localGpuStatus;
         private set { if (Set(ref localGpuStatus, value)) Changed(nameof(ProviderHelp)); }
     }
-    private string localGpuStatus = "Checking for a usable NVIDIA GPU after the default models are ready…";
+    private string localGpuStatus = OperatingSystem.IsWindows() ? "Checking for a usable NVIDIA GPU after the default models are ready…" : "";
     public string ParakeetStatus { get => parakeetStatus; private set => Set(ref parakeetStatus, value); }
     private string parakeetStatus = "";
     private bool shownParakeetReady, gpuOfferAsked;
