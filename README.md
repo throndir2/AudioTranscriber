@@ -27,7 +27,7 @@
 
 <img src="docs/images/transcript.png" alt="AudioTranscriber showing a tabletop game session transcript, with every line labeled Dungeon Master or Lyra (rogue)">
 
-<p align="center"><i>A game night, transcribed on the PC with every speaker named. Fill in two lines yourself and the app labels the rest by voice.</i></p>
+<p align="center"><i>A game night, transcribed on your own computer with every speaker named. Label two lines yourself and the app labels the rest by voice.</i></p>
 
 ---
 
@@ -136,11 +136,12 @@ The speech model downloads by itself the first time you start the app.
 </tr>
 </table>
 
-**Plus the small things:** automatic updates from GitHub releases (checked
-against SHA-256 before installing), a live activity log that shows what's
-happening, a jobs view with pause, resume and cancel, bulk-deleting old sessions,
-safe recovery after a crash, a one-click **diagnostics ZIP** for bug reports (with
-your user name scrubbed), and a dark gold theme.
+**Plus the small things:** real installers for Windows and Linux (`.exe`, `.deb`,
+`.rpm`), automatic updates from GitHub releases (checked against SHA-256 before
+installing), a live activity log that shows what's happening, a jobs view with
+pause, resume and cancel, bulk-deleting old sessions, safe recovery after a crash, a
+one-click **diagnostics ZIP** for bug reports (with your user name scrubbed), and a
+dark gold theme.
 
 ## 📸 Take a look
 
@@ -151,9 +152,14 @@ your user name scrubbed), and a dark gold theme.
 </tr>
 <tr>
 <td><img src="docs/images/templates.png" alt="Output templates with DM guidance, session summary, NPCs and items"><p align="center"><b>Output templates</b><br>Your prompts, updated from the live transcript.</p></td>
-<td><img src="docs/images/privacy-models.png" alt="Privacy / models tab with cloud consent off, local Parakeet and local speaker analysis"><p align="center"><b>You stay in control</b><br>Local models, consent per session, no key needed.</p></td>
+<td><img src="docs/images/discord.png" alt="Discord tab with guided bot setup and network help"><p align="center"><b>Record Discord servers</b><br>Guided bot setup; every line named after its speaker.</p></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><img src="docs/images/privacy-models.png" alt="Privacy / models tab with cloud consent off, diagnostics, local Parakeet, speaker analysis and the voice library" width="50%"><p align="center"><b>You stay in control</b><br>Local models, consent per session, a voice library you can see and edit.</p></td>
 </tr>
 </table>
+
+<p align="center"><sub>The same app and dark gold theme on Windows and Linux (screenshots taken on Linux).</sub></p>
 
 ## 🚀 Up and running in a minute
 
