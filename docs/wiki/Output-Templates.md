@@ -42,20 +42,31 @@ are kept in memory only and go to that template's LLM connection.
 
 ## Virtual tabletop assistant
 
-**Add table (VTT) templates** adds three linked templates, each with one narrow job so
-small vision models can keep up:
+**Add table (VTT) templates** adds eight linked templates, each with one narrow job so
+small vision models can keep up. Screenshot readers:
 
-- **Table: turn order** reads only the initiative tracker from the table screenshot.
+- **Table: turn order** reads only the initiative tracker.
 - **Table: token positions** reads only the battle map: tokens, PC or monster, where
   they are and who is next to whom.
-- **Table: DM reminders** combines both with the recent transcript and your reference
-  files into up to 8 short reminders: whose turn is now and next, monster tactics, rules
-  to remember, and story beats or clues from your notes not presented yet.
+- **Table: health and conditions** reads HP bars or numbers and status markers.
+- **Table: dice rolls** reads the latest rolls from the chat log.
+- **Table: scene and map** describes the map: place, lighting and fog, exits, terrain
+  and hazards (every 2 minutes).
+
+Text-only combiners:
+
+- **Table: movement** lists who moved, appeared or disappeared since last time.
+- **Table: combat log** keeps a round-by-round log from the turn order, rolls, health
+  and table talk.
+- **Table: DM reminders** combines turn order, movement, health, scene, the recent
+  transcript and your reference files into up to 8 short reminders: whose turn is now
+  and next, monster tactics, creatures low on HP or with conditions, rules to remember,
+  and story beats or clues from your notes not presented yet.
 
 Setup: pick your Roll20 (or Foundry) browser window in **Table screenshot**, use a vision
 model such as Ollama `gemma4:e4b`, and point the **context folder** at your adventure PDF
-and notes. All three keep updating on their own; the reminders re-run whenever the turn
-order, tokens or transcript change.
+and notes. All of them keep updating on their own; combiners re-run whenever one of their
+inputs changes. Turn off readers you don't need to save GPU time.
 
 Output is shown in the app and can be copied. **Also write the output to a file**
 rewrites a `.md` or `.txt` file without locking it, so VS Code, Obsidian, or a browser

@@ -329,21 +329,36 @@ narrow job, such as turn order or token positions.
 
 ### Virtual tabletop assistant
 
-**Add table (VTT) templates** adds three linked templates that show the
-one-narrow-job-per-call design for small vision models:
+**Add table (VTT) templates** adds eight linked templates that show the
+one-narrow-job-per-call design for small vision models. Screenshot readers (each
+looks at one part of the table):
 
-- **Table: turn order** reads only the initiative tracker from the table screenshot.
+- **Table: turn order** reads only the initiative tracker.
 - **Table: token positions** reads only the battle map: tokens, PC or monster, where
   they are and who is next to whom.
-- **Table: DM reminders** uses both outputs plus the recent transcript and your
-  reference files to give up to 8 short reminders: whose turn is now and next,
-  monster tactics, rules to remember, and story beats or clues from your notes not
-  presented yet ("Don't forget to present …").
+- **Table: health and conditions** reads HP bars or numbers and status markers.
+- **Table: dice rolls** reads the latest rolls from the chat log.
+- **Table: scene and map** describes the map: place, lighting and fog, exits,
+  terrain and hazards (every 2 minutes).
+
+Text-only combiners (no screenshot, so they are cheap):
+
+- **Table: movement** compares the token positions with last time and lists who
+  moved, appeared or disappeared.
+- **Table: combat log** keeps a round-by-round log from the turn order, rolls,
+  health and table talk.
+- **Table: DM reminders** uses the turn order, movement, health, scene, the recent
+  transcript and your reference files to give up to 8 short reminders: whose turn is
+  now and next, monster tactics, creatures low on HP or with conditions, rules to
+  remember, and story beats or clues from your notes not presented yet ("Don't
+  forget to present …").
 
 Setup: pick your Roll20 (or Foundry) browser window in **Table screenshot**, use a
 vision model such as Ollama `gemma4:e4b` for the connection, and point the
-**context folder** at your adventure PDF and notes. All three keep updating on
-their own; the reminders re-run whenever the turn order, tokens or transcript change.
+**context folder** at your adventure PDF and notes. All of them keep updating on
+their own; combiners re-run whenever one of their inputs changes. Untick **Keep
+updating** on readers you don't need to save GPU time, and raise **max width** if
+small text (names, rolls) is misread.
 
 **LLM connections** use the OpenAI-compatible `/v1/chat/completions` API. Pick a
 type and choose **Add**: OpenRouter (`https://openrouter.ai/api/v1`), NVIDIA Build

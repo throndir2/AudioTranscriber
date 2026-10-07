@@ -414,7 +414,7 @@ public sealed class TemplatesViewModel : ObservableObject
         var reminders = added[^1];
         SelectedTemplate = reminders;
         if (string.IsNullOrWhiteSpace(CaptureTarget))
-            reminders.Status = "Pick your virtual tabletop window (e.g. the Roll20 browser window) in the Table screenshot card so the turn order and token templates can read it.";
+            reminders.Status = "Pick your virtual tabletop window (e.g. the Roll20 browser window) in the Table screenshot card so the table templates can read it.";
     }
 
     private void DuplicateTemplate()
