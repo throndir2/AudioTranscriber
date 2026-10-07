@@ -11,8 +11,8 @@ Format: newest first; each version is `## vX.Y.Z - YYYY-MM-DD` with `### Added`,
 ### Added
 
 - **Add table templates** now also adds templates for token movement, health and conditions, dice rolls from the chat log, the scene and map, and a round-by-round combat log; DM reminders use them to flag low-HP creatures and conditions. (#50)
-- **TTRPG template library** on the Templates tab: 16 ready-made tabletop RPG templates (recap, quest log, combat tracker, rulings, lore, locations, calendar, mysteries and clues, spotlight, quotes, in-character journal, spoiler-free player handout, next-session prep, XP and rewards, character changes, improv NPCs), added one at a time or all at once. (#PR)
-- Templates save a **versioned copy** of each changed update (timestamped files next to the output file, or in the library), with **Keep only the latest N versions** to limit them, an option to turn versioning off, and **Open versions folder**. (#PR)
+- **TTRPG template library** on the Templates tab: 16 ready-made tabletop RPG templates (recap, quest log, combat tracker, rulings, lore, locations, calendar, mysteries and clues, spotlight, quotes, in-character journal, spoiler-free player handout, next-session prep, XP and rewards, character changes, improv NPCs), added one at a time or all at once. (#51)
+- Templates save a **versioned copy** of each changed update (timestamped files next to the output file, or in the library), with **Keep only the latest N versions** to limit them, an option to turn versioning off, and **Open versions folder**. (#51)
 
 ## v0.2.0 - 2026-10-06
 
