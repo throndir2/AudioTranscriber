@@ -78,6 +78,15 @@ NVIDIA credentials are attached only to the explicitly approved NVIDIA transport
 authority. Microsoft Graph uses its own Microsoft sign-in token and fixed Graph
 authority. Endpoint overrides must not redirect credentials to arbitrary servers.
 
+## Diagnostic logs
+
+The diagnostic log (`logs\` in the data root) stays on this PC and is never
+uploaded. It holds app events, status/error messages, and exception details; these
+can include file paths, session and template names, device names, and provider
+error text. It never records audio, transcript lines, LLM output, or keys. The
+**Save diagnostics ZIP** export adds a system summary and replaces your Windows
+profile path and user name; review it before attaching it to a public issue.
+
 ## Output templates (LLM connections)
 
 Output templates never run until you choose **Update now** or tick **Keep updating**

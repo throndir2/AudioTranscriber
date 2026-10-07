@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Threading;
 using AudioTranscriber.App.Mcp;
 using AudioTranscriber.Application;
+using AudioTranscriber.Core;
 using AudioTranscriber.Storage;
 
 namespace AudioTranscriber.App;
@@ -15,6 +16,7 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        AppLog.Info($"Exiting with code {e.ApplicationExitCode}.");
         if (!smokeMode) mainViewModel?.ApplyPendingUpdate(startupArguments);
         base.OnExit(e);
     }
@@ -27,6 +29,7 @@ public partial class App : System.Windows.Application
         try
         {
             options = StartupOptions.Parse(e.Args);
+            AppDiagnostics.Start(options);
             if (options.Mcp != McpMode.None)
             {
                 await RunMcpAsync(options);
@@ -86,6 +89,7 @@ public partial class App : System.Windows.Application
         }
         catch (Exception error)
         {
+            AppLog.Error("Startup failed.", error);
             if (controller is not null)
             {
                 try { await controller.DisposeAsync(); }
@@ -93,7 +97,8 @@ public partial class App : System.Windows.Application
             }
             var message = error is ArgumentException
                 ? error.Message
-                : "The local application could not start. Check data-root permissions, available disk space, the Windows Desktop .NET 10 x64 runtime, and required native dependencies.";
+                : "The local application could not start. Check data-root permissions, available disk space, the Windows Desktop .NET 10 x64 runtime, and required native dependencies." +
+                  (AppLog.Directory is { } logs ? $"{Environment.NewLine}{Environment.NewLine}Details were written to the log in {logs}; attach it to a GitHub issue if this keeps happening." : "");
             if (options?.Smoke == true)
             {
                 try
