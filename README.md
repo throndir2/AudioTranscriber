@@ -80,6 +80,7 @@ The speech model downloads by itself the first time you start the app.
 - **NVIDIA Parakeet TDT v3** on your CPU by default: 25 European languages, detected automatically.
 - In testing it made **about a third fewer word errors** than Whisper large-v3-turbo and used far less CPU.
 - Have an **NVIDIA GPU**? The app offers to run Parakeet on it instead.
+- **Recommended setup for this PC** reads your CPU, RAM and graphics card and fits the speech models and a local AI model to them.
 - **Local Whisper** for any other language.
 - Optional **NVIDIA cloud** models, only when you allow it for a session.
 
@@ -133,7 +134,8 @@ The speech model downloads by itself the first time you start the app.
 **Plus the small things:** automatic updates from GitHub releases (checked
 against SHA-256 before installing), a live activity log that shows what's
 happening, a jobs view with pause, resume and cancel, bulk-deleting old sessions,
-safe recovery after a crash, and a dark gold theme.
+safe recovery after a crash, a one-click **diagnostics ZIP** for bug reports (with
+your user name scrubbed), and a dark gold theme.
 
 ## 📸 Take a look
 
