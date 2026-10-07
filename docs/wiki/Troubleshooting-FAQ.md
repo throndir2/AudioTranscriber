@@ -1,5 +1,16 @@
 # Troubleshooting / FAQ
 
+## Reporting a problem (diagnostics ZIP)
+
+Open **Privacy / models → Diagnostics and bug reports**, choose **Save diagnostics
+ZIP…**, and attach the ZIP to a [GitHub issue](https://github.com/throndir2/AudioTranscriber/issues).
+It holds the app's local logs (last 14 days), the updater log, the Activity panel
+without transcript lines, and a system summary (version, Windows/.NET, GPU, FFmpeg and
+Visual C++ status, model status). It never includes audio, transcript text, the library
+database, or keys, and your Windows user name and profile path are replaced. Open it to
+review before sharing. **Open log folder** shows the raw logs in the data root's `logs`
+folder; if the app cannot start, the startup error names that folder.
+
 ## The app says FFmpeg is missing
 
 Release ZIPs include FFmpeg/FFprobe in the `ffmpeg` folder. Keep that folder next to

@@ -43,6 +43,15 @@ your machines.
 Template file tools are read-only and limited to the chosen context folder and
 always-included files.
 
+## Diagnostic logs
+
+The app keeps a local log in the data root's `logs` folder. It is never uploaded. It
+records app events, status and error messages, and exception details (which can
+include file paths, session or device names, and provider error text), but never
+audio, transcript lines, LLM output, or keys. **Save diagnostics ZIP…** replaces your
+Windows profile path and user name; review the ZIP before attaching it to a public
+issue.
+
 ## Speaker data
 
 Speaker profiles and voice-library entries are local biometric-like voice data:
