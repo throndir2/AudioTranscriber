@@ -53,6 +53,7 @@ public partial class App : System.Windows.Application
                 mainViewModel = viewModel;
                 smokeMode = false;
                 _ = viewModel.RunAutomaticSetupAsync();
+                viewModel.Discord.AutoConnect();
                 viewModel.StartUpdateChecks();
             }
             if (options.Smoke)

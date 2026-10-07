@@ -304,6 +304,30 @@ public sealed class ControllerTests
     }
 
     [Fact]
+    public async Task SourceNamedSpeechLabelsExistingAndLaterLinesOfTheTrack()
+    {
+        await using var fixture = new Fixture();
+        fixture.Provider.Release.TrySetResult();
+        var session = await fixture.App.StartRecordingAsync("Synthetic Discord", "synthetic-output", null, "local-whisper", "en", false);
+        float[] Voice() => Enumerable.Range(0, 32000).Select(i => (float)(0.3 * Math.Sin(2 * Math.PI * 300 * i / 16000.0))).ToArray();
+        var track = fixture.Capture.TrackId;
+        fixture.Capture.EmitAudio(track, Voice());
+        await UntilAsync(() => fixture.App.Store.GetTranscriptPage(session.Id).Any(row => row.TrackId == track));
+        var first = fixture.App.Store.GetTranscriptPage(session.Id).First(row => row.TrackId == track);
+
+        fixture.App.LabelTrackSpeech(session.Id, track, "Alice", first.StartTicks, first.EndTicks);
+        fixture.App.LabelTrackSpeech(session.Id, track, "Bob", first.EndTicks + 1, first.EndTicks + 600 * TimeSpan.TicksPerSecond);
+        fixture.Capture.EmitAudio(track, Voice());
+        await fixture.App.StopRecordingAsync();
+        await UntilAsync(() => fixture.App.Store.GetTranscriptPage(session.Id).Count(row => row.TrackId == track) >= 2);
+
+        var rows = fixture.App.Store.GetTranscriptPage(session.Id).Where(row => row.TrackId == track).ToArray();
+        Assert.Equal("Alice", rows[0].SpeakerName);
+        Assert.Equal("Bob", rows[^1].SpeakerName);
+        Assert.All(rows, row => Assert.True(row.ManualSpeaker));
+    }
+
+    [Fact]
     public async Task NamingTheMicrophoneLabelsItsExistingAndLaterLines()
     {
         await using var fixture = new Fixture();

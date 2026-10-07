@@ -189,6 +189,8 @@ public sealed class MainViewModel : ObservableObject
             recommendationText = "";
             RefreshSetup();
         }, () => !closing);
+        Discord = new DiscordViewModel(controller, dispatcher, controller.Store.RootDirectory, RecordFromAsync,
+            () => Guard(RefreshDevices), (text, error) => { if (error) SetStatus(text, true); else { SetStatus(text); Log(text); } });
         if (liveFileEnabled) liveFileStatus = ArmedLiveStatus();
         controller.Notification += OnNotification;
         controller.LevelsChanged += OnLevelsChanged;
@@ -231,6 +233,20 @@ public sealed class MainViewModel : ObservableObject
         }
     }
     public TemplatesViewModel Templates { get; }
+    public DiscordViewModel Discord { get; }
+
+    // Selects an external source (a joined Discord channel) as the output and starts a new recording from it.
+    private async Task RecordFromAsync(string deviceId)
+    {
+        RefreshDevices();
+        if (OutputDevices.FirstOrDefault(device => device.Id == deviceId) is not { } source) return;
+        OutputDevice = source;
+        await StartRecordingAsync();
+    }
+
+    // Discord already carries everyone's voice, including yours if you're in the call, so no microphone track is added.
+    private string? MicrophoneFor(DeviceChoice output) =>
+        MicrophoneEnabled && !output.Id.StartsWith(AudioTranscriber.Audio.ExternalAudioSources.Prefix, StringComparison.Ordinal) ? MicrophoneDevice?.Id : null;
     public ICommand RestartToUpdateCommand { get; }
     public string CurrentVersionText => updater.IsSupported
         ? $"Installed version: {updater.CurrentTag} · updates come from the latest GitHub release of {AppUpdater.Repository}"
@@ -1172,7 +1188,7 @@ public sealed class MainViewModel : ObservableObject
         }
         var name = TakeSessionName();
         var locale = Language.Trim();
-        var microphoneId = MicrophoneEnabled ? MicrophoneDevice?.Id : null;
+        var microphoneId = MicrophoneFor(output);
         var consent = NewCloudConsent;
         var reduceEcho = ReduceEcho;
         SaveRecordingPreferences();
@@ -1203,7 +1219,7 @@ public sealed class MainViewModel : ObservableObject
             SetStatus("Select an available microphone or turn off the separate microphone track.", true);
             return;
         }
-        var microphoneId = MicrophoneEnabled ? MicrophoneDevice?.Id : null;
+        var microphoneId = MicrophoneFor(output);
         var reduceEcho = ReduceEcho;
         SaveRecordingPreferences();
         await RunAsync($"Continuing \"{target.Name}\" with the selected audio devices…", async token =>
@@ -1895,6 +1911,7 @@ public sealed class MainViewModel : ObservableObject
             if (activeOperation is not null) await activeOperation;
             if (stopTask is not null) await stopTask;
             if (controller.IsRecording) await controller.StopRecordingAsync();
+            await Discord.ShutdownAsync();
             if (liveWrite is not null) await liveWrite;
             if (liveSessionId is { } liveId && LiveFilePath.Trim() is { Length: > 0 } livePath)
             {

@@ -84,6 +84,9 @@ public interface IAppController : IAsyncDisposable
     int SetMicrophoneSpeaker(Guid sessionId, string? name);
     // Manually labels rows (null = Unknown). With speaker models installed, the rows' voice is learned in the background.
     void AssignSpeaker(Guid sessionId, IReadOnlyCollection<string> segmentIds, string? speakerId);
+    // Names a track's lines by who was speaking there (for example a Discord user): lines already transcribed in the range and
+    // lines transcribed later get this speaker, and with speaker models installed their voice print is learned under the name.
+    void LabelTrackSpeech(Guid sessionId, Guid trackId, string name, long startTicks, long endTicks);
     // Renames a speaker; a name another speaker already has merges the two. Returns the surviving speaker ID.
     Task<string> RenameSpeakerAsync(Guid sessionId, string speakerId, string name, CancellationToken cancellationToken = default);
     // Voice library shared by all sessions. Naming a speaker remembers their voice (embeddings only, never audio);

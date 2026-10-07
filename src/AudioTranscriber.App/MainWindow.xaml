@@ -376,6 +376,93 @@
                         </Grid>
                     </TabItem>
 
+                    <TabItem Header="Disc_ord" Tag="&#xE8BD;">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" DataContext="{Binding Discord}">
+                            <Grid Margin="16,14,16,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="16" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <Border Style="{StaticResource HeroCard}">
+                                        <StackPanel>
+                                            <ContentControl Style="{StaticResource SectionHeader}" Content="Record a Discord server voice channel" />
+                                            <TextBlock Style="{StaticResource Help}" Text="Your own Discord bot joins a voice channel in a server and records everyone in it. Discord sends each person's voice separately, so every transcript line is named after the Discord user who said it, and their voice prints are learned under that name (with speaker models installed and Remember voices on). Bots can't join DM or group-DM calls; for those, record Windows output instead." />
+                                            <ContentControl Style="{StaticResource SectionHeader}" Content="1 · Create your Discord app" Margin="0,8,0,0" />
+                                            <TextBlock Style="{StaticResource Help}" Text="{Binding Steps}" />
+                                            <WrapPanel>
+                                                <Button Content="Open the Discord Developer Portal" Command="{Binding OpenPortalCommand}"
+                                                        ToolTip="https://discord.com/developers/applications — choose New Application there." />
+                                                <Button Content="Open my bot's page" Command="{Binding OpenBotPageCommand}" ToolTip="Where you reset and copy the bot token." />
+                                            </WrapPanel>
+                                            <ContentControl Style="{StaticResource SectionHeader}" Content="2 · Connect the bot" Margin="0,8,0,0" />
+                                            <WrapPanel>
+                                                <PasswordBox x:Name="DiscordTokenInput" Width="330" Padding="8" Margin="0,4,10,4" PasswordChanged="DiscordTokenChanged"
+                                                             AutomationProperties.Name="Discord bot token, password input, never logged" />
+                                                <Button Content="Save and connect" Style="{StaticResource PrimaryButton}" Command="{Binding ConnectCommand}"
+                                                        ToolTip="Saves the token encrypted for your Windows account (discord.json in the library) and connects. With a saved token, leave the box empty to reconnect." />
+                                                <Button Content="Disconnect" Command="{Binding DisconnectCommand}" />
+                                                <Button Content="Forget the bot" Command="{Binding ForgetCommand}" ToolTip="Disconnects and deletes the saved token from this PC." />
+                                            </WrapPanel>
+                                            <TextBlock Text="{Binding BotStatus}" TextWrapping="Wrap" FontWeight="SemiBold" Margin="0,4,0,0" AutomationProperties.LiveSetting="Polite" />
+                                            <ContentControl Style="{StaticResource SectionHeader}" Content="3 · Add the bot to your server" Margin="0,10,0,0" />
+                                            <TextBlock Style="{StaticResource Help}" Text="Opens Discord's invite page for your bot with only View Channels and Connect. You need Manage Server in that server; otherwise send the link to someone who has it." />
+                                            <WrapPanel>
+                                                <Button Content="Add the bot to a server" Command="{Binding InviteCommand}" />
+                                                <Button Content="Copy invite link" Command="{Binding CopyInviteCommand}" />
+                                            </WrapPanel>
+                                            <TextBlock Style="{StaticResource Caption}" Text="{Binding InviteUrl}" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource Card}">
+                                        <StackPanel>
+                                            <ContentControl Style="{StaticResource SectionHeader}" Content="4 · Join a voice channel and record" />
+                                            <DockPanel>
+                                                <Button DockPanel.Dock="Right" Content="Refresh" Command="{Binding RefreshChannelsCommand}" Margin="8,3,0,8" />
+                                                <ComboBox ItemsSource="{Binding Channels}" SelectedItem="{Binding SelectedChannel}" DisplayMemberPath="Display" Margin="0,3,0,8"
+                                                          AutomationProperties.Name="Discord server voice channel" />
+                                            </DockPanel>
+                                            <WrapPanel>
+                                                <Button Content="●  Join and record" Style="{StaticResource PrimaryButton}" Command="{Binding JoinAndRecordCommand}"
+                                                        ToolTip="Joins the channel and starts a new session with the settings on Record / import (no microphone track: Discord already carries everyone, including you)." />
+                                                <Button Content="Join only" Command="{Binding JoinCommand}"
+                                                        ToolTip="Joins without recording. The channel then appears as an output choice on Record / import, so you can also Continue recording an existing session." />
+                                                <Button Content="Leave" Command="{Binding LeaveCommand}" />
+                                            </WrapPanel>
+                                            <TextBlock Text="{Binding VoiceStatus}" TextWrapping="Wrap" Margin="0,6,0,0" AutomationProperties.LiveSetting="Polite" />
+                                            <TextBlock Style="{StaticResource Caption}" Margin="0,6,0,0" Text="Stop the recording on Record / import. Everyone in the channel sees the bot join; tell people they are recorded and get their consent. Audio is end-to-end encrypted by Discord (DAVE) and decrypted only on this PC; transcription follows the session's provider." />
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <Border Style="{StaticResource Card}">
+                                        <StackPanel>
+                                            <ContentControl Style="{StaticResource SectionHeader}" Content="Network: firewall, UPnP and port forwarding" />
+                                            <TextBlock Style="{StaticResource Help}" Text="Voice audio arrives over UDP on one fixed port of this PC. It usually works with no setup, because the bot connects out to Discord first. If the status says people are talking but no audio arrives, work down this list." />
+                                            <DockPanel Margin="0,4,0,0">
+                                                <Label Content="Voice UDP port" Target="{Binding ElementName=DiscordPortInput}" VerticalAlignment="Center" />
+                                                <TextBox x:Name="DiscordPortInput" Width="90" HorizontalAlignment="Left" Margin="8,3,0,8" Text="{Binding VoicePort, UpdateSourceTrigger=LostFocus}"
+                                                         AutomationProperties.Name="Discord voice UDP port" ToolTip="1024–65535. Applies to the next join." />
+                                            </DockPanel>
+                                            <ContentControl Style="{StaticResource SectionHeader}" Content="a · Windows Firewall" Margin="0,4,0,0" />
+                                            <TextBlock Style="{StaticResource Help}" Text="Adds an inbound rule allowing this app on the voice port (UDP, all network types). Windows asks for administrator approval once." />
+                                            <Button Content="Allow in Windows Firewall" Command="{Binding FirewallCommand}" HorizontalAlignment="Left" />
+                                            <TextBlock Text="{Binding FirewallStatus}" Style="{StaticResource Caption}" TextWrapping="Wrap" />
+                                            <ContentControl Style="{StaticResource SectionHeader}" Content="b · UPnP (automatic router forwarding)" Margin="0,8,0,0" />
+                                            <CheckBox Content="Ask the router to forward the voice port (UPnP) each time the bot joins" IsChecked="{Binding UseUpnp}" />
+                                            <Button Content="Try UPnP now" Command="{Binding UpnpCommand}" HorizontalAlignment="Left" Margin="0,6,0,0" />
+                                            <TextBlock Text="{Binding NetworkStatus}" Style="{StaticResource Caption}" TextWrapping="Wrap" />
+                                            <ContentControl Style="{StaticResource SectionHeader}" Content="c · Forward the port by hand" Margin="0,8,0,0" />
+                                            <TextBlock Style="{StaticResource Help}" Text="{Binding PortForwardSteps}" />
+                                            <Button Content="Copy these steps" Command="{Binding CopyPortForwardCommand}" HorizontalAlignment="Left" />
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </Grid>
+                        </ScrollViewer>
+                    </TabItem>
+
                     <TabItem Header="_Transcript" Tag="&#xE8A5;">
                         <Grid Margin="12,10">
                             <Grid.Resources>
@@ -952,8 +1039,8 @@
                                     </Border>
                                     <Border Style="{StaticResource Card}">
                                         <StackPanel>
-                                            <ContentControl Style="{StaticResource SectionHeader}" Content="Not included: live Teams or Discord audio" />
-                                            <TextBlock Style="{StaticResource Help}" Text="Live Teams requires a separately deployed Azure media bot and tenant policy. Discord live receive needs a visible, authorized guild bot and validated DAVE-compatible receive support. Neither is represented by a fake capture button. Windows selected-output capture is a distinct, explicit local action." />
+                                            <ContentControl Style="{StaticResource SectionHeader}" Content="Not included: live Teams audio" />
+                                            <TextBlock Style="{StaticResource Help}" Text="Live Teams requires a separately deployed Azure media bot and tenant policy, so it is not represented by a fake capture button. Record Windows output instead, or fetch the meeting transcript here. Discord server voice channels are recorded on the Discord tab." />
                                         </StackPanel>
                                     </Border>
                                 </StackPanel>

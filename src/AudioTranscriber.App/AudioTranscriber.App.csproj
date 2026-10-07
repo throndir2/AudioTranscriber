@@ -18,6 +18,7 @@
     <!-- Also a WPF resource so every window sets it explicitly; the exe fallback shows the .NET icon under dotnet.exe. -->
     <Resource Include="Assets\AppIcon.ico" />
     <ProjectReference Include="..\AudioTranscriber.Application\AudioTranscriber.Application.csproj" />
+    <ProjectReference Include="..\AudioTranscriber.Discord\AudioTranscriber.Discord.csproj" />
     <!-- Native GPU runtime ships via build/ targets, which do not flow transitively. -->
     <PackageReference Include="Whisper.net.Runtime.Vulkan" Version="1.9.1" />
     <!-- Apache-2.0 PDF text extraction for output-template reference files. -->
