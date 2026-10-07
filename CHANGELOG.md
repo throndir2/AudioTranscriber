@@ -8,6 +8,10 @@ Format: newest first; each version is `## vX.Y.Z - YYYY-MM-DD` with `### Added`,
 
 ## Unreleased
 
+### Added
+
+- **Add table templates** now also adds templates for token movement, health and conditions, dice rolls from the chat log, the scene and map, and a round-by-round combat log; DM reminders use them to flag low-HP creatures and conditions. (#50)
+
 ## v0.2.0 - 2026-10-06
 
 ### Added
