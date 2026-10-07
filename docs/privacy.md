@@ -97,7 +97,11 @@ terms, logging and quotas; Ollama or LM Studio on your own machines keep the tex
 local. Template API keys are saved only when you choose **Save key**, encrypted with
 DPAPI for the current Windows user in `templates.json`, and sent only to the
 connection's own base URL. The model's file tools are read-only and limited to the
-chosen context folder and always-included files.
+chosen context folder and always-included files. Unless you untick **Save a versioned
+copy of each update**, every changed template output is also kept on disk as a
+timestamped copy (next to the template's output file, or in `template-versions` in the
+library folder); delete them there or limit them with **Keep only the latest N
+versions**.
 
 Templates with **Include a screenshot of the table** also send a screenshot (JPEG) of
 the window or screen chosen under **Table screenshot** with every run, so anything

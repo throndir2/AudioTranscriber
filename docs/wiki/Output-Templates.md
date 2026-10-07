@@ -72,6 +72,26 @@ Output is shown in the app and can be copied. **Also write the output to a file*
 rewrites a `.md` or `.txt` file without locking it, so VS Code, Obsidian, or a browser
 can keep it open.
 
+## TTRPG template library
+
+Pick a template from **TTRPG template library** and choose **Add**, or **Add all** for
+the whole set: a "Previously on…" recap, quest log and plot hooks, combat tracker, rules
+questions and rulings, lore and canon log, locations and travel, in-game calendar,
+mysteries and clues, spotlight and player engagement, memorable quotes, an
+in-character journal, a spoiler-free player handout, next session prep, XP and rewards,
+character changes and conditions, and an improv NPC helper. They start as manual
+updates; tick **Keep updating** on the ones you want live.
+
+## Versioned copies
+
+Because templates rewrite their output on every update, **Save a versioned copy of each
+update** (on by default) also saves each changed output as a timestamped file such as
+`2026-10-06 21-10-03.md`. With an output file, copies go to a `<file name> versions`
+folder next to it; otherwise to `template-versions` in the library folder. Identical
+outputs are not saved twice. **Keep only the latest N versions** deletes the oldest
+copies beyond N (0 keeps all); untick the option to keep only the latest output.
+**Open versions folder** shows them.
+
 ## Reference files
 
 Reference files are shared across templates unless unticked for a template. The model

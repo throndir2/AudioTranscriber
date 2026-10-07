@@ -96,8 +96,8 @@ public sealed class OutputTemplate : ObservableObject
 {
     private string name = "", prompt = "", outputPath = "", output = "", status = "Not run yet.";
     private Guid? connectionId;
-    private bool autoUpdate, writeToFile, includePrevious = true, useReferences = true, useTranscript = true, useScreenshot, running;
-    private int intervalSeconds = 60, maxTranscriptChars = 60000;
+    private bool autoUpdate, writeToFile, includePrevious = true, useReferences = true, useTranscript = true, useScreenshot, running, keepVersions = true;
+    private int intervalSeconds = 60, maxTranscriptChars = 60000, maxVersions;
     private List<Guid> inputTemplateIds = [];
 
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -118,6 +118,10 @@ public sealed class OutputTemplate : ObservableObject
     public string OutputPath { get => outputPath; set => Set(ref outputPath, value ?? ""); }
     public string Output { get => output; set => Set(ref output, value ?? ""); }
     public Guid? OutputSessionId { get; set; }
+    /// <summary>Save every changed output as a timestamped copy (see <see cref="TemplateVersions"/>).</summary>
+    public bool KeepVersions { get => keepVersions; set => Set(ref keepVersions, value); }
+    /// <summary>How many versioned copies to keep, newest first; 0 keeps all of them.</summary>
+    public int MaxVersions { get => maxVersions; set => Set(ref maxVersions, Math.Clamp(value, 0, 100_000)); }
 
     [JsonIgnore] public string Status { get => status; set => Set(ref status, value ?? ""); }
     [JsonIgnore] public bool IsRunning { get => running; set { if (Set(ref running, value)) Changed(nameof(Summary)); } }
@@ -159,7 +163,7 @@ public sealed class OutputTemplate : ObservableObject
         var turnOrder = new OutputTemplate
         {
             Name = "Table: turn order",
-            UseScreenshot = true, UseTranscript = false, UseReferences = false, IncludePrevious = false,
+            UseScreenshot = true, UseTranscript = false, UseReferences = false, IncludePrevious = false, KeepVersions = false,
             AutoUpdate = true, IntervalSeconds = 20,
             Prompt = "Look ONLY at the turn order / initiative tracker in this virtual tabletop screenshot. Ignore everything else.\n" +
                      "If a turn order is visible: list every combatant from top to bottom, one per line, as \"Name - initiative number\". " +
@@ -171,7 +175,7 @@ public sealed class OutputTemplate : ObservableObject
         var tokens = new OutputTemplate
         {
             Name = "Table: token positions",
-            UseScreenshot = true, UseTranscript = false, UseReferences = false, IncludePrevious = false,
+            UseScreenshot = true, UseTranscript = false, UseReferences = false, IncludePrevious = false, KeepVersions = false,
             AutoUpdate = true, IntervalSeconds = 20,
             Prompt = "Look ONLY at the battle map in this virtual tabletop screenshot. Ignore chat, menus and sidebars.\n" +
                      "For each visible token write one line: name or label (if shown, otherwise a short description), PC or monster/NPC, and approximate location " +
@@ -184,7 +188,7 @@ public sealed class OutputTemplate : ObservableObject
         var movement = new OutputTemplate
         {
             Name = "Table: movement",
-            UseScreenshot = false, UseTranscript = false, UseReferences = false, IncludePrevious = true,
+            UseScreenshot = false, UseTranscript = false, UseReferences = false, IncludePrevious = true, KeepVersions = false,
             AutoUpdate = true, IntervalSeconds = 20,
             InputTemplateIds = [tokens.Id],
             Prompt = "The input \"Table: token positions\" is the battle map as it looks right now. Your previous output, if any, ends with a " +
@@ -200,7 +204,7 @@ public sealed class OutputTemplate : ObservableObject
         var health = new OutputTemplate
         {
             Name = "Table: health and conditions",
-            UseScreenshot = true, UseTranscript = false, UseReferences = false, IncludePrevious = false,
+            UseScreenshot = true, UseTranscript = false, UseReferences = false, IncludePrevious = false, KeepVersions = false,
             AutoUpdate = true, IntervalSeconds = 30,
             Prompt = "Look ONLY at hit points and status in this virtual tabletop screenshot: health bars or numbers on tokens, status marker icons " +
                      "on tokens, and any visible party, character sheet or combat tracker HP. Ignore everything else.\n" +
@@ -212,7 +216,7 @@ public sealed class OutputTemplate : ObservableObject
         var rolls = new OutputTemplate
         {
             Name = "Table: dice rolls",
-            UseScreenshot = true, UseTranscript = false, UseReferences = false, IncludePrevious = false,
+            UseScreenshot = true, UseTranscript = false, UseReferences = false, IncludePrevious = false, KeepVersions = false,
             AutoUpdate = true, IntervalSeconds = 20,
             Prompt = "Look ONLY at the chat log / dice roll panel in this virtual tabletop screenshot. Ignore the map and everything else.\n" +
                      "List the most recent dice rolls you can read, oldest first, at most 8, one per line: who rolled, what for (attack, damage, save, " +
@@ -223,7 +227,7 @@ public sealed class OutputTemplate : ObservableObject
         var scene = new OutputTemplate
         {
             Name = "Table: scene and map",
-            UseScreenshot = true, UseTranscript = false, UseReferences = false, IncludePrevious = false,
+            UseScreenshot = true, UseTranscript = false, UseReferences = false, IncludePrevious = false, KeepVersions = false,
             AutoUpdate = true, IntervalSeconds = 120,
             Prompt = "Look ONLY at the map in this virtual tabletop screenshot (not the tokens, chat or menus) and describe the scene in at most 8 short bullets: " +
                      "what kind of place it is, lighting and unrevealed (fog of war) areas, doors and exits, notable terrain, cover, hazards and objects, " +
@@ -262,6 +266,171 @@ public sealed class OutputTemplate : ObservableObject
                      "Each bullet one short line. Only use facts from the inputs; skip a point if there is nothing for it. No introduction or closing text."
         };
         return [turnOrder, tokens, movement, health, rolls, scene, combatLog, reminders];
+    }
+
+    /// <summary>Ready-made tabletop RPG templates the user can add one at a time (or all at once). All start as manual updates.</summary>
+    public static IReadOnlyList<TemplateBlueprint> TtrpgLibrary { get; } =
+    [
+        new("Recap: \"Previously on…\"", "A short read-aloud recap to open the next session.", () => new()
+        {
+            Name = "Recap: previously on…",
+            Prompt = "Write a read-aloud recap of this session for the Game Master to open the next session with. Start with \"Previously on…\" and write 1–3 short, vivid paragraphs in second person plural (\"you\"), past tense, covering only what the player characters did and learned, ending on the cliffhanger or the situation where play stopped. Do not reveal GM secrets from the reference files. After the recap add a heading \"Key reminders\" with up to 5 bullets the players will want to remember (names, promises, deadlines)."
+        }),
+        new("Quest log and plot hooks", "Active quests, objectives, rewards, and hooks the party noticed.", () => new()
+        {
+            Name = "Quest log and plot hooks",
+            Prompt = "Maintain the party's quest log. Use the headings Active quests, Completed or failed, and Unfollowed plot hooks. For each quest give: name, who gave it, the goal, current progress and next step, any reward promised, and any deadline. Under Unfollowed plot hooks list rumours, leads and offers the players heard but have not acted on yet. Use the reference files to name quests consistently with the adventure. Keep entries from your previous output, update their status, and add new ones. Do not invent quests that were not mentioned."
+        }),
+        new("Combat tracker", "Round, initiative, damage, conditions and resources in the current fight.", () => new()
+        {
+            Name = "Combat tracker",
+            MaxTranscriptChars = 20000,
+            Prompt = "Track the current (or most recent) combat from the transcript. Show: the round number, the initiative order with whose turn it is, then one line per combatant with damage taken or HP remaining when stated, conditions and their durations (e.g. prone, poisoned until end of next turn), concentration, and notable resources used (spell slots, rage, ki, legendary actions, potions). List defeated or fled combatants separately. Mark anything you are unsure about with \"(?)\". If no combat is happening, reply with a one-line note and the outcome of the last fight. Keep it compact; no narration."
+        }),
+        new("Rules questions and rulings", "Rules questions raised at the table, the call made, and the rule as written.", () => new()
+        {
+            Name = "Rules questions and rulings",
+            Prompt = "Keep a log of rules questions and rulings from this session. For each: the situation in one line, the ruling the GM made at the table, and what the rules say (search the reference files and cite file and page when you find it). Flag rulings that differ from the rules as written with \"Differs from RAW\" so the GM can decide whether to keep them as house rules. Keep previous entries and add new ones. Skip questions that were never resolved unless they are still open; list those under \"Open questions\"."
+        }),
+        new("Lore and canon log", "World facts established in play, so later sessions stay consistent.", () => new()
+        {
+            Name = "Lore and canon log",
+            Prompt = "Maintain a canon log of facts about the world that were established during play, especially details the GM improvised: history, names, gods, customs, prices, distances, relationships, secrets revealed to the players. Group by topic with short bullets and note who said it when relevant. Compare against the reference files and add a \"Possible contradictions\" section when something said at the table conflicts with the adventure or setting material (cite file and page). Keep previous entries; do not invent facts."
+        }),
+        new("Locations and travel", "Places visited or mentioned, routes, and where the party is now.", () => new()
+        {
+            Name = "Locations and travel",
+            Prompt = "Maintain a gazetteer of locations from this session. Start with \"Party is now at:\" and the current location. Then for each place visited or mentioned: name (spelled as in the reference files when found), region, a one-line description, notable features, who or what is there, and whether the party has visited it. End with a \"Routes\" section listing known paths, travel times and hazards between places. Keep previous entries and update them."
+        }),
+        new("In-game calendar and timeline", "Days passed, time of day, rests, deadlines and countdowns.", () => new()
+        {
+            Name = "In-game calendar and timeline",
+            Prompt = "Track in-world time for this campaign. Give: the current in-game date or day number and time of day, then a timeline of events with in-game times (travel, rests, downtime, scenes), and a \"Deadlines and countdowns\" section with anything time-sensitive (rituals, festivals, ultimatums, spell or effect durations, poison or disease progress) and how much time is left. State assumptions when the transcript is vague (e.g. \"assumed one day of travel\"). Keep previous entries and extend the timeline."
+        }),
+        new("Mysteries and clues", "Clues found, what they point to, and leads the players have missed.", () => new()
+        {
+            Name = "Mysteries and clues",
+            Prompt = "Track the mysteries in this campaign. For each open mystery or question: what the players are trying to find out, the clues they have found so far (and where), what those clues actually point to according to the reference files (GM eyes only), and important clues they have not found or not connected yet. Suggest one or two new ways to deliver a missing clue if the players seem stuck. Mark solved mysteries as solved. Keep previous entries and update them."
+        }),
+        new("Spotlight and player engagement", "Who got the spotlight, character moments, and ideas to involve quieter players.", () => new()
+        {
+            Name = "Spotlight and player engagement",
+            Prompt = "For each player character (and the player's name when known), summarise: their key moments this session, personal goals or backstory threads that came up, and roughly how much spotlight they had (high, medium, low). Then suggest 1–2 concrete ways to give the lower-spotlight characters a moment next session, tied to their goals or abilities and to the adventure in the reference files. Be kind and practical; this is for the GM only."
+        }),
+        new("Memorable quotes and moments", "Funny or epic lines with who said them, plus highlight moments.", () => new()
+        {
+            Name = "Memorable quotes and moments",
+            Prompt = "Collect the memorable moments of this session: great or funny quotes (quote them exactly as transcribed, with the speaker), dramatic dice rolls, clever plans, epic fails and emotional beats. Use two headings, Quotes and Highlights, with short bullets in the order they happened. Keep previous entries and add new ones. Do not invent quotes."
+        }),
+        new("In-character journal", "A journal entry written by a party member, in prose.", () => new()
+        {
+            Name = "In-character journal",
+            UseReferences = false,
+            Prompt = "Write this session as an in-character journal entry by a member of the party (the most talkative player character, unless one is named as the chronicler). Write in first person, past tense, in that character's voice, 300–600 words. Include only what the characters experienced and know; no game mechanics, dice or out-of-character table talk. Update and extend your previous entry instead of starting over."
+        }),
+        new("Player handout (spoiler-free)", "A player-facing summary that is safe to share with the group.", () => new()
+        {
+            Name = "Player handout (spoiler-free)",
+            UseReferences = false,
+            Prompt = "Write a player-facing campaign wiki entry for this session that the GM can share with the players. Include: a short summary, NPCs met (one line each, only what the characters know), places visited, loot gained, and open leads. Leave out anything only the GM knows, any out-of-character table talk and anything the characters did not witness. Use Markdown headings and bullets."
+        }),
+        new("Next session prep", "Likely next scenes, NPCs and stat blocks to prepare, and consequences.", () => new()
+        {
+            Name = "Next session prep",
+            Prompt = "Help the GM prepare the next session based on where this one ended. Give: a strong start for next session, the 3–5 scenes most likely to come up next, NPCs and monsters to have ready (with the file and page of their stat blocks or descriptions from the reference files), secrets and clues the players could discover, how the world reacts to what the players did (consequences, factions moving), and loose ends to follow up. Use short headings and bullets."
+        }),
+        new("XP, milestones and rewards", "Encounters overcome, objectives reached, XP and treasure to hand out.", () => new()
+        {
+            Name = "XP, milestones and rewards",
+            Prompt = "Track advancement and rewards for this session: encounters overcome (with the monsters involved), objectives and milestones reached, XP awarded when mentioned (or a suggested amount from the reference files' rules, marked as a suggestion), treasure and how it was split, and other rewards such as favours, titles or boons. End with whether the party looks ready for a level-up under milestone advancement. Keep previous entries and add new ones."
+        }),
+        new("Character changes and conditions", "Level-ups, new abilities, lasting conditions, curses and attunement.", () => new()
+        {
+            Name = "Character changes and conditions",
+            Prompt = "For each player character, track lasting changes from this session: level-ups, new spells, feats or abilities, ability score or HP changes, lasting conditions (exhaustion, curses, diseases, madness, injuries), attuned or equipped magic items, and resources still spent at the end of the session if no rest happened. Look up rules for conditions and effects in the reference files and note how they end. Keep previous entries and update them."
+        }),
+        new("Improv helper: NPCs on the fly", "Ready-to-use NPCs and names that fit the current scene.", () => new()
+        {
+            Name = "Improv helper: NPCs on the fly",
+            IncludePrevious = false, MaxTranscriptChars = 8000,
+            Prompt = "From the most recent part of the transcript, work out the current scene and setting. Give the GM three ready-to-use NPCs who could plausibly appear here, each with: a name that fits the setting, a one-line look, a voice or mannerism, what they want, and one secret or useful piece of information. Then list 8 spare names (mixed people, taverns and shops) that fit the setting. If the reference files describe this location, prefer NPCs from there and cite file and page. Keep it short."
+        })
+    ];
+}
+
+/// <summary>An entry of the TTRPG template library: <see cref="Create"/> builds a fresh template (new ID) each time.</summary>
+public sealed record TemplateBlueprint(string Name, string Description, Func<OutputTemplate> Create)
+{
+    public override string ToString() => Name;
+}
+
+/// <summary>
+/// Versioned copies of a template's output: every changed update is saved as a timestamped file, either next to the
+/// template's output file (in "&lt;name&gt; versions") or in the library's template-versions folder.
+/// </summary>
+public static partial class TemplateVersions
+{
+    private const string Stamp = "yyyy-MM-dd HH-mm-ss";
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^\d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}$")]
+    private static partial System.Text.RegularExpressions.Regex StampName();
+
+    public static string Folder(OutputTemplate template, string libraryRoot)
+    {
+        if (template.WriteToFile && template.OutputPath.Trim().Trim('"') is { Length: > 0 } path)
+        {
+            var full = Path.GetFullPath(path);
+            return Path.Combine(Path.GetDirectoryName(full) ?? libraryRoot, Path.GetFileNameWithoutExtension(full) + " versions");
+        }
+        // The folder ends with the template's short ID, so renaming the template keeps using its existing folder.
+        var root = Path.Combine(libraryRoot, "template-versions");
+        var suffix = $" ({template.Id.ToString("N")[..8]})";
+        if (Directory.Exists(root) && Directory.EnumerateDirectories(root, "*" + suffix).FirstOrDefault() is { } existing) return existing;
+        return Path.Combine(root, SafeName(template.Name) + suffix);
+    }
+
+    private static string Extension(OutputTemplate template) =>
+        template.WriteToFile && Path.GetExtension(template.OutputPath.Trim().Trim('"')) is { Length: > 1 } ext ? ext : ".md";
+
+    private static string SafeName(string name)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var safe = new string(name.Select(c => invalid.Contains(c) ? '_' : c).ToArray()).Trim().TrimEnd('.');
+        if (safe.Length > 60) safe = safe[..60].Trim();
+        return safe.Length == 0 ? "Template" : safe;
+    }
+
+    /// <summary>Versioned copies in <paramref name="folder"/>, oldest first.</summary>
+    public static IReadOnlyList<string> List(string folder, string extension) => !Directory.Exists(folder) ? []
+        : Directory.EnumerateFiles(folder, "*" + extension)
+            .Where(f => Path.GetExtension(f).Equals(extension, StringComparison.OrdinalIgnoreCase) && StampName().IsMatch(Path.GetFileNameWithoutExtension(f)))
+            .Order(StringComparer.Ordinal).ToArray();
+
+    /// <summary>
+    /// Saves <paramref name="output"/> as a new version unless it matches the newest one, then deletes the oldest versions
+    /// beyond <see cref="OutputTemplate.MaxVersions"/>. Returns the new file, or null when nothing changed.
+    /// </summary>
+    public static string? Save(OutputTemplate template, string libraryRoot, string output, DateTime now)
+    {
+        var folder = Folder(template, libraryRoot);
+        var extension = Extension(template);
+        Directory.CreateDirectory(folder);
+        var existing = List(folder, extension);
+        string? written = null;
+        if (existing.Count == 0 || File.ReadAllText(existing[^1]) != output)
+        {
+            if (existing.Count > 0 && DateTime.TryParseExact(Path.GetFileNameWithoutExtension(existing[^1]), Stamp,
+                    System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var newest) && newest >= now)
+                now = newest;
+            string path;
+            while (File.Exists(path = Path.Combine(folder, now.ToString(Stamp, System.Globalization.CultureInfo.InvariantCulture) + extension))) now = now.AddSeconds(1);
+            File.WriteAllText(path, output);
+            written = path;
+            existing = [.. existing, path];
+        }
+        if (template.MaxVersions > 0)
+            foreach (var old in existing.Take(Math.Max(0, existing.Count - template.MaxVersions))) File.Delete(old);
+        return written;
     }
 }
 
