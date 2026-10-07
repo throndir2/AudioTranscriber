@@ -8,6 +8,7 @@
   <Project Path="src\AudioTranscriber.Integrations\AudioTranscriber.Integrations.csproj" />
   <Project Path="src\AudioTranscriber.Application\AudioTranscriber.Application.csproj" />
   <Project Path="src\AudioTranscriber.App\AudioTranscriber.App.csproj" />
+  <Project Path="tools\AudioTranscriber.UiMcp\AudioTranscriber.UiMcp.csproj" />
   <Project Path="tools\AudioTranscriber.Benchmarks\AudioTranscriber.Benchmarks.csproj" />
   <Project Path="tests\AudioTranscriber.Storage.Tests\AudioTranscriber.Storage.Tests.csproj" />
   <Project Path="tests\AudioTranscriber.Application.Tests\AudioTranscriber.Application.Tests.csproj" />

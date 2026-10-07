@@ -1,0 +1,249 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Styles.Resources>
+    <FontFamily x:Key="DisplayFont">Palatino Linotype, Georgia, Times New Roman</FontFamily>
+    <FontFamily x:Key="IconFont">Segoe Fluent Icons, Segoe MDL2 Assets, Arial</FontFamily>
+    <SolidColorBrush x:Key="BgDeep" Color="#0D0A08" />
+    <SolidColorBrush x:Key="Bg" Color="#15110E" />
+    <SolidColorBrush x:Key="Surface" Color="#1C1713" />
+    <SolidColorBrush x:Key="SurfaceAlt" Color="#221C17" />
+    <SolidColorBrush x:Key="InputBg" Color="#100C0A" />
+    <SolidColorBrush x:Key="Line" Color="#382D23" />
+    <SolidColorBrush x:Key="LineStrong" Color="#5A4834" />
+    <SolidColorBrush x:Key="Hover" Color="#2A221B" />
+    <SolidColorBrush x:Key="Selection" Color="#44331A" />
+    <SolidColorBrush x:Key="SelectionInactive" Color="#382B19" />
+    <SolidColorBrush x:Key="Ink" Color="#EADFC8" />
+    <SolidColorBrush x:Key="Muted" Color="#AB9C82" />
+    <SolidColorBrush x:Key="Dim" Color="#8E806A" />
+    <SolidColorBrush x:Key="Gold" Color="#C9A24A" />
+    <SolidColorBrush x:Key="GoldBright" Color="#E8C872" />
+    <SolidColorBrush x:Key="GoldDeep" Color="#7A5E2A" />
+    <SolidColorBrush x:Key="Accent" Color="#D8B460" />
+    <Color x:Key="SystemAccentColor">#C9A24A</Color>
+    <Color x:Key="SystemAccentColorLight1">#D8B460</Color>
+    <Color x:Key="SystemAccentColorLight2">#E8C872</Color>
+    <Color x:Key="SystemAccentColorLight3">#F2DFA0</Color>
+    <Color x:Key="SystemAccentColorDark1">#A9832F</Color>
+    <Color x:Key="SystemAccentColorDark2">#7A5E2A</Color>
+    <Color x:Key="SystemAccentColorDark3">#44331A</Color>
+    <SolidColorBrush x:Key="SystemControlHighlightAccentBrush" Color="{StaticResource SystemAccentColor}" />
+    <SolidColorBrush x:Key="SystemControlHighlightAccentBrush1" Color="{StaticResource SystemAccentColorLight1}" />
+    <SolidColorBrush x:Key="SystemControlHighlightAccentBrush2" Color="{StaticResource SystemAccentColorLight2}" />
+    <SolidColorBrush x:Key="SystemControlHighlightAccentBrush3" Color="{StaticResource SystemAccentColorLight3}" />
+    <SolidColorBrush x:Key="Crimson" Color="#A11F1F" />
+    <SolidColorBrush x:Key="CrimsonBright" Color="#E0463E" />
+    <SolidColorBrush x:Key="ErrorText" Color="#EF8175" />
+    <LinearGradientBrush x:Key="WindowFill" StartPoint="0%,0%" EndPoint="0%,100%">
+      <GradientStop Color="#17120F" Offset="0" />
+      <GradientStop Color="#110D0B" Offset="1" />
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="TitleBarFill" StartPoint="0%,0%" EndPoint="0%,100%">
+      <GradientStop Color="#0B0907" Offset="0" />
+      <GradientStop Color="#15100C" Offset="1" />
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="SidebarFill" StartPoint="0%,0%" EndPoint="100%,0%">
+      <GradientStop Color="#171310" Offset="0" />
+      <GradientStop Color="#1B1612" Offset="1" />
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="CardFill" StartPoint="0%,0%" EndPoint="0%,100%">
+      <GradientStop Color="#211B16" Offset="0" />
+      <GradientStop Color="#1B1612" Offset="1" />
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="WarningCardFill" StartPoint="0%,0%" EndPoint="0%,100%">
+      <GradientStop Color="#2A1614" Offset="0" />
+      <GradientStop Color="#1E1311" Offset="1" />
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="ButtonFill" StartPoint="0%,0%" EndPoint="0%,100%">
+      <GradientStop Color="#2E261F" Offset="0" />
+      <GradientStop Color="#241D18" Offset="1" />
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="GoldFill" StartPoint="0%,0%" EndPoint="0%,100%">
+      <GradientStop Color="#E6C467" Offset="0" />
+      <GradientStop Color="#A9832F" Offset="1" />
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="CrimsonFill" StartPoint="0%,0%" EndPoint="0%,100%">
+      <GradientStop Color="#BA2B24" Offset="0" />
+      <GradientStop Color="#7C1414" Offset="1" />
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="MeterFill" StartPoint="0%,0%" EndPoint="100%,0%">
+      <GradientStop Color="#B08A36" Offset="0" />
+      <GradientStop Color="#E8C872" Offset="0.65" />
+      <GradientStop Color="#E0463E" Offset="1" />
+    </LinearGradientBrush>
+  </Styles.Resources>
+
+  <Style Selector="Window">
+    <Setter Property="FontFamily" Value="Inter" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="Foreground" Value="{StaticResource Ink}" />
+    <Setter Property="Background" Value="{StaticResource WindowFill}" />
+  </Style>
+  <Style Selector="TextBlock">
+    <Setter Property="Foreground" Value="{StaticResource Ink}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="TextBlock.help">
+    <Setter Property="Foreground" Value="{StaticResource Muted}" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="Margin" Value="0,4,0,10" />
+    <Setter Property="LineHeight" Value="20" />
+    <Setter Property="FontSize" Value="13" />
+  </Style>
+  <Style Selector="TextBlock.caption">
+    <Setter Property="Foreground" Value="{StaticResource Dim}" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="FontSize" Value="12" />
+  </Style>
+  <Style Selector="TextBlock.heading">
+    <Setter Property="FontFamily" Value="{StaticResource DisplayFont}" />
+    <Setter Property="FontSize" Value="18" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{StaticResource GoldBright}" />
+    <Setter Property="Margin" Value="0,0,0,8" />
+  </Style>
+  <Style Selector="TextBlock.glyph">
+    <Setter Property="FontFamily" Value="{StaticResource IconFont}" />
+    <Setter Property="FontSize" Value="13" />
+  </Style>
+  <Style Selector="Border.card">
+    <Setter Property="Background" Value="{StaticResource CardFill}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Line}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Padding" Value="16,14" />
+    <Setter Property="Margin" Value="0,0,0,14" />
+  </Style>
+  <Style Selector="Border.hero">
+    <Setter Property="BorderBrush" Value="{StaticResource GoldDeep}" />
+  </Style>
+  <Style Selector="Border.warning">
+    <Setter Property="Background" Value="{StaticResource WarningCardFill}" />
+    <Setter Property="BorderBrush" Value="#5A2A24" />
+  </Style>
+  <Style Selector="Button">
+    <Setter Property="Padding" Value="14,7" />
+    <Setter Property="Margin" Value="0,4,8,4" />
+    <Setter Property="MinHeight" Value="34" />
+    <Setter Property="Background" Value="{StaticResource ButtonFill}" />
+    <Setter Property="Foreground" Value="{StaticResource Ink}" />
+    <Setter Property="BorderBrush" Value="{StaticResource LineStrong}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="5" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button:pointerover">
+    <Setter Property="BorderBrush" Value="{StaticResource Gold}" />
+  </Style>
+  <Style Selector="Button.primary">
+    <Setter Property="Background" Value="{StaticResource GoldFill}" />
+    <Setter Property="Foreground" Value="#1B1309" />
+    <Setter Property="BorderBrush" Value="#EDD08A" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="Button.stop">
+    <Setter Property="Background" Value="{StaticResource CrimsonFill}" />
+    <Setter Property="Foreground" Value="#FFF1E4" />
+    <Setter Property="BorderBrush" Value="#D8473E" />
+    <Setter Property="FontWeight" Value="Bold" />
+  </Style>
+  <Style Selector="Button.ghost">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="Foreground" Value="{StaticResource Muted}" />
+    <Setter Property="Padding" Value="8,3" />
+    <Setter Property="MinHeight" Value="28" />
+    <Setter Property="Margin" Value="0" />
+  </Style>
+  <Style Selector="TextBox, ComboBox">
+    <Setter Property="MinHeight" Value="34" />
+    <Setter Property="Margin" Value="0,3,8,8" />
+    <Setter Property="Background" Value="{StaticResource InputBg}" />
+    <Setter Property="Foreground" Value="{StaticResource Ink}" />
+    <Setter Property="BorderBrush" Value="{StaticResource LineStrong}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="5" />
+  </Style>
+  <Style Selector="TextBox">
+    <Setter Property="Padding" Value="8,6" />
+    <Setter Property="CaretBrush" Value="{StaticResource GoldBright}" />
+    <Setter Property="SelectionBrush" Value="{StaticResource Gold}" />
+  </Style>
+  <Style Selector="ComboBox">
+    <Setter Property="Padding" Value="8,6" />
+  </Style>
+  <Style Selector="CheckBox">
+    <Setter Property="Margin" Value="0,7,0,7" />
+    <Setter Property="Foreground" Value="{StaticResource Ink}" />
+  </Style>
+  <Style Selector="ListBox">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{StaticResource Ink}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Line}" />
+  </Style>
+  <Style Selector="ListBoxItem">
+    <Setter Property="Padding" Value="10,8" />
+    <Setter Property="Margin" Value="0,1" />
+  </Style>
+  <Style Selector="ListBoxItem:selected">
+    <Setter Property="Background" Value="{StaticResource Selection}" />
+  </Style>
+  <Style Selector="TabControl">
+    <Setter Property="Background" Value="{StaticResource Surface}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Line}" />
+  </Style>
+  <Style Selector="TabItem">
+    <Setter Property="Foreground" Value="{StaticResource Muted}" />
+    <Setter Property="Padding" Value="14,8" />
+    <Setter Property="FontSize" Value="15.5" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="TabItem:selected">
+    <Setter Property="Foreground" Value="{StaticResource GoldBright}" />
+  </Style>
+  <Style Selector="DataGrid">
+    <Setter Property="AutoGenerateColumns" Value="False" />
+    <Setter Property="IsReadOnly" Value="True" />
+    <Setter Property="Background" Value="{StaticResource Surface}" />
+    <Setter Property="Foreground" Value="{StaticResource Ink}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Line}" />
+    <Setter Property="GridLinesVisibility" Value="Horizontal" />
+    <Setter Property="RowBackground" Value="#1C1713" />
+    <Setter Property="HeadersVisibility" Value="Column" />
+  </Style>
+  <Style Selector="DataGridColumnHeader">
+    <Setter Property="Background" Value="#120E0B" />
+    <Setter Property="Foreground" Value="{StaticResource Gold}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Padding" Value="10,0" />
+  </Style>
+  <Style Selector="DataGridRow:selected">
+    <Setter Property="Background" Value="{StaticResource Selection}" />
+  </Style>
+  <Style Selector="DataGridCell">
+    <Setter Property="Padding" Value="8,0" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+  <Style Selector="ProgressBar">
+    <Setter Property="Background" Value="{StaticResource InputBg}" />
+    <Setter Property="Foreground" Value="{StaticResource MeterFill}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Line}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="3" />
+  </Style>
+  <Style Selector="ComboBox:disabled">
+    <Setter Property="Opacity" Value="0.55" />
+  </Style>
+  <Style Selector="GridSplitter">
+    <Setter Property="Background" Value="{StaticResource Line}" />
+  </Style>
+  <Style Selector="ContextMenu">
+    <Setter Property="Background" Value="{StaticResource Surface}" />
+    <Setter Property="Foreground" Value="{StaticResource Ink}" />
+    <Setter Property="BorderBrush" Value="{StaticResource GoldDeep}" />
+  </Style>
+  <Style Selector="MenuItem">
+    <Setter Property="Foreground" Value="{StaticResource Ink}" />
+  </Style>
+</Styles>

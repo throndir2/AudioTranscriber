@@ -59,6 +59,7 @@ public static class GpuProbe
 
     private static string? FindNvidiaSmi()
     {
+        if (!OperatingSystem.IsWindows()) return ToolProcess.FindOnPath("nvidia-smi");
         var candidates = new[]
         {
             Path.Combine(Environment.SystemDirectory, "nvidia-smi.exe"),

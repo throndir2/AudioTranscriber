@@ -4,7 +4,7 @@ using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Windows.Input;
-using System.Windows.Threading;
+using Avalonia.Threading;
 using AudioTranscriber.App.Templates;
 using AudioTranscriber.Application;
 using AudioTranscriber.Storage;
@@ -42,27 +42,33 @@ public sealed class TemplatesViewModel : ObservableObject
         this.log = log;
         Load();
         AddConnectionCommand = new RelayCommand(AddConnection);
-        RemoveConnectionCommand = new RelayCommand(RemoveConnection, () => SelectedConnection is not null);
+        RemoveConnectionCommand = new AsyncCommand(RemoveConnectionAsync, () => SelectedConnection is not null);
         LoadModelsCommand = new AsyncCommand(LoadModelsAsync, () => SelectedConnection is not null && !loadingModels);
         TestConnectionCommand = new AsyncCommand(TestConnectionAsync, () => SelectedConnection is not null && !loadingModels);
         AddTemplateCommand = new RelayCommand(() => AddTemplate(new OutputTemplate { Name = "New template", Prompt = "Describe what to produce from the transcript…" }));
         DuplicateTemplateCommand = new RelayCommand(DuplicateTemplate, () => SelectedTemplate is not null);
-        DeleteTemplateCommand = new RelayCommand(DeleteTemplate, () => SelectedTemplate is not null);
+        DeleteTemplateCommand = new AsyncCommand(DeleteTemplateAsync, () => SelectedTemplate is not null);
         AddStartersCommand = new RelayCommand(() => { foreach (var t in OutputTemplate.Starters()) AddTemplate(t); });
         RunTemplateCommand = new RelayCommand(() => { if (SelectedTemplate is { } t) _ = RunAsync(t, manual: true); },
             () => SelectedTemplate is { IsRunning: false });
         StopTemplateCommand = new RelayCommand(() => { if (SelectedTemplate is { } t && running.TryGetValue(t.Id, out var c)) c.Cancel(); },
             () => SelectedTemplate is { IsRunning: true });
-        BrowseOutputCommand = new RelayCommand(BrowseOutput, () => SelectedTemplate is not null);
-        BrowseFolderCommand = new RelayCommand(() => { if (dialogs.ChooseFolder(ContextFolder) is { } folder) ContextFolder = folder; });
-        AddPinnedFilesCommand = new RelayCommand(AddPinnedFiles);
-        CopyOutputCommand = new RelayCommand(() =>
+        BrowseOutputCommand = new AsyncCommand(BrowseOutputAsync, () => SelectedTemplate is not null);
+        BrowseFolderCommand = new AsyncCommand(async () => { if (await dialogs.ChooseFolderAsync(ContextFolder) is { } folder) ContextFolder = folder; });
+        AddPinnedFilesCommand = new AsyncCommand(AddPinnedFilesAsync);
+        CopyOutputCommand = new AsyncCommand(async () =>
         {
-            try { System.Windows.Clipboard.SetText(SelectedTemplate?.Output ?? ""); }
-            catch (System.Runtime.InteropServices.ExternalException) { }
+            await DesktopDialogs.SetClipboardTextAsync(SelectedTemplate?.Output ?? "");
         }, () => !string.IsNullOrEmpty(SelectedTemplate?.Output));
-        timer = new DispatcherTimer(TimeSpan.FromSeconds(4), DispatcherPriority.Background, (_, _) => _ = TickAsync(), dispatcher);
+        timer = NewTimer(TimeSpan.FromSeconds(4), (_, _) => _ = TickAsync());
         timer.Stop();
+    }
+
+    private static DispatcherTimer NewTimer(TimeSpan interval, EventHandler tick)
+    {
+        var timer = new DispatcherTimer { Interval = interval };
+        timer.Tick += tick;
+        return timer;
     }
 
     public ObservableCollection<LlmConnection> Connections { get; } = [];
@@ -134,7 +140,7 @@ public sealed class TemplatesViewModel : ObservableObject
         if (SelectedConnection is not { } connection) return;
         connection.SetKey(key);
         Save();
-        ConnectionStatus = string.IsNullOrWhiteSpace(key) ? "API key removed." : "API key saved, encrypted for your Windows account.";
+        ConnectionStatus = string.IsNullOrWhiteSpace(key) ? "API key removed." : $"API key saved, {AudioTranscriber.Providers.UserSecretProtection.Description}.";
     }
 
     // ---------- persistence ----------
@@ -215,10 +221,10 @@ public sealed class TemplatesViewModel : ObservableObject
         return candidate;
     }
 
-    private void RemoveConnection()
+    private async Task RemoveConnectionAsync()
     {
         if (SelectedConnection is not { } connection) return;
-        if (!dialogs.Confirm("Remove connection", $"Remove the LLM connection \"{connection.Name}\" and its saved API key?")) return;
+        if (!await dialogs.ConfirmAsync("Remove connection", $"Remove the LLM connection \"{connection.Name}\" and its saved API key?")) return;
         Connections.Remove(connection);
         AssignDefaultConnection();
         SelectedConnection = Connections.FirstOrDefault();
@@ -296,25 +302,25 @@ public sealed class TemplatesViewModel : ObservableObject
         });
     }
 
-    private void DeleteTemplate()
+    private async Task DeleteTemplateAsync()
     {
         if (SelectedTemplate is not { } template) return;
-        if (!dialogs.Confirm("Delete template", $"Delete the template \"{template.Name}\"? Its output file, if any, is left in place.")) return;
+        if (!await dialogs.ConfirmAsync("Delete template", $"Delete the template \"{template.Name}\"? Its output file, if any, is left in place.")) return;
         if (running.TryGetValue(template.Id, out var cancellation)) cancellation.Cancel();
         Templates.Remove(template);
         SelectedTemplate = Templates.FirstOrDefault();
         Save();
     }
 
-    private void BrowseOutput()
+    private async Task BrowseOutputAsync()
     {
         if (SelectedTemplate is not { } template) return;
-        if (dialogs.SaveTemplateOutput(template.OutputPath, template.Name) is { } path) { template.OutputPath = path; template.WriteToFile = true; }
+        if (await dialogs.SaveTemplateOutputAsync(template.OutputPath, template.Name) is { } path) { template.OutputPath = path; template.WriteToFile = true; }
     }
 
-    private void AddPinnedFiles()
+    private async Task AddPinnedFilesAsync()
     {
-        var files = dialogs.ChooseReferenceFiles(ContextFolder);
+        var files = await dialogs.ChooseReferenceFilesAsync(ContextFolder);
         if (files.Count == 0) return;
         var existing = PinnedList();
         var added = files.Where(f => !existing.Contains(f, StringComparer.OrdinalIgnoreCase)).ToArray();

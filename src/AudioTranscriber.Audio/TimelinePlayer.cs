@@ -2,7 +2,6 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Globalization;
 using System.Threading.Channels;
-using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 
@@ -21,9 +20,7 @@ public sealed class TimelinePlayer(MediaTools? tools = null) : IAsyncDisposable
     private readonly SemaphoreSlim gate = new(1, 1);
     private readonly List<TrackProvider> tracks = [];
     private CancellationTokenSource? lifetime;
-    private WasapiOut? output;
-    private MMDevice? device;
-    private MMDeviceEnumerator? enumerator;
+    private AudioOutput? output;
     public event Action<Exception>? PlaybackFailed;
 
     public async Task PlayAsync(PlaybackRequest request, CancellationToken cancellationToken = default)
@@ -46,12 +43,7 @@ public sealed class TimelinePlayer(MediaTools? tools = null) : IAsyncDisposable
             }
             await Task.WhenAll(tracks.Select(t => t.Ready)).WaitAsync(cancellationToken);
             var mixer = new MixingSampleProvider(tracks) { ReadFully = false };
-            enumerator = new MMDeviceEnumerator();
-            device = request.OutputDeviceId is null
-                ? enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia)
-                : enumerator.GetDevice(request.OutputDeviceId);
-            output = new WasapiOut(device, AudioClientShareMode.Shared, useEventSync: true, latency: 100);
-            output.Init(mixer);
+            output = new AudioOutput(request.OutputDeviceId, mixer);
             output.Play();
         }
         catch { await StopCoreAsync(); throw; }
@@ -79,8 +71,6 @@ public sealed class TimelinePlayer(MediaTools? tools = null) : IAsyncDisposable
         lifetime?.Cancel();
         foreach (var track in tracks) await track.DisposeAsync();
         tracks.Clear();
-        device?.Dispose(); device = null;
-        enumerator?.Dispose(); enumerator = null;
         lifetime?.Dispose(); lifetime = null;
     }
 

@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using AudioTranscriber.Audio;
 
 namespace AudioTranscriber.App;
@@ -26,7 +27,9 @@ public static class Prerequisites
                 {
                     MediaToolsReady ? $"FFmpeg: ready ({FFmpeg})"
                         : "FFmpeg: MISSING. Recording normalization and imports will pause. " + MediaToolLocator.MissingMessage(FFmpeg is null ? "ffmpeg" : "ffprobe"),
-                    VcRuntimeReady ? "Microsoft Visual C++ runtime (x64): ready"
+                    !OperatingSystem.IsWindows()
+                        ? (LinuxAudioReady ? "PulseAudio/PipeWire client (libpulse, pactl): ready" : "PulseAudio/PipeWire client: MISSING. " + PulseAudio.MissingMessage)
+                    : VcRuntimeReady ? "Microsoft Visual C++ runtime (x64): ready"
                         : $"Microsoft Visual C++ runtime (x64): missing or older than {MinimumVcRuntime}. Local Whisper cannot run until it is installed."
                 };
                 return string.Join(Environment.NewLine, lines);
@@ -36,8 +39,14 @@ public static class Prerequisites
 
     public static Report Check() => new(MediaToolLocator.TryFind("ffmpeg"), MediaToolLocator.TryFind("ffprobe"), IsVcRuntimeReady());
 
+    /// <summary>Linux recording needs the PulseAudio client library (served by PipeWire too) and pactl for device lists.</summary>
+    public static bool LinuxAudioReady => OperatingSystem.IsWindows() ||
+        NativeLibrary.TryLoad("libpulse-simple.so.0", out _) && MediaToolLocator.TryFind("pactl") is not null;
+
+    /// <summary>The Visual C++ runtime is a Windows-only requirement; Linux builds link the system C++ runtime.</summary>
     public static bool IsVcRuntimeReady()
     {
+        if (!OperatingSystem.IsWindows()) return true;
         foreach (var file in VcRuntimeFiles)
         {
             var path = Path.Combine(Environment.SystemDirectory, file);

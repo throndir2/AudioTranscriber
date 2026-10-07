@@ -10,7 +10,8 @@ public sealed class NativeSqliteTests
     {
         using var connection = new SqliteConnection("Data Source=:memory:");
         connection.Open();
-        Assert.True(Version.Parse(connection.ServerVersion) >= new Version(3, 53, 4));
+        // Windows ships 3.53.4 (official DLL); Linux ships SQLitePCLRaw's 3.53.3 build.
+        Assert.True(Version.Parse(connection.ServerVersion) >= (OperatingSystem.IsWindows() ? new Version(3, 53, 4) : new Version(3, 53, 3)));
 
         using var command = connection.CreateCommand();
         command.CommandText = "CREATE TABLE jobs(state TEXT, session_id TEXT)";

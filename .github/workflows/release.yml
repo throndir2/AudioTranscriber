@@ -21,7 +21,7 @@ jobs:
   release:
     if: github.event_name == 'workflow_dispatch' || (github.ref_type == 'tag' && !github.event.deleted)
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     permissions:
       contents: write
     defaults:
@@ -77,6 +77,12 @@ jobs:
         run: |
           .\scripts\Release.ps1 -Phase Prepare -Tag $env:RELEASE_TAG
 
+      - name: Install release packagers
+        if: steps.prepare.outputs.needs-build == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends nsis rpm
+
       - name: Set up the pinned SDK and cached packages
         if: steps.prepare.outputs.needs-build == 'true'
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -87,17 +93,20 @@ jobs:
             global.json
             src/**/packages*.lock.json
 
-      - name: Cross-publish and package Windows x64
+      - name: Cross-publish and package Windows and Linux x64
         if: steps.prepare.outputs.needs-build == 'true'
         id: package
         env:
           RELEASE_TAG: ${{ steps.tag.outputs.tag || github.ref_name }}
           RELEASE_COMMIT: ${{ steps.prepare.outputs.commit }}
         run: |
-          $publish = Join-Path $env:RUNNER_TEMP 'publish'
-          .\scripts\Publish.ps1 -DotnetPath (Get-Command dotnet).Source -OutputDirectory $publish -RequireEmptyOutput
+          $publishWin = Join-Path $env:RUNNER_TEMP 'publish-win-x64'
+          $publishLinux = Join-Path $env:RUNNER_TEMP 'publish-linux-x64'
+          $assets = Join-Path $env:RUNNER_TEMP 'release-assets'
+          .\scripts\Publish.ps1 -DotnetPath (Get-Command dotnet).Source -Runtime win-x64 -OutputDirectory $publishWin -RequireEmptyOutput
+          .\scripts\Publish.ps1 -DotnetPath (Get-Command dotnet).Source -Runtime linux-x64 -OutputDirectory $publishLinux -RequireEmptyOutput
           .\scripts\Release.ps1 -Phase Package -Tag $env:RELEASE_TAG -Commit $env:RELEASE_COMMIT `
-            -PublishDirectory $publish -AssetDirectory (Join-Path $env:RUNNER_TEMP 'release-assets')
+            -PublishDirectory $publishWin -LinuxPublishDirectory $publishLinux -AssetDirectory $assets
 
       - name: Publish the verified assets to GitHub Release
         if: steps.prepare.outputs.needs-publish == 'true'
@@ -105,8 +114,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.tag.outputs.tag || github.ref_name }}
           RELEASE_COMMIT: ${{ steps.prepare.outputs.commit }}
-          RELEASE_ZIP: ${{ steps.package.outputs.zip }}
-          RELEASE_CHECKSUM: ${{ steps.package.outputs.checksum }}
+          RELEASE_ASSET_DIRECTORY: ${{ steps.package.outputs.asset_directory }}
         run: |
           .\scripts\Release.ps1 -Phase Publish -Tag $env:RELEASE_TAG -Commit $env:RELEASE_COMMIT `
-            -ZipPath $env:RELEASE_ZIP -ChecksumPath $env:RELEASE_CHECKSUM
+            -AssetDirectory $env:RELEASE_ASSET_DIRECTORY
+

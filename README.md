@@ -1,7 +1,6 @@
 # <img src="src/AudioTranscriber.App/Assets/AppIcon.png" alt="" width="40" align="top"> AudioTranscriber
 
-Native Windows x64 recording and transcription with a .NET 10 WPF desktop
-interface, durable local audio, searchable transcripts, and optional NVIDIA ASR.
+Native Windows and Linux x64 recording and transcription with a .NET 10 desktop interface, durable local audio, searchable transcripts, and optional NVIDIA ASR.
 
 Record the **selected Windows output endpoint**, optionally with a separately
 timestamped microphone, or import a long audio/video recording. Transcription
@@ -64,8 +63,7 @@ Targeted validation and direct local SDK invocation:
 .\.tools\dotnet\dotnet.exe build .\src\AudioTranscriber.Core\AudioTranscriber.Core.csproj -c Release
 ```
 
-Publish output is `artifacts\publish\win-x64`; launch `AudioTranscriber.App.exe`
-there. Keep the complete output directory together, including the worker and
+Publish output is `artifacts\publish\win-x64` by default; use `.\scripts\Publish.ps1 -Runtime linux-x64` for Linux output in `artifacts\publish\linux-x64`. Launch `AudioTranscriber.App.exe` on Windows or `AudioTranscriber.App` on Linux. Keep the complete output directory together, including the worker and
 native runtime libraries. FFmpeg/FFprobe are bundled in the `ffmpeg` folder
 (LGPL build; license and provenance under `licenses`).
 The package includes documentation, model notices, dependency license files,
@@ -78,28 +76,19 @@ smoke mode rejects nonempty roots rather than running previously queued work.
 ## MCP hooks for agents
 
 The app exposes two stdio MCP servers for driving and testing it: `--mcp` (headless engine: record,
-import, transcribe, diarize, read transcripts) and `--mcp-ui` (launches the real window and clicks
-through it via UI Automation, with snapshots and screenshots). `.mcp.json` registers both through
+import, transcribe, diarize, read transcripts) and `audiotranscriber-ui` (separate Windows-only UI MCP tool that launches the real Avalonia window and clicks through it via UI Automation, with snapshots and screenshots). `.mcp.json` registers both through
 `scripts\Start-Mcp.ps1`; `scripts\New-SpeechFixture.ps1` generates two-speaker test audio. See
 `docs\mcp.md`.
 
 ## GitHub releases
 
-The release-only workflow builds one self-contained Windows x64 ZIP on Ubuntu
-when a valid `vMAJOR.MINOR.PATCH` tag (optionally a prerelease) is pushed. It uses
-the pinned SDK, cached locked packages, and a single app/worker build graph; it
-does not run tests, benchmarks, or ordinary branch/PR CI. The ZIP and SHA256 file
-are published directly to the matching GitHub Release. See `docs\releases.md`
-for tag/rerun instructions, safeguards, and the locally verified Linux build.
+The release-only workflow builds Windows and Linux x64 release assets on Ubuntu when a valid `vMAJOR.MINOR.PATCH` tag (optionally a prerelease) is pushed: the legacy Windows ZIP, a per-user Windows setup `.exe`, a Linux tarball, `.deb`, `.rpm`, and SHA256 files. It does not run tests, benchmarks, or ordinary branch/PR CI. See `docs\releases.md` for tag/rerun instructions, safeguards, and local package fallback.
 
-Installed release builds update themselves from the latest GitHub release: they
-download and SHA-256-verify the new ZIP in the background and install it when the
-app closes (or on **Restart to update**). See `docs\usage.md` → Updates.
+Installed release builds update themselves from the latest GitHub release: Windows downloads and SHA-256-verifies the legacy ZIP; writable Linux installs use the Linux tarball; `/opt` Linux package installs stage the `.deb` or `.rpm` and prompt for a privileged package install on exit. See `docs\usage.md` → Updates.
 
 ## First session
 
-Download the release ZIP, extract it, run `AudioTranscriber.App.exe`, and click
-**Start recording**. Everything has a working default:
+Windows: download and run `AudioTranscriber-vX.Y.Z-win-x64-setup.exe` (unsigned, per-user), or extract the ZIP and run `AudioTranscriber.App.exe`. Linux: install `sudo apt install ./audiotranscriber_X.Y.Z_amd64.deb`, `sudo dnf install ./audiotranscriber-X.Y.Z-1.x86_64.rpm`, or extract `AudioTranscriber-vX.Y.Z-linux-x64.tar.gz` and run `./install.sh` (use `--yes` for non-interactive prerequisite install offers). Then start AudioTranscriber and click **Start recording**. Everything has a working default:
 
 - Output: the default Windows output device. Microphone: your default microphone
   as a separate track when one exists. Echo reduction is on, so no headset is needed:
@@ -209,3 +198,7 @@ No hardware capture test is started automatically. Tests use controlled
 synthetic/public data; a physical WASAPI capture check requires separate explicit
 consent to a controlled sound source. Tenant-dependent Graph access also requires
 real tenant setup.
+
+
+
+

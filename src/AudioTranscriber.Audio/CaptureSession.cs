@@ -41,6 +41,8 @@ public sealed class CaptureSession : IAsyncDisposable
 
     public static IReadOnlyList<AudioDevice> EnumerateDevices(bool loopback)
     {
+        if (!OperatingSystem.IsWindows())
+            return PulseAudio.Enumerate(loopback).Select(d => new AudioDevice(d.Id, d.Name, loopback)).ToArray();
         using var enumerator = new MMDeviceEnumerator();
         var collection = enumerator.EnumerateAudioEndPoints(loopback ? DataFlow.Render : DataFlow.Capture, DeviceState.Active);
         var result = new List<AudioDevice>();
@@ -153,6 +155,11 @@ public sealed class CaptureSession : IAsyncDisposable
         }
         public void Start()
         {
+            if (!OperatingSystem.IsWindows())
+            {
+                new Thread(RunPulse) { IsBackground = true, Name = $"PulseAudio {choice.TrackId:N}" }.Start();
+                return;
+            }
             var thread = new Thread(Run) { IsBackground = true, Name = $"WASAPI {choice.TrackId:N}" };
             thread.SetApartmentState(ApartmentState.MTA);
             thread.Start();
@@ -240,6 +247,103 @@ public sealed class CaptureSession : IAsyncDisposable
                 queue.Dispose();
                 complete.TrySetResult();
             }
+        }
+
+        private void RunPulse()
+        {
+            Task? writer = null;
+            PulseAudio.Recorder? recorder = null;
+            try
+            {
+                var source = PulseAudio.CaptureSource(choice.DeviceId, choice.Loopback);
+                recorder = new PulseAudio.Recorder(source, 48000, choice.Loopback ? 2 : 1,
+                    choice.Loopback ? "Output loopback" : "Microphone");
+                var format = recorder.Format;
+                Info = new(choice.TrackId, PulseAudio.DeviceName(choice.DeviceId, choice.Loopback) ?? choice.DeviceId,
+                    choice.DeviceId, choice.Loopback, format);
+                archive = new(new(options.RootDirectory, options.SessionId, choice.TrackId, format, origin,
+                    choice.DeviceId, choice.Loopback, options.QueueByteLimit, options.MaxChunkBytes,
+                    options.MaxChunkSeconds, MinimumFreeBytes: options.MinimumFreeBytes,
+                    PauseSplitAfterMilliseconds: options.PauseSplitAfterMilliseconds, PauseMilliseconds: options.PauseMilliseconds));
+                archive.ChunkSealed += sealedChunk;
+                archive.Gap += gap;
+                writer = Task.Run(WritePacketsAsync);
+                var frames = format.SampleRate / 100;
+                var buffer = new byte[frames * format.BlockAlign];
+                long anchor = 0, anchorFrame = 0;
+                var anchored = false;
+                started.TrySetResult();
+                while (!stop.IsSet)
+                {
+                    var latency = recorder.Read(buffer);
+                    if (writerFailed) throw new IOException("Archive writer failed; captured audio was not archived.");
+                    // PulseAudio has no per-packet device clock: timestamps follow the sample count from an anchor, and
+                    // the stream is re-anchored (flagged as a discontinuity) if it drifts from the system clock (overruns).
+                    // Reported latency is capped: some sources (e.g. idle or virtual ones) report seconds of bogus delay.
+                    var measured = Qpc100ns() - (long)Math.Min(latency, 200_000UL) * 10 - AudioTime.FramesToTicks(frames, format.SampleRate);
+                    var flags = PacketFlags.None;
+                    if (!anchored) { anchor = Math.Max(measured, origin); anchorFrame = sourceFrame; anchored = true; }
+                    var qpc = anchor + AudioTime.FramesToTicks(sourceFrame - anchorFrame, format.SampleRate);
+                    if (Math.Abs(measured - qpc) > 250 * TimeSpan.TicksPerMillisecond)
+                    {
+                        anchor = qpc = measured;
+                        anchorFrame = sourceFrame;
+                        flags |= PacketFlags.Discontinuity;
+                    }
+                    Enqueue(buffer, frames, qpc, flags, format);
+                }
+            }
+            catch (Exception exception)
+            {
+                captureFailed = true;
+                started.TrySetException(exception);
+                ReportFault(exception is OverflowException ? "QueueOverflow" : "CaptureDeviceFailure", exception.Message);
+            }
+            finally
+            {
+                recorder?.Dispose();
+                queue.Complete();
+                try { writer?.GetAwaiter().GetResult(); }
+                catch (Exception exception) { writerFailed = true; ReportFault("ArchiveFailure", exception.Message); }
+                try
+                {
+                    if (!writerFailed) archive?.Finish(Qpc100ns() - origin, !captureFailed);
+                }
+                catch (Exception exception) { ReportFault("ArchiveSealFailure", exception.Message); }
+                archive?.Dispose();
+                queue.Dispose();
+                complete.TrySetResult();
+            }
+        }
+
+        private void Enqueue(byte[] data, int frames, long qpc, PacketFlags flags, NativeWaveFormat format)
+        {
+            var count = frames * format.BlockAlign;
+            var startWait = Environment.TickCount64;
+            while (!queue.TryWrite(count, sourceFrame, frames, sourceFrame, qpc, flags, memory =>
+            {
+                data.AsSpan(0, count).CopyTo(memory.Span);
+                var level = SampleMeter.Measure(memory.Span, format);
+                Interlocked.Exchange(ref peak, Math.Max(peak, level.Peak));
+                Interlocked.Exchange(ref rms, Math.Max(rms, level.Rms));
+            }))
+            {
+                if (writerFailed || Environment.TickCount64 - startWait > 100)
+                {
+                    var start = qpc - origin;
+                    sourceFrame = checked(sourceFrame + frames);
+                    var diagnostic = new AudioGap(options.SessionId, choice.TrackId, start,
+                        checked(start + AudioTime.FramesToTicks(frames, format.SampleRate)),
+                        AudioGapKind.QueueOverflow, "Byte-bounded capture queue exhausted; this packet was not archived.");
+                    var directory = Path.Combine(Path.GetFullPath(options.RootDirectory), options.SessionId.ToString("N"), choice.TrackId.ToString("N"));
+                    LocalMedia.AtomicJson(Path.Combine(directory, $"gap-{Guid.NewGuid():N}.json"), diagnostic);
+                    gap(diagnostic);
+                    throw new OverflowException(diagnostic.Detail);
+                }
+                Thread.Sleep(2);
+            }
+            sourceFrame = checked(sourceFrame + frames);
+            Interlocked.Exchange(ref acceptedThrough, sourceFrame);
         }
 
         private async Task WritePacketsAsync()

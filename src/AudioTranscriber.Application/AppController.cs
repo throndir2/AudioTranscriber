@@ -95,7 +95,9 @@ public sealed class AppController : IAppController
     public IReadOnlyList<ProviderOption> Providers { get; } = new ProviderOption[]
         {
             new(SherpaParakeetProvider.ProviderId,
-                "Local · CPU (NVIDIA GPU if enabled) — Parakeet TDT v3 · recommended, 25 European languages", false, "Word timestamps"),
+                OperatingSystem.IsWindows()
+                    ? "Local · CPU (NVIDIA GPU if enabled) — Parakeet TDT v3 · recommended, 25 European languages"
+                    : "Local · CPU — Parakeet TDT v3 · recommended, 25 European languages", false, "Word timestamps"),
             new("local-whisper",
                 "Local · GPU via Vulkan (CPU if no GPU) — Whisper large-v3-turbo · any language", false, "Segment timestamps")
         }
@@ -340,6 +342,11 @@ public sealed class AppController : IAppController
     private async Task StartLocalGpuAsync(CancellationToken token)
     {
         if (providerOverride is not null) return;
+        if (!OperatingSystem.IsWindows())
+        {
+            localGpuStatus = "GPU Parakeet is available on Windows only for now; Parakeet runs on the CPU.";
+            return;
+        }
         try
         {
             var gpus = await GpuProbe.QueryNvidiaGpusAsync(token);
@@ -2670,9 +2677,10 @@ public sealed class AppController : IAppController
 
     private static (string Worker, string? Host) FindWorker()
     {
-        var local = Path.Combine(AppContext.BaseDirectory, "AudioTranscriber.Worker.exe");
+        var exe = OperatingSystem.IsWindows() ? ".exe" : "";
+        var local = Path.Combine(AppContext.BaseDirectory, "AudioTranscriber.Worker" + exe);
         // Development builds copy the referenced worker's apphost without its assembly; only a complete worker is usable.
-        if (File.Exists(local) && File.Exists(Path.ChangeExtension(local, ".dll"))) return (local, null);
+        if (File.Exists(local) && File.Exists(Path.Combine(AppContext.BaseDirectory, "AudioTranscriber.Worker.dll"))) return (local, null);
         var root = FindCheckout();
         if (root is not null)
         {
@@ -2681,8 +2689,8 @@ public sealed class AppController : IAppController
             foreach (var configuration in new[] { preferred, preferred == "Release" ? "Debug" : "Release" })
             {
                 var candidate = Path.Combine(root, "src", "AudioTranscriber.Worker", "bin", configuration,
-                    "net10.0-windows", "win-x64", "AudioTranscriber.Worker.dll");
-                var host = Path.Combine(root, ".tools", "dotnet", "dotnet.exe");
+                    "net10.0", OperatingSystem.IsWindows() ? "win-x64" : "linux-x64", "AudioTranscriber.Worker.dll");
+                var host = Path.Combine(root, ".tools", "dotnet", "dotnet" + exe);
                 if (File.Exists(candidate) && File.Exists(host)) return (candidate, host);
             }
         }

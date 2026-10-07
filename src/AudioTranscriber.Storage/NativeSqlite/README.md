@@ -1,4 +1,4 @@
-# SQLite native runtime (Windows x64)
+# SQLite native runtimes (Windows x64, Linux x64)
 
 `e_sqlite3.dll` is the **unmodified official SQLite 3.53.4 Windows x64 DLL**,
 renamed from `sqlite3.dll` to the name expected by SQLitePCLRaw. SQLite is
@@ -20,6 +20,18 @@ initialization override is needed at runtime.
   `ab57d0437795ecc757cb693f32ea224173fa9856594d95cfa6b5033e645cd1ec`
 - DLL SHA3-256:
   `844d00bdf5ba9a52d61cd3fd244a7efffdb89d7da119701fb47c172043c5c1d3`
+
+## Linux x64
+
+`libe_sqlite3.so` is the **unmodified** `runtimes/linux-x64/native/libe_sqlite3.so`
+(SQLite 3.53.3, built with FTS5) from the NuGet package
+[SQLitePCLRaw.lib.e_sqlite3 3.53.3](https://www.nuget.org/packages/SQLitePCLRaw.lib.e_sqlite3/3.53.3)
+(Apache-2.0 packaging of public-domain SQLite). It is vendored next to the Windows DLL so
+both platforms use the same explicit-native approach; a `linux-x64` publish ships only the
+`.so` and a `win-x64` publish only the DLL.
+
+- Package SHA-256: `72cb724779218e024833a21e2903c795a9e90c0bfa01520f27990c36413f32d4`
+- `libe_sqlite3.so` SHA-256: `b0f5c48026fedcf9f05cf31c6fadf9e1e001ca59cd85aa68b8b6814e52c18a07`
 
 ## Why this DLL is explicit
 

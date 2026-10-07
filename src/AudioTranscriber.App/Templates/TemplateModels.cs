@@ -33,7 +33,7 @@ public sealed class LlmConnection : ObservableObject
     public string BaseUrl { get => baseUrl; set => Set(ref baseUrl, value ?? ""); }
     public string Model { get => model; set => Set(ref model, value ?? ""); }
 
-    /// <summary>API key encrypted with Windows DPAPI for the current user; never stored in plain text.</summary>
+    /// <summary>API key encrypted for the current OS user (DPAPI on Windows); never stored in plain text.</summary>
     public string? ProtectedKey
     {
         get => protectedKey;
@@ -41,18 +41,18 @@ public sealed class LlmConnection : ObservableObject
     }
 
     [JsonIgnore] public bool HasKey => !string.IsNullOrEmpty(ProtectedKey);
-    [JsonIgnore] public string KeyStatus => HasKey ? "An API key is saved for this connection (encrypted for your Windows account)." : "No API key saved (not needed for Ollama / LM Studio).";
+    [JsonIgnore] public string KeyStatus => HasKey ? $"An API key is saved for this connection ({AudioTranscriber.Providers.UserSecretProtection.Description})." : "No API key saved (not needed for Ollama / LM Studio).";
 
     public string? GetKey()
     {
         if (!HasKey) return null;
-        try { return Encoding.UTF8.GetString(ProtectedData.Unprotect(Convert.FromBase64String(ProtectedKey!), null, DataProtectionScope.CurrentUser)); }
+        try { return Encoding.UTF8.GetString(AudioTranscriber.Providers.UserSecretProtection.Unprotect(Convert.FromBase64String(ProtectedKey!))); }
         catch (Exception ex) when (ex is CryptographicException or FormatException) { return null; }
     }
 
     public void SetKey(string? key) => ProtectedKey = string.IsNullOrWhiteSpace(key)
         ? null
-        : Convert.ToBase64String(ProtectedData.Protect(Encoding.UTF8.GetBytes(key.Trim()), null, DataProtectionScope.CurrentUser));
+        : Convert.ToBase64String(AudioTranscriber.Providers.UserSecretProtection.Protect(Encoding.UTF8.GetBytes(key.Trim())));
 
     public override string ToString() => Name;
 }

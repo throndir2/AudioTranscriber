@@ -8,7 +8,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-$dotnet = Join-Path $root '.tools\dotnet\dotnet.exe'
+$dotnetName = if ($IsLinux -or $IsMacOS) { 'dotnet' } else { 'dotnet.exe' }
+$dotnet = Join-Path $root ".tools\dotnet\$dotnetName"
 $project = Join-Path $root 'src\AudioTranscriber.App\AudioTranscriber.App.csproj'
 if (-not (Test-Path $dotnet)) { throw 'Run .\scripts\Setup.ps1 first to install the pinned local SDK.' }
 if (-not (Test-Path $project)) { throw 'The desktop application project is not present in this checkout yet.' }
@@ -38,7 +39,7 @@ try {
         & $dotnet build $project --configuration $Configuration --nologo -p:RestoreLockedMode=true
         if ($LASTEXITCODE -ne 0) { throw 'Desktop build failed. Run Setup.ps1 after intentional dependency changes.' }
     }
-    $assembly = Join-Path $root "src\AudioTranscriber.App\bin\$Configuration\net10.0-windows\AudioTranscriber.App.dll"
+    $assembly = Join-Path $root "src\AudioTranscriber.App\bin\$Configuration\net10.0\AudioTranscriber.App.dll"
     if (-not (Test-Path -LiteralPath $assembly)) { throw 'The desktop assembly is missing. Build the application first.' }
     $arguments = @($assembly)
     if ($DataRoot) { $arguments += @('--data-root', $DataRoot) }

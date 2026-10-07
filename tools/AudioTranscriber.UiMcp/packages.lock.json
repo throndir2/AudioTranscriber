@@ -2,18 +2,6 @@
   "version": 1,
   "dependencies": {
     "net10.0-windows7.0": {
-      "PdfPig": {
-        "type": "Direct",
-        "requested": "[0.1.16, )",
-        "resolved": "0.1.16",
-        "contentHash": "qQcbsNMYVY+K5ELptax2S8thNMk0+rSQq3H/KdYj3LLcko8yTCz8y5KIvsKxIyAuTN0ZYNnfsZkM+0EvxTwHVA=="
-      },
-      "Whisper.net.Runtime.Vulkan": {
-        "type": "Direct",
-        "requested": "[1.9.1, )",
-        "resolved": "1.9.1",
-        "contentHash": "2kynHvbAczuEYHKRIR9NYg8xiXaGZHW3hb1Ts+N2dNcmVpA87xJWxA07yDiFnf5+vXz428wK57YWNvxqTJdkKw=="
-      },
       "Google.Protobuf": {
         "type": "Transitive",
         "resolved": "3.36.1",
@@ -80,60 +68,15 @@
         "resolved": "8.14.0",
         "contentHash": "iwbCpSjD3ehfTwBhtSNEtKPK0ICun6ov7Ibx6ISNA9bfwIyzI2Siwyi9eJFCJBwxowK9xcA1mj+jBWiigeqgcQ=="
       },
-      "NAudio": {
-        "type": "Transitive",
-        "resolved": "2.2.1",
-        "contentHash": "c0DzwiyyklM0TP39Y7RObwO3QkWecgM6H60ikiEnsV/aEAJPbj5MFCLaD8BSfKuZe0HGuh9GRGWWlJmSxDc9MA==",
-        "dependencies": {
-          "NAudio.Asio": "2.2.1",
-          "NAudio.Core": "2.2.1",
-          "NAudio.Midi": "2.2.1",
-          "NAudio.Wasapi": "2.2.1",
-          "NAudio.WinForms": "2.2.1",
-          "NAudio.WinMM": "2.2.1"
-        }
-      },
-      "NAudio.Asio": {
-        "type": "Transitive",
-        "resolved": "2.2.1",
-        "contentHash": "hQglyOT5iT3XuGpBP8ZG0+aoqwRfidHjTNehpoWwX0g6KJEgtH2VaqM2nuJ2mheKZa/IBqB4YQTZVvrIapzfOA==",
-        "dependencies": {
-          "NAudio.Core": "2.2.1"
-        }
-      },
       "NAudio.Core": {
         "type": "Transitive",
         "resolved": "2.2.1",
         "contentHash": "GgkdP6K/7FqXFo7uHvoqGZTJvW4z8g2IffhOO4JHaLzKCdDOUEzVKtveoZkCuUX8eV2HAINqi7VFqlFndrnz/g=="
       },
-      "NAudio.Midi": {
-        "type": "Transitive",
-        "resolved": "2.2.1",
-        "contentHash": "6r23ylGo5aeP02WFXsPquz0T0hFJWyh+7t++tz19tc3Kr38NHm+Z9j+FiAv+xkH8tZqXJqus9Q8p6u7bidIgbw==",
-        "dependencies": {
-          "NAudio.Core": "2.2.1"
-        }
-      },
       "NAudio.Wasapi": {
         "type": "Transitive",
         "resolved": "2.2.1",
         "contentHash": "lFfXoqacZZe0WqNChJgGYI+XV/n/61LzPHT3C1CJp4khoxeo2sziyX5wzNYWeCMNbsWxFvT3b3iXeY1UYjBhZw==",
-        "dependencies": {
-          "NAudio.Core": "2.2.1"
-        }
-      },
-      "NAudio.WinForms": {
-        "type": "Transitive",
-        "resolved": "2.2.1",
-        "contentHash": "DlDkewY1myY0A+3NrYRJD+MZhZV0yy1mNF6dckB27IQ9XCs/My5Ip8BZcoSHOsaPSe2GAjvoaDnk6N9w8xTv7w==",
-        "dependencies": {
-          "NAudio.WinMM": "2.2.1"
-        }
-      },
-      "NAudio.WinMM": {
-        "type": "Transitive",
-        "resolved": "2.2.1",
-        "contentHash": "xFHRFwH4x6aq3IxRbewvO33ugJRvZFEOfO62i7uQJRUNW2cnu6BeBTHUS0JD5KBucZbHZaYqxQG8dwZ47ezQuQ==",
         "dependencies": {
           "NAudio.Core": "2.2.1"
         }
@@ -238,11 +181,6 @@
           "SQLitePCLRaw.core": "3.0.5"
         }
       },
-      "System.Security.Cryptography.ProtectedData": {
-        "type": "Transitive",
-        "resolved": "10.0.0",
-        "contentHash": "qy6C3gQRTrfhFfuiIYU1jNwWfFdJpBVo1BARW7jgMm1zTEm3LRzLLyOLJGaAuKE+nZCGkEP71y4rj9NWjqLGdQ=="
-      },
       "Whisper.net": {
         "type": "Transitive",
         "resolved": "1.9.1",
@@ -264,6 +202,11 @@
         "resolved": "1.9.1",
         "contentHash": "Ut5tZyCUwXMVdThoLvdvQ7GyLwjRMreR/p3LuMJvRiXidQ2AXxx2Tv8UOGtMxvL395AC3+IkHdN/kMfd+EPSEw=="
       },
+      "Whisper.net.Runtime.Vulkan": {
+        "type": "Transitive",
+        "resolved": "1.9.1",
+        "contentHash": "2kynHvbAczuEYHKRIR9NYg8xiXaGZHW3hb1Ts+N2dNcmVpA87xJWxA07yDiFnf5+vXz428wK57YWNvxqTJdkKw=="
+      },
       "audiotranscriber.application": {
         "type": "Project",
         "dependencies": {
@@ -280,7 +223,8 @@
         "type": "Project",
         "dependencies": {
           "AudioTranscriber.Core": "[1.0.0, )",
-          "NAudio": "[2.2.1, )"
+          "NAudio.Core": "[2.2.1, )",
+          "NAudio.Wasapi": "[2.2.1, )"
         }
       },
       "audiotranscriber.core": {
@@ -307,7 +251,6 @@
           "AudioTranscriber.Core": "[1.0.0, )",
           "Google.Protobuf": "[3.36.1, )",
           "Grpc.Net.Client": "[2.83.0, )",
-          "System.Security.Cryptography.ProtectedData": "[10.0.0, )",
           "Whisper.net": "[1.9.1, )",
           "Whisper.net.Runtime": "[1.9.1, )",
           "Whisper.net.Runtime.Vulkan": "[1.9.1, )"
@@ -318,66 +261,6 @@
         "dependencies": {
           "Microsoft.Data.Sqlite.Core": "[10.0.12, )",
           "SQLitePCLRaw.config.e_sqlite3": "[3.0.5, )"
-        }
-      }
-    },
-    "net10.0-windows7.0/win-x64": {
-      "org.k2fsa.sherpa.onnx.runtime.android-arm64": {
-        "type": "Transitive",
-        "resolved": "1.13.8",
-        "contentHash": "0bEXZHGGu3ywaXjx0nwmHoBkPsVDKQjfC6FpqGGpBLnfokMbvPaGXgFShFW73bW8PSOB4gc9cLrVRkgOImy67A=="
-      },
-      "org.k2fsa.sherpa.onnx.runtime.android-x64": {
-        "type": "Transitive",
-        "resolved": "1.13.8",
-        "contentHash": "BMltFcQOnoIgWRUDb2lNGF2FHuoWoWMP6DKrJgzsdkRXCIdl3jX0lpbj+etBeW+8wdXmKxREGA2hrvO8h42k0g=="
-      },
-      "org.k2fsa.sherpa.onnx.runtime.linux-arm64": {
-        "type": "Transitive",
-        "resolved": "1.13.8",
-        "contentHash": "Vg6iDY3YDILvapwKrCrByAnBu2OImxuZNsB0Sg1k+Gox3GV2runHidTZtNTHJZUA9zFdjAz9Ab4HzqsaATjrzg=="
-      },
-      "org.k2fsa.sherpa.onnx.runtime.linux-x64": {
-        "type": "Transitive",
-        "resolved": "1.13.8",
-        "contentHash": "rqWNcekzaZHKX0xwYHePwGMwa9lb/JiuNh6Cc0f+Jnz6r5U45BdAtqUUJNh9F5DO2d2CuabAbBe3IqkngtVR8w=="
-      },
-      "org.k2fsa.sherpa.onnx.runtime.osx-arm64": {
-        "type": "Transitive",
-        "resolved": "1.13.8",
-        "contentHash": "lhEqIPi/KlleNXrNMxXLpBrT1e3uONY/Nt0v7kswxXzvOwj89484ylpMu4jns7rpVug0Y/MfFP6kCDuV2CZo5Q=="
-      },
-      "org.k2fsa.sherpa.onnx.runtime.osx-x64": {
-        "type": "Transitive",
-        "resolved": "1.13.8",
-        "contentHash": "jUYwCbi+y7yNHbAFB3u2pyQihsrdk0fl8tC5yPvaqeLqgfUn1wdsrXsS+maJTx/8Phxfx+HHlcii31zlQHSv2w=="
-      },
-      "org.k2fsa.sherpa.onnx.runtime.win-arm64": {
-        "type": "Transitive",
-        "resolved": "1.13.8",
-        "contentHash": "EQk0M1dpvIOG9uVtYz7kgkmlrdajQcqbzAPCdTHeOOSYy68biXk1/O8pyHeBwTF9J9i2xDiJq+PtyNc7C8Vmbg=="
-      },
-      "org.k2fsa.sherpa.onnx.runtime.win-x64": {
-        "type": "Transitive",
-        "resolved": "1.13.8",
-        "contentHash": "qQS9IQTRet05fl82IlM93XLNnuhW50lhepOBR2qzbjxWKjSXFTvx8SlALAoCLDGyURrQ5iOgl97JZFEeIG9A9g=="
-      },
-      "org.k2fsa.sherpa.onnx.runtime.win-x86": {
-        "type": "Transitive",
-        "resolved": "1.13.8",
-        "contentHash": "QbpkOX0LBcYq/AUZTIlrwz7tPunhqVAFT8A9+JnVw6a6TYRFKvSBwxIWUPbNfpyGYPkTFNunpFIJzcLyiek0gg=="
-      },
-      "SoundFlow": {
-        "type": "Transitive",
-        "resolved": "1.4.0",
-        "contentHash": "PVc8NEpwmx16qJdOGRvc7Kpvs/3hNZBuldErmnMQSh9IClAA2UWrafcUIQUxki2GrWB2g71hPSDIUKEo3nRgeA=="
-      },
-      "SoundFlow.Extensions.WebRtc.Apm": {
-        "type": "Transitive",
-        "resolved": "1.4.0",
-        "contentHash": "vsILVFDGVN32a3jmiYO+EhgmeVo+i4i+99/7KlCv2rbivNxPTmeIWVcgubJfXQW/clU5LydMskEu5tkpEVDxvw==",
-        "dependencies": {
-          "SoundFlow": "1.4.0"
         }
       }
     }
