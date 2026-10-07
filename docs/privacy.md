@@ -116,9 +116,15 @@ consent, meeting access, and tenant policy. Respect denied transcript access and
 speaker-attribution restrictions. Unattributed access is not permission to
 reconstruct identities that the tenant prohibited.
 
-Discord live receive is not supported in this first version. A future connector
-requires a visible authorized bot and verified DAVE-compatible receive/rekey/
-reconnect behavior. User-token/selfbot access is not an acceptable substitute.
+Discord server voice channels are recorded through the user's own visible bot
+(never a user token or selfbot). Everyone in the channel sees the bot join; get
+their consent. The bot token is encrypted for the Windows user (DPAPI) in
+`discord.json` and sent only to Discord. Voice stays end-to-end encrypted (DAVE)
+until this PC decrypts it; the audio is archived and transcribed like any other
+track, following the session's provider and consent. Discord display names become
+speaker names, and with Remember voices on their voice prints (embeddings, never
+audio) are saved in the local voice library. Optional network help adds a Windows
+Firewall rule (UAC) and a router UPnP mapping for the voice UDP port only.
 
 ## Public comparison
 

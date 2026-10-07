@@ -67,6 +67,7 @@ The speech model downloads by itself the first time you start the app.
 
 ### 🎙️ Record anything
 - Captures the **Windows output device** you pick, so it hears everything your PC plays.
+- Records **Discord server voice channels** through your own bot, with every line named after the Discord user who said it.
 - Adds your **microphone as a separate track**, with **echo reduction** so the call isn't transcribed twice.
 - **Import** long audio or video files (FFmpeg is bundled).
 - **Continue** a session later, or **merge** sessions that got split.
