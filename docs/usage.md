@@ -247,8 +247,12 @@ does not manufacture finer timing than the stored rows.
 ### Live transcript file (read it in VS Code while recording)
 
 On **Record / import**, check **Write the transcript to a live text file** and
-choose a path (default `Documents\AudioTranscriber\live-transcript.txt`; an existing
-file is overwritten; the path and checkbox are remembered). Checking the box while
+choose a folder (default `Documents\AudioTranscriber\Live transcripts`; the path and
+checkbox are remembered). Each session gets its own file in that folder, named after
+the session, for example `Session 2026-10-09 14-05.txt`. If the session name does
+not already contain its start time, the start time is added to the file name. To
+use one fixed file instead, type a path that ends in a file name, such as
+`C:\Notes\live.txt`; that file is overwritten by each new session. Checking the box while
 a recording is running starts mirroring that recording immediately; otherwise the
 next recording or import is mirrored. Unchecking it stops updates and leaves the file.
 The app rewrites that file as soon as each chunk is recognized (and at least every

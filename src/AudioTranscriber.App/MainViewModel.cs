@@ -55,9 +55,12 @@ public sealed class MainViewModel : ObservableObject
     private int previousSucceeded = -1;
     private CaptureMeter pendingMeter = new(0, 0);
     private int meterQueued;
-    private string liveFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "AudioTranscriber", "live-transcript.txt");
+    private static readonly string LiveFolderRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "AudioTranscriber");
+    private static readonly string DefaultLiveFolder = Path.Combine(LiveFolderRoot, "Live transcripts");
+    private string liveFilePath = DefaultLiveFolder;
     private bool liveFileEnabled;
     private Guid? liveSessionId;
+    private string? liveTargetPath;
     private string? lastLiveContent;
     private Task? liveWrite;
     private bool liveWritePending;
@@ -163,7 +166,7 @@ public sealed class MainViewModel : ObservableObject
             () => Busy && operationCancellation is not null && !closing);
         BrowseLiveFileCommand = new AsyncCommand(async () =>
         {
-            if (await dialogs.SaveLiveTranscriptAsync(LiveFilePath) is { } path) LiveFilePath = path;
+            if (await dialogs.ChooseLiveFolderAsync(LiveFilePath) is { } path) LiveFilePath = path;
         }, () => !closing);
         LiveMirrorSelectedCommand = new RelayCommand(() => { if (SelectedSession is { } s) StartLiveFile(s.Id); },
             () => SelectedSession is not null && !closing);
@@ -620,7 +623,11 @@ public sealed class MainViewModel : ObservableObject
             liveFileLoggedWrite = false;
             SaveLiveSettings();
             if (liveSessionId is null && LiveFileEnabled) LiveFileStatus = ArmedLiveStatus();
-            else if (liveSessionId is not null) UpdateLiveFile();
+            else if (liveSessionId is { } id)
+            {
+                liveTargetPath = LiveTargetFor(id);
+                UpdateLiveFile();
+            }
         }
     }
     public bool LiveFileEnabled
@@ -642,9 +649,20 @@ public sealed class MainViewModel : ObservableObject
     }
     public string LiveFileStatus { get => liveFileStatus; private set => Set(ref liveFileStatus, value); }
 
-    private string ArmedLiveStatus() => string.IsNullOrWhiteSpace(LiveFilePath)
-        ? "Live file is on, but no file path is set."
-        : $"Live file is on: the next recording or import is written to {LiveFilePath.Trim()}";
+    private string ArmedLiveStatus()
+    {
+        if (string.IsNullOrWhiteSpace(LiveFilePath)) return "Live file is on, but no folder or file path is set.";
+        var target = LiveTranscriptFile.IsFolder(LiveFilePath)
+            ? Path.Combine(LiveFilePath.Trim(), "<session name>.txt") : LiveFilePath.Trim();
+        return $"Live file is on: the next recording or import is written to {target}";
+    }
+
+    private string? LiveTargetFor(Guid sessionId)
+    {
+        if (string.IsNullOrWhiteSpace(LiveFilePath)) return null;
+        var session = Sessions.FirstOrDefault(x => x.Id == sessionId) ?? controller.Store.GetSession(sessionId);
+        return LiveTranscriptFile.TargetPath(LiveFilePath, session);
+    }
 
     private string LiveSettingsPath => Path.Combine(controller.Store.RootDirectory, "live-transcript.json");
 
@@ -655,7 +673,10 @@ public sealed class MainViewModel : ObservableObject
             if (!File.Exists(LiveSettingsPath)) return;
             var saved = System.Text.Json.JsonSerializer.Deserialize<LiveFileSettings>(File.ReadAllText(LiveSettingsPath));
             if (saved is null) return;
-            if (!string.IsNullOrWhiteSpace(saved.Path)) liveFilePath = saved.Path;
+            // The old default was one shared file; move it to the per-session folder. A file the user picked stays fixed.
+            if (!string.IsNullOrWhiteSpace(saved.Path))
+                liveFilePath = string.Equals(saved.Path, Path.Combine(LiveFolderRoot, "live-transcript.txt"), StringComparison.OrdinalIgnoreCase)
+                    ? DefaultLiveFolder : saved.Path;
             liveFileEnabled = saved.Enabled;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Text.Json.JsonException) { }
@@ -669,18 +690,19 @@ public sealed class MainViewModel : ObservableObject
 
     private void StartLiveFile(Guid sessionId)
     {
-        if (string.IsNullOrWhiteSpace(LiveFilePath))
+        if (LiveTargetFor(sessionId) is not { } target)
         {
-            SetStatus("Choose a live transcript file path first.", true);
+            SetStatus("Choose a live transcript folder or file path first.", true);
             return;
         }
         liveSessionId = sessionId;
+        liveTargetPath = target;
         lastLiveContent = null;
         liveFileLoggedWrite = false;
         liveFileFailing = false;
         var name = Sessions.FirstOrDefault(x => x.Id == sessionId)?.Name ?? controller.Store.GetSession(sessionId).Name;
-        LiveFileStatus = $"Live transcript file active → {LiveFilePath.Trim()}";
-        Log($"Live file on: mirroring \"{name}\" → {LiveFilePath.Trim()}");
+        LiveFileStatus = $"Live transcript file active → {target}";
+        Log($"Live file on: mirroring \"{name}\" → {target}");
         CommandManager.InvalidateRequerySuggested();
         UpdateLiveFile();
     }
@@ -708,8 +730,7 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
         liveWritePending = false;
-        var path = LiveFilePath.Trim();
-        if (path.Length == 0) return;
+        if (liveTargetPath is not { Length: > 0 } path) return;
         var previous = lastLiveContent;
         var store = controller.Store;
         liveWrite = Task.Run(() =>
@@ -719,7 +740,7 @@ public sealed class MainViewModel : ObservableObject
             return (Content: content, Rows: rows, Bytes: LiveTranscriptFile.Write(path, content));
         }).ContinueWith(task => dispatcher.Post(() =>
         {
-            if (liveSessionId != id || !string.Equals(LiveFilePath.Trim(), path, StringComparison.Ordinal)) return;
+            if (liveSessionId != id || !string.Equals(liveTargetPath, path, StringComparison.Ordinal)) return;
             if (task.IsFaulted)
             {
                 LiveFileStatus = "Live file update failed; retrying: " + task.Exception?.GetBaseException().Message;
@@ -1918,7 +1939,7 @@ public sealed class MainViewModel : ObservableObject
             if (controller.IsRecording) await controller.StopRecordingAsync();
             await Discord.ShutdownAsync();
             if (liveWrite is not null) await liveWrite;
-            if (liveSessionId is { } liveId && LiveFilePath.Trim() is { Length: > 0 } livePath)
+            if (liveSessionId is { } liveId && liveTargetPath is { Length: > 0 } livePath)
             {
                 try { await Task.Run(() => LiveTranscriptFile.Write(livePath, LiveTranscriptFile.Render(controller.Store, liveId))); }
                 catch { }

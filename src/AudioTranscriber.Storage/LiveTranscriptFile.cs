@@ -8,6 +8,29 @@ public static class LiveTranscriptFile
 {
     private static readonly UTF8Encoding Utf8 = new(false);
 
+    // The setting is a folder (each session gets its own file named after the session) or one fixed file path.
+    public static bool IsFolder(string setting)
+    {
+        var path = setting.Trim();
+        return Directory.Exists(path) || !Path.HasExtension(path) ||
+            path.EndsWith(Path.DirectorySeparatorChar) || path.EndsWith(Path.AltDirectorySeparatorChar);
+    }
+
+    public static string TargetPath(string setting, StoredSession session) =>
+        IsFolder(setting) ? Path.Combine(setting.Trim(), FileName(session)) : setting.Trim();
+
+    // The session name plus its start time, so every session gets its own file; default names already carry the time.
+    public static string FileName(StoredSession session)
+    {
+        var created = session.CreatedUtc.ToLocalTime();
+        var name = session.Name.Trim();
+        if (!name.Contains(created.ToString("yyyy-MM-dd HH:mm"), StringComparison.Ordinal))
+            name = (name + " " + created.ToString("yyyy-MM-dd HH:mm")).Trim();
+        var invalid = Path.GetInvalidFileNameChars();
+        var safe = new string(name.Select(c => c == ':' || invalid.Contains(c) ? '-' : c).ToArray()).Trim().TrimEnd('.');
+        return (safe.Length == 0 ? "live-transcript" : safe) + ".txt";
+    }
+
     public static string Render(LibraryStore store, Guid sessionId) => Render(store, sessionId, out _);
 
     public static string Render(LibraryStore store, Guid sessionId, out int rowCount)

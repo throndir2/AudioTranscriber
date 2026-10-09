@@ -31,8 +31,9 @@ public sealed class DesktopDialogs(Func<Window> owner)
     public Task<string?> SaveExportAsync(string sessionName) => SaveFileAsync("Export the complete selected-session transcript",
         Safe(sessionName, "transcript"), ["*.txt", "*.json", "*.srt", "*.vtt"]);
 
-    public Task<string?> SaveLiveTranscriptAsync(string currentPath) => SaveFileAsync("Choose the live transcript file (kept unlocked so other apps can read it)",
-        string.IsNullOrWhiteSpace(currentPath) ? "live-transcript.txt" : Path.GetFileName(currentPath), ["*.txt", "*.md", "*.*"], StartFolder(currentPath));
+    public Task<string?> ChooseLiveFolderAsync(string currentPath) => ChooseFolderAsync(
+        LiveTranscriptFile.IsFolder(currentPath) ? currentPath.Trim() : StartFolder(currentPath) ?? "",
+        "Choose the folder for live transcript files (one file per session, named after the session)");
 
     public Task<string?> SaveTemplateOutputAsync(string currentPath, string templateName) => SaveFileAsync("Choose the file this template keeps updated (kept unlocked so other apps can read it)",
         string.IsNullOrWhiteSpace(currentPath) ? Safe(templateName, "template") + ".md" : Path.GetFileName(currentPath), ["*.md", "*.txt", "*.*"], StartFolder(currentPath));
@@ -41,11 +42,12 @@ public sealed class DesktopDialogs(Func<Window> owner)
         $"AudioTranscriber-diagnostics-{DateTime.Now:yyyyMMdd-HHmmss}.zip", ["*.zip"],
         Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory));
 
-    public async Task<string?> ChooseFolderAsync(string currentFolder)
+    public async Task<string?> ChooseFolderAsync(string currentFolder,
+        string title = "Choose the folder of reference files (PDFs, notes…) templates may read")
     {
         var result = await owner().StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
-            Title = "Choose the folder of reference files (PDFs, notes…) templates may read",
+            Title = title,
             AllowMultiple = false,
             SuggestedStartLocation = await StorageFolderAsync(currentFolder)
         });
