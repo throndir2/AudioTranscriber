@@ -1,8 +1,36 @@
 # Output Templates
 
 The **Templates** tab turns a transcript into documents you define with prompts: DM
-guidance, a running session summary, NPC/item/place lists, or similar notes. Four
-starter templates are included; **Add starter templates** brings them back.
+guidance, a running session summary, NPC/item/place lists, or similar notes. The list
+starts with four starter templates in **General** and the whole TTRPG set in **TTRPG**;
+delete what you don't need. **Add missing built-in templates** brings deleted ones back.
+
+## Folders and favorites
+
+Templates are shown in a folder tree. Set a template's **Folder** to move it: use `/`
+for subfolders (for example `Campaign/Session notes`), or leave it empty for the top
+level. **New template** goes into the selected folder.
+
+Select ☆ next to a template, or tick **Favorite**, to also list it under **★ Favorites**
+at the top of the tree. The template stays in its own folder too.
+
+## Template table
+
+The template list is also kept in a CSV table, `templates.csv` in the library folder.
+**Browse…** links another file instead: an existing table is loaded, and a new file gets
+your current templates. **Open table** opens it in Excel, LibreOffice, or any editor.
+
+Each row is one template, with the columns Folder, Name, Favorite, Prompt, Auto update,
+Every seconds, Transcript, Timestamps, Reference files, Previous output, Screenshot,
+Inputs (names of other templates, separated by `;`), Connection (empty uses the default
+connection), Transcript characters, Write to file, Output file, Keep versions, Max
+versions, and Id. Use `yes` or `no` for the options.
+
+Add, delete, reorder, or edit rows and save the file. The app picks up the changes within
+a few seconds. A row without an Id becomes a new template; a template without a row is
+removed. Changes made in the app are written back to the table. While a spreadsheet app
+keeps the file locked, those changes wait until it is closed. If both change, the table
+wins.
 
 ## Running a template
 
@@ -56,7 +84,7 @@ are kept in memory only and go to that template's LLM connection.
 
 ## Virtual tabletop assistant
 
-**Add table (VTT) templates** adds eight linked templates, each with one narrow job so
+**Add table templates** adds eight linked templates to the **Virtual tabletop** folder, each with one narrow job so
 small vision models can keep up. Screenshot readers:
 
 - **Table: turn order** reads only the initiative tracker.
@@ -86,10 +114,10 @@ Output is shown in the app and can be copied. **Also write the output to a file*
 rewrites a `.md` or `.txt` file without locking it, so VS Code, Obsidian, or a browser
 can keep it open.
 
-## TTRPG template library
+## TTRPG templates
 
-Pick a template from **TTRPG template library** and choose **Add**, or **Add all** for
-the whole set: a "Previously on…" recap, quest log and plot hooks, combat tracker, rules
+The **TTRPG** folder has the whole set: a "Previously on…" recap, quest log and plot
+hooks, combat tracker, rules
 questions and rulings, lore and canon log, locations and travel, in-game calendar,
 mysteries and clues, spotlight and player engagement, memorable quotes, an
 in-character journal, a spoiler-free player handout, next session prep, XP and rewards,

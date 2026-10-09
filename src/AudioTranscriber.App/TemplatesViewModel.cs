@@ -28,7 +28,17 @@ public sealed class TemplatesViewModel : ObservableObject
     private readonly Dictionary<Guid, CancellationTokenSource> running = new();
     private LlmConnection? selectedConnection, defaultConnection;
     private OutputTemplate? selectedTemplate;
-    private TemplateBlueprint? selectedBlueprint = OutputTemplate.TtrpgLibrary[0];
+    private TemplateTreeNode? selectedNode;
+    private string selectedFolder = "", listStatus = "";
+    private readonly HashSet<string> collapsedFolders = new(StringComparer.OrdinalIgnoreCase);
+    private bool treeQueued, selectedFavorites;
+    private const string FavoritesKey = "\u0001favorites";
+    private string tablePath = "";
+    private string? tableText;
+    private DateTime tableStamp;
+    private char tableSeparator = TemplateTable.DefaultSeparator;
+    private bool tablePending;
+    private const int CurrentLibraryVersion = 1;
     private string contextFolder = "", pinnedFiles = "", connectionStatus = "", targetDescription = "No session selected.";
     private string captureTarget = "", captureCaption = "No screenshot taken yet.";
     private int captureMaxWidth = ScreenCapture.DefaultMaxWidth;
@@ -51,13 +61,13 @@ public sealed class TemplatesViewModel : ObservableObject
         LoadModelsCommand = new AsyncCommand(LoadModelsAsync, () => SelectedConnection is not null && !loadingModels);
         TestConnectionCommand = new AsyncCommand(TestConnectionAsync, () => SelectedConnection is not null && !loadingModels);
         CheckImageSupportCommand = new AsyncCommand(CheckImageSupportAsync, () => SelectedConnection is not null && !loadingModels);
-        AddTemplateCommand = new RelayCommand(() => AddTemplate(new OutputTemplate { Name = "New template", Prompt = "Describe what to produce from the transcript…" }));
+        AddTemplateCommand = new RelayCommand(() => AddTemplate(new OutputTemplate { Name = "New template", Folder = selectedFolder, IsFavorite = selectedFavorites, Prompt = "Describe what to produce from the transcript…" }));
         DuplicateTemplateCommand = new RelayCommand(DuplicateTemplate, () => SelectedTemplate is not null);
         DeleteTemplateCommand = new AsyncCommand(DeleteTemplateAsync, () => SelectedTemplate is not null);
-        AddStartersCommand = new RelayCommand(() => { foreach (var t in OutputTemplate.Starters()) AddTemplate(t); });
+        RestoreBuiltInsCommand = new RelayCommand(RestoreBuiltIns);
         AddTableStartersCommand = new RelayCommand(AddTableStarters);
-        AddBlueprintCommand = new RelayCommand(() => { if (SelectedBlueprint is { } b) AddTemplate(b.Create()); }, () => SelectedBlueprint is not null);
-        AddAllTtrpgCommand = new RelayCommand(() => { foreach (var b in TtrpgLibrary) AddTemplate(b.Create()); });
+        OpenTableCommand = new RelayCommand(OpenTable);
+        BrowseTableCommand = new AsyncCommand(async () => { if (await dialogs.ChooseTemplateTableAsync(TablePath) is { } path) TablePath = path; });
         OpenVersionsCommand = new RelayCommand(OpenVersions, () => SelectedTemplate is not null);
         RunTemplateCommand = new RelayCommand(() => { if (SelectedTemplate is { } t) _ = RunAsync(t, manual: true); },
             () => SelectedTemplate is { IsRunning: false });
@@ -78,10 +88,11 @@ public sealed class TemplatesViewModel : ObservableObject
         }, () => !string.IsNullOrEmpty(SelectedTemplate?.Output));
         timer = NewTimer(TimeSpan.FromSeconds(4), (_, _) => _ = TickAsync());
         timer.Stop();
-        Templates.CollectionChanged += (_, _) => RebuildInputOptions();
+        Templates.CollectionChanged += (_, _) => { RebuildInputOptions(); QueueTreeRebuild(); };
         Models.CollectionChanged += (_, _) => { Changed(nameof(HasModels)); Changed(nameof(ModelPickerText)); };
         RebuildInputOptions();
         SyncChoices();
+        RebuildTree();
     }
 
     private static DispatcherTimer NewTimer(TimeSpan interval, EventHandler tick)
@@ -111,18 +122,48 @@ public sealed class TemplatesViewModel : ObservableObject
     public ICommand AddTemplateCommand { get; }
     public ICommand DuplicateTemplateCommand { get; }
     public ICommand DeleteTemplateCommand { get; }
-    public ICommand AddStartersCommand { get; }
+    public ICommand RestoreBuiltInsCommand { get; }
     public ICommand AddTableStartersCommand { get; }
-    public ICommand AddBlueprintCommand { get; }
-    public ICommand AddAllTtrpgCommand { get; }
+    public ICommand OpenTableCommand { get; }
+    public ICommand BrowseTableCommand { get; }
     public ICommand OpenVersionsCommand { get; }
-    public IReadOnlyList<TemplateBlueprint> TtrpgLibrary => OutputTemplate.TtrpgLibrary;
-    public TemplateBlueprint? SelectedBlueprint
+
+    /// <summary>Templates grouped by folder; rebuilt when templates are added, removed or moved.</summary>
+    public ObservableCollection<TemplateTreeNode> TemplateTree { get; } = [];
+    /// <summary>Every folder path in use, for the folder picker.</summary>
+    public ObservableCollection<string> FolderNames { get; } = [];
+    public string ListStatus { get => listStatus; private set => Set(ref listStatus, value); }
+
+    public TemplateTreeNode? SelectedNode
     {
-        get => selectedBlueprint;
-        set { if (Set(ref selectedBlueprint, value)) Changed(nameof(BlueprintDescription)); }
+        get => selectedNode;
+        set
+        {
+            // The tree briefly selects nothing while it is rebuilt; keep the current template then.
+            if (value is null || !Set(ref selectedNode, value)) return;
+            selectedFolder = value.Template?.Folder ?? value.FolderPath;
+            selectedFavorites = value.IsFavorites;
+            SelectedTemplate = value.Template;
+        }
     }
-    public string BlueprintDescription => SelectedBlueprint?.Description ?? "Pick a ready-made tabletop RPG template to add.";
+
+    /// <summary>The CSV table that mirrors the template list. Pointing at an existing table loads it; otherwise it is created.</summary>
+    public string TablePath
+    {
+        get => tablePath;
+        set
+        {
+            var path = string.IsNullOrWhiteSpace(value) ? DefaultTablePath : value.Trim().Trim('"');
+            if (!Set(ref tablePath, path)) return;
+            tableText = null;
+            tableStamp = default;
+            dirty = true;
+            var existed = File.Exists(path);
+            ReadTableIfChanged();
+            Save();
+            if (!existed && !tablePending) ListStatus = $"Created the table with your {Templates.Count} templates.";
+        }
+    }
     public ICommand RunTemplateCommand { get; }
     public ICommand StopTemplateCommand { get; }
     public ICommand BrowseOutputCommand { get; }
@@ -187,9 +228,118 @@ public sealed class TemplatesViewModel : ObservableObject
     public OutputTemplate? SelectedTemplate
     {
         get => selectedTemplate;
-        set { if (Set(ref selectedTemplate, value)) { Changed(nameof(HasTemplate)); Changed(nameof(SelectedTemplateConnectionId)); RebuildInputOptions(); } }
+        set
+        {
+            if (!Set(ref selectedTemplate, value)) return;
+            Changed(nameof(HasTemplate));
+            Changed(nameof(SelectedTemplateConnectionId));
+            RebuildInputOptions();
+            if (value is not null && selectedNode?.Template != value) SelectNode(value);
+        }
     }
     public bool HasTemplate => SelectedTemplate is not null;
+
+    // ---------- folder tree ----------
+
+    private void QueueTreeRebuild()
+    {
+        if (treeQueued) return;
+        treeQueued = true;
+        dispatcher.Post(() => { treeQueued = false; RebuildTree(); });
+    }
+
+    private void RebuildTree()
+    {
+        var top = new List<TemplateTreeNode>();
+        var folders = new Dictionary<string, TemplateTreeNode>(StringComparer.OrdinalIgnoreCase);
+        List<TemplateTreeNode> ChildrenOf(string path)
+        {
+            if (path.Length == 0) return top;
+            if (folders.TryGetValue(path, out var existing)) return existing.Children;
+            var slash = path.LastIndexOf('/');
+            var parent = ChildrenOf(slash < 0 ? "" : path[..slash]);
+            var node = new TemplateTreeNode(path[(slash + 1)..], path, null) { IsExpanded = !collapsedFolders.Contains(path) };
+            node.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName != nameof(TemplateTreeNode.IsExpanded)) return;
+                if (node.IsExpanded) collapsedFolders.Remove(path); else collapsedFolders.Add(path);
+            };
+            folders[path] = node;
+            parent.Add(node);
+            return node.Children;
+        }
+        foreach (var template in Templates) ChildrenOf(template.Folder).Add(new TemplateTreeNode(template.Name, template.Folder, template));
+
+        // Folders first (alphabetical), then templates in list order.
+        static void Sort(List<TemplateTreeNode> nodes)
+        {
+            var sorted = nodes.OrderBy(n => n.IsFolder ? 0 : 1).ThenBy(n => n.IsFolder ? n.Name : "", StringComparer.CurrentCultureIgnoreCase).ToList();
+            nodes.Clear();
+            nodes.AddRange(sorted);
+            foreach (var folder in nodes.Where(n => n.IsFolder)) Sort(folder.Children);
+        }
+        Sort(top);
+
+        // Favorites stay in their own folder too; the group at the top is a shortcut to them.
+        if (Templates.Any(t => t.IsFavorite))
+        {
+            var favorites = new TemplateTreeNode("★ Favorites", "", null, isFavorites: true) { IsExpanded = !collapsedFolders.Contains(FavoritesKey) };
+            favorites.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName != nameof(TemplateTreeNode.IsExpanded)) return;
+                if (favorites.IsExpanded) collapsedFolders.Remove(FavoritesKey); else collapsedFolders.Add(FavoritesKey);
+            };
+            foreach (var template in Templates.Where(t => t.IsFavorite))
+                favorites.Children.Add(new TemplateTreeNode(template.Name, template.Folder, template, isFavorites: true));
+            top.Insert(0, favorites);
+        }
+
+        var previousFolder = selectedNode is { IsFolder: true } ? selectedNode : null;
+        selectedNode = null;
+        TemplateTree.Clear();
+        foreach (var node in top) TemplateTree.Add(node);
+        var folderNames = folders.Keys.Order(StringComparer.CurrentCultureIgnoreCase).ToList();
+        if (!folderNames.SequenceEqual(FolderNames))
+        {
+            FolderNames.Clear();
+            foreach (var path in folderNames) FolderNames.Add(path);
+        }
+        if (SelectedTemplate is { } selected) SelectNode(selected);
+        else if (previousFolder is not null && TemplateTree.SelectMany(n => n.All()).FirstOrDefault(n => n.IsFolder &&
+                     n.IsFavorites == previousFolder.IsFavorites && n.FolderPath.Equals(previousFolder.FolderPath, StringComparison.OrdinalIgnoreCase)) is { } folderNode)
+        {
+            selectedNode = folderNode;
+            Changed(nameof(SelectedNode));
+        }
+        else Changed(nameof(SelectedNode));
+    }
+
+    private void SelectNode(OutputTemplate template)
+    {
+        // Prefer the copy in the group the user was working in (Favorites or the template's folder).
+        var nodes = TemplateTree.SelectMany(n => n.All()).Where(n => n.Template == template).ToList();
+        var node = nodes.FirstOrDefault(n => n.IsFavorites == selectedFavorites) ?? nodes.FirstOrDefault();
+        if (node is null) return;
+        if (node.IsFavorites)
+        {
+            collapsedFolders.Remove(FavoritesKey);
+            TemplateTree.First(n => n.IsFavorites).IsExpanded = true;
+        }
+        // Open the folders above it so the selection is visible.
+        var path = node.IsFavorites ? "" : template.Folder;
+        while (path.Length > 0)
+        {
+            collapsedFolders.Remove(path);
+            if (TemplateTree.SelectMany(n => n.All()).FirstOrDefault(n => n.IsFolder && !n.IsFavorites && n.FolderPath.Equals(path, StringComparison.OrdinalIgnoreCase)) is { } folder)
+                folder.IsExpanded = true;
+            var slash = path.LastIndexOf('/');
+            path = slash < 0 ? "" : path[..slash];
+        }
+        selectedNode = node;
+        selectedFolder = template.Folder;
+        selectedFavorites = node.IsFavorites;
+        Changed(nameof(SelectedNode));
+    }
 
     private void RebuildInputOptions()
     {
@@ -301,7 +451,8 @@ public sealed class TemplatesViewModel : ObservableObject
             {
                 Version = TemplateSettings.CurrentVersion,
                 Connections = [new LlmConnection { Name = ollama.Name, Kind = ollama.Name, BaseUrl = ollama.BaseUrl, Model = ollama.Model }],
-                Templates = OutputTemplate.Starters().ToList()
+                Templates = OutputTemplate.BuiltIns().ToList(),
+                LibraryVersion = CurrentLibraryVersion
             };
             dirty = true;
             freshDefaults = true;
@@ -327,6 +478,17 @@ public sealed class TemplatesViewModel : ObservableObject
             template.ConnectionId = null;
         if (legacy) dirty = true;
         selectedConnection = defaultConnection;
+        tablePath = string.IsNullOrWhiteSpace(saved.TablePath) ? DefaultTablePath : saved.TablePath;
+        // The table wins over templates.json: it may have been edited while the app was closed.
+        ReadTableIfChanged();
+        if (saved.LibraryVersion < 1)
+        {
+            // Lists from before folders and the TTRPG set: file built-in templates in their folders and add the TTRPG set once.
+            foreach (var template in Templates.Where(t => t.Folder.Length == 0)) template.Folder = OutputTemplate.BuiltInFolder(template.Name) ?? "";
+            AddMissing(OutputTemplate.TtrpgTemplates());
+            dirty = true;
+        }
+        if (!File.Exists(TablePath)) dirty = true;
         selectedTemplate = Templates.FirstOrDefault();
     }
 
@@ -335,6 +497,7 @@ public sealed class TemplatesViewModel : ObservableObject
         item.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName is not (nameof(OutputTemplate.Status) or nameof(OutputTemplate.IsRunning) or nameof(OutputTemplate.Summary))) dirty = true;
+            if (item is OutputTemplate && e.PropertyName is nameof(OutputTemplate.Folder) or nameof(OutputTemplate.IsFavorite)) QueueTreeRebuild();
         };
         list.Add(item);
     }
@@ -353,7 +516,9 @@ public sealed class TemplatesViewModel : ObservableObject
                 ContextFolder = ContextFolder,
                 PinnedFiles = PinnedFiles,
                 CaptureTarget = CaptureTarget,
-                CaptureMaxWidth = CaptureMaxWidth
+                CaptureMaxWidth = CaptureMaxWidth,
+                TablePath = TablePath.Equals(DefaultTablePath, StringComparison.OrdinalIgnoreCase) ? "" : TablePath,
+                LibraryVersion = CurrentLibraryVersion
             };
             var path = SettingsPath;
             var temp = path + ".tmp";
@@ -361,6 +526,108 @@ public sealed class TemplatesViewModel : ObservableObject
             File.Move(temp, path, overwrite: true);
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { dirty = true; }
+        WriteTable();
+    }
+
+    // ---------- template table (CSV) ----------
+
+    private string DefaultTablePath => Path.Combine(controller.Store.RootDirectory, TemplateTable.FileName);
+
+    /// <summary>Writes the table when the list changed. While another program holds the file, retries on each tick.</summary>
+    private void WriteTable()
+    {
+        var path = TablePath;
+        var text = TemplateTable.Write(Templates, Connections, tableSeparator);
+        if (text == tableText && File.Exists(path)) { tablePending = false; return; }
+        try
+        {
+            if (Path.GetDirectoryName(Path.GetFullPath(path)) is { } folder) Directory.CreateDirectory(folder);
+            using (var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete))
+            using (var writer = new StreamWriter(stream, new UTF8Encoding(true)))
+                writer.Write(text);
+            tableText = text;
+            tableStamp = File.GetLastWriteTimeUtc(path);
+            if (tablePending) ListStatus = $"Table updated {DateTime.Now:HH:mm:ss}.";
+            tablePending = false;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            if (!tablePending) ListStatus = "Can't write the table now (is it open in a spreadsheet app?). Changes are saved here and written to the table when it is free.";
+            tablePending = true;
+        }
+    }
+
+    /// <summary>Loads the table when it changed on disk since the app last read or wrote it. The table wins over unsaved edits here.</summary>
+    private void ReadTableIfChanged()
+    {
+        var path = TablePath;
+        try
+        {
+            if (!File.Exists(path)) return;
+            var stamp = File.GetLastWriteTimeUtc(path);
+            if (stamp == tableStamp && tableText is not null) return;
+            byte[] bytes;
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            using (var memory = new MemoryStream())
+            {
+                stream.CopyTo(memory);
+                bytes = memory.ToArray();
+            }
+            tableStamp = stamp;
+            var text = TemplateTable.Decode(bytes);
+            if (text == tableText) return;
+            var rows = TemplateTable.Read(text, out tableSeparator);
+            if (rows.Count == 0 && Templates.Count > 0)
+            {
+                // An empty table is more likely a half-saved file than a wish to delete everything.
+                ListStatus = "The table has no templates, so it was not loaded. It is rewritten from the list here.";
+                tableText = null;
+                dirty = true;
+                return;
+            }
+            ApplyTable(rows);
+            tableText = text;
+            ListStatus = $"Loaded {rows.Count} templates from the table {DateTime.Now:HH:mm:ss}.";
+        }
+        catch (FormatException error)
+        {
+            ListStatus = "Could not read the table: " + error.Message;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { }
+    }
+
+    private void ApplyTable(IReadOnlyList<Dictionary<string, string>> rows)
+    {
+        var next = TemplateTable.Apply(rows, Templates.ToList(), Connections);
+        foreach (var gone in Templates.Except(next).ToList())
+        {
+            if (running.TryGetValue(gone.Id, out var cancellation)) cancellation.Cancel();
+            Templates.Remove(gone);
+        }
+        for (var i = 0; i < next.Count; i++)
+        {
+            var index = Templates.IndexOf(next[i]);
+            if (index < 0)
+            {
+                Track(next[i], Templates);
+                index = Templates.Count - 1;
+            }
+            if (index != i) Templates.Move(index, i);
+        }
+        if (SelectedTemplate is { } selected && !Templates.Contains(selected)) SelectedTemplate = Templates.FirstOrDefault();
+        RebuildInputOptions();
+        Changed(nameof(SelectedTemplateConnectionId));
+        dirty = true;
+    }
+
+    private void OpenTable()
+    {
+        Save();
+        try { AppDiagnostics.OpenFile(TablePath); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            ListStatus = "Could not open the table: " + error.Message;
+        }
     }
 
     // ---------- connections ----------
@@ -516,6 +783,26 @@ public sealed class TemplatesViewModel : ObservableObject
         dirty = true;
     }
 
+    /// <summary>Adds the templates whose names are not in the list yet; returns how many were added.</summary>
+    private int AddMissing(IEnumerable<OutputTemplate> templates)
+    {
+        var added = 0;
+        foreach (var template in templates.Where(t => !Templates.Any(e => e.Name.Equals(t.Name, StringComparison.OrdinalIgnoreCase))))
+        {
+            Track(template, Templates);
+            added++;
+        }
+        if (added == 0) return 0;
+        dirty = true;
+        return added;
+    }
+
+    private void RestoreBuiltIns()
+    {
+        var added = AddMissing(OutputTemplate.BuiltIns());
+        ListStatus = added == 0 ? "All built-in templates are already in the list." : $"Added {added} built-in template{(added == 1 ? "" : "s")}.";
+    }
+
     private void AddTableStarters()
     {
         var added = OutputTemplate.TableStarters();
@@ -531,7 +818,7 @@ public sealed class TemplatesViewModel : ObservableObject
         if (SelectedTemplate is not { } source) return;
         AddTemplate(new OutputTemplate
         {
-            Name = source.Name + " (copy)", Prompt = source.Prompt, ConnectionId = source.ConnectionId, IntervalSeconds = source.IntervalSeconds,
+            Name = source.Name + " (copy)", Folder = source.Folder, Prompt = source.Prompt, ConnectionId = source.ConnectionId, IntervalSeconds = source.IntervalSeconds,
             IncludePrevious = source.IncludePrevious, UseReferences = source.UseReferences, MaxTranscriptChars = source.MaxTranscriptChars,
             UseTranscript = source.UseTranscript, IncludeTimestamps = source.IncludeTimestamps, InputTemplateIds = [.. source.InputTemplateIds], UseScreenshot = source.UseScreenshot,
             KeepVersions = source.KeepVersions, MaxVersions = source.MaxVersions
@@ -622,7 +909,8 @@ public sealed class TemplatesViewModel : ObservableObject
         ticking = true;
         try
         {
-            if (dirty) Save();
+            ReadTableIfChanged();
+            if (dirty || tablePending) Save();
             var store = controller.Store;
             Guid? session = null;
             if (targetSession() is not { } id)
