@@ -8,6 +8,8 @@ Format: newest first; each version is `## vX.Y.Z - YYYY-MM-DD` with `### Added`,
 
 ## Unreleased
 
+## v0.2.7 - 2026-10-09
+
 ### Changed
 
 - **Import file…** on Record / import now also takes a WebVTT (`.vtt`) transcript and opens it as a new session with its timed lines and speaker labels. (#63)
