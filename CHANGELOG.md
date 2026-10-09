@@ -8,6 +8,8 @@ Format: newest first; each version is `## vX.Y.Z - YYYY-MM-DD` with `### Added`,
 
 ## Unreleased
 
+## v0.2.8 - 2026-10-09
+
 ### Added
 
 - Templates can fill the model's whole context window, so long sessions (such as a multi-hour D&D game) are sent in full when they fit. Set **Transcript chars** to 0 (now the default); the connection shows the model's context window and has a **Token limit** to cap it. (#61)
