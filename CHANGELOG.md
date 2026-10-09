@@ -8,6 +8,8 @@ Format: newest first; each version is `## vX.Y.Z - YYYY-MM-DD` with `### Added`,
 
 ## Unreleased
 
+## v0.2.9 - 2026-10-09
+
 ### Fixed
 
 - Speakers you named in earlier sessions are now recognized by voice much more often while you record: an automatic "Speaker N" gets the remembered name once that speaker has about 20 seconds of clear speech. (#67)
