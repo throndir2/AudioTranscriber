@@ -297,8 +297,22 @@ and every live file write. **Copy** puts the log on the clipboard.
 
 The **Templates** tab turns the transcript into documents you define with a prompt,
 for example "Give me DM guidance for the current scene based on the PDFs", a running
-session summary, or a list of NPCs, places or items. Four starter templates are
-included (**Add starter templates** brings them back).
+session summary, or a list of NPCs, places or items. The list starts with four
+starter templates in the **General** folder and the whole TTRPG set in the **TTRPG**
+folder; delete the ones you don't need (**Add missing built-in templates** brings
+them back).
+
+- **Folders and favorites:** templates are shown in a folder tree. Set a template's
+  **Folder** to move it (use `/` for subfolders, leave it empty for the top level);
+  **New template** goes into the selected folder. Select ☆ next to a template (or
+  tick **Favorite**) to also list it under **★ Favorites** at the top.
+- **Template table:** the list is also kept in a CSV table (`templates.csv` in the
+  library folder; **Browse…** links another file). **Open table** opens it in Excel,
+  LibreOffice or any editor: one row per template with its folder, name, favorite,
+  prompt and settings. Add, delete, reorder or edit rows and save; the app picks up
+  the changes within a few seconds, and writes changes made in the app back to the
+  table. While a spreadsheet app keeps the file locked, the app's own changes wait
+  until it is closed. If both change, the table wins.
 
 - **Which session:** templates that use the transcript run on the session being
   recorded, otherwise on the session selected on the left.
@@ -340,10 +354,10 @@ included (**Add starter templates** brings them back).
   output file, or in `template-versions` in the library folder. **Keep only the latest
   N versions** deletes older copies (0 keeps all); untick it to keep only the latest
   output. **Open versions folder** shows them.
-- **TTRPG template library:** pick a ready-made tabletop RPG template (recap, quest
-  log, combat tracker, rulings, lore, locations, calendar, mysteries, spotlight,
-  quotes, in-character journal, player handout, next session prep, XP, character
-  changes, improv NPCs) and choose **Add**, or **Add all**.
+- **TTRPG templates:** the **TTRPG** folder has ready-made tabletop RPG templates
+  (recap, quest log, combat tracker, rulings, lore, locations, calendar, mysteries,
+  spotlight, quotes, in-character journal, player handout, next session prep, XP,
+  character changes, improv NPCs). They start as manual updates.
 
 **Reference files** are shared by all templates (untick **Reference files** in a
 template's inputs). The **context folder** is browsable by the model through

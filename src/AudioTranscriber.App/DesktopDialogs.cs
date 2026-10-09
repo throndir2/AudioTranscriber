@@ -34,6 +34,9 @@ public sealed class DesktopDialogs(Func<Window> owner)
     public Task<string?> SaveTemplateOutputAsync(string currentPath, string templateName) => SaveFileAsync("Choose the file this template keeps updated (kept unlocked so other apps can read it)",
         string.IsNullOrWhiteSpace(currentPath) ? Safe(templateName, "template") + ".md" : Path.GetFileName(currentPath), ["*.md", "*.txt", "*.*"], StartFolder(currentPath));
 
+    public Task<string?> ChooseTemplateTableAsync(string currentPath) => SaveFileAsync("Choose the template table: an existing table is loaded, a new file gets your templates",
+        string.IsNullOrWhiteSpace(currentPath) ? "templates.csv" : Path.GetFileName(currentPath), ["*.csv"], StartFolder(currentPath), overwritePrompt: false);
+
     public Task<string?> SaveDiagnosticsAsync() => SaveFileAsync("Save diagnostics for a bug report",
         $"AudioTranscriber-diagnostics-{DateTime.Now:yyyyMMdd-HHmmss}.zip", ["*.zip"],
         Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory));
@@ -239,13 +242,14 @@ public sealed class DesktopDialogs(Func<Window> owner)
         return result.FirstOrDefault()?.TryGetLocalPath();
     }
 
-    private async Task<string?> SaveFileAsync(string title, string name, IReadOnlyList<string> patterns, string? startFolder = null)
+    private async Task<string?> SaveFileAsync(string title, string name, IReadOnlyList<string> patterns, string? startFolder = null, bool overwritePrompt = true)
     {
         var result = await owner().StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = title,
             SuggestedFileName = name,
             SuggestedStartLocation = await StorageFolderAsync(startFolder),
+            ShowOverwritePrompt = overwritePrompt,
             FileTypeChoices = [new FilePickerFileType(title) { Patterns = patterns }, FilePickerFileTypes.All]
         });
         return result?.TryGetLocalPath();

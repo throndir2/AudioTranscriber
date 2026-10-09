@@ -167,14 +167,21 @@ public sealed class LlmConnection : ObservableObject
 
 public sealed class OutputTemplate : ObservableObject
 {
-    private string name = "", prompt = "", outputPath = "", output = "", status = "Not run yet.";
+    public const string GeneralFolder = "General", TtrpgFolder = "TTRPG", TableFolder = "Virtual tabletop";
+
+    private string name = "", folder = "", prompt = "", outputPath = "", output = "", status = "Not run yet.";
     private Guid? connectionId;
-    private bool autoUpdate, writeToFile, includePrevious = true, useReferences = true, useTranscript = true, useScreenshot, running, keepVersions = true, includeTimestamps = true;
+    private bool autoUpdate, writeToFile, includePrevious = true, useReferences = true, useTranscript = true, useScreenshot, running, keepVersions = true, includeTimestamps = true, isFavorite;
     private int intervalSeconds = 60, maxTranscriptChars, maxVersions;
     private List<Guid> inputTemplateIds = [];
 
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get => name; set => Set(ref name, value ?? ""); }
+    /// <summary>Folder in the template tree; "/" separates subfolders and an empty folder is the top level.</summary>
+    public string Folder { get => folder; set => Set(ref folder, NormalizeFolder(value)); }
+    /// <summary>Favorites are also listed in the Favorites group at the top of the template tree.</summary>
+    public bool IsFavorite { get => isFavorite; set { if (Set(ref isFavorite, value)) Changed(nameof(FavoriteGlyph)); } }
+    [JsonIgnore] public string FavoriteGlyph => IsFavorite ? "★" : "☆";
     public string Prompt { get => prompt; set => Set(ref prompt, value ?? ""); }
     /// <summary>The connection this template always uses; null uses the default connection.</summary>
     public Guid? ConnectionId { get => connectionId; set => Set(ref connectionId, value); }
@@ -207,7 +214,25 @@ public sealed class OutputTemplate : ObservableObject
     [JsonIgnore] public string Summary => (IsRunning ? "updating…" : AutoUpdate ? "live" : "manual") +
         (InputTemplateIds.Count > 0 ? $" · uses {InputTemplateIds.Count}" : "");
 
-    public static IEnumerable<OutputTemplate> Starters() =>
+    public static string NormalizeFolder(string? value) =>
+        string.Join('/', (value ?? "").Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+
+    /// <summary>The templates a new library starts with and <c>Add missing built-in templates</c> restores: starters and the TTRPG set.</summary>
+    public static IReadOnlyList<OutputTemplate> BuiltIns() => [.. Starters(), .. TtrpgTemplates()];
+
+    private static Dictionary<string, string>? builtInFolders;
+
+    /// <summary>The folder of the built-in template with this name, or null for the user's own templates.</summary>
+    public static string? BuiltInFolder(string name)
+    {
+        builtInFolders ??= BuiltIns().Concat(TableStarters()).GroupBy(t => t.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().Folder, StringComparer.OrdinalIgnoreCase);
+        return builtInFolders.GetValueOrDefault(name);
+    }
+
+    public static IEnumerable<OutputTemplate> Starters() => StarterList().Select(t => { t.Folder = GeneralFolder; return t; });
+
+    private static IEnumerable<OutputTemplate> StarterList() =>
     [
         new()
         {
@@ -343,103 +368,104 @@ public sealed class OutputTemplate : ObservableObject
                      "phrased like \"Don't forget to present …\".\n" +
                      "Each bullet one short line. Only use facts from the inputs; skip a point if there is nothing for it. No introduction or closing text."
         };
-        return [turnOrder, tokens, movement, health, rolls, scene, combatLog, reminders];
+        OutputTemplate[] all = [turnOrder, tokens, movement, health, rolls, scene, combatLog, reminders];
+        foreach (var template in all) template.Folder = TableFolder;
+        return all;
     }
 
-    /// <summary>Ready-made tabletop RPG templates the user can add one at a time (or all at once). All start as manual updates.</summary>
-    public static IReadOnlyList<TemplateBlueprint> TtrpgLibrary { get; } =
-    [
-        new("Recap: \"Previously on…\"", "A short read-aloud recap to open the next session.", () => new()
-        {
-            Name = "Recap: previously on…",
-            Prompt = "Write a read-aloud recap of this session for the Game Master to open the next session with. Start with \"Previously on…\" and write 1–3 short, vivid paragraphs in second person plural (\"you\"), past tense, covering only what the player characters did and learned, ending on the cliffhanger or the situation where play stopped. Do not reveal GM secrets from the reference files. After the recap add a heading \"Key reminders\" with up to 5 bullets the players will want to remember (names, promises, deadlines)."
-        }),
-        new("Quest log and plot hooks", "Active quests, objectives, rewards, and hooks the party noticed.", () => new()
-        {
-            Name = "Quest log and plot hooks",
-            Prompt = "Maintain the party's quest log. Use the headings Active quests, Completed or failed, and Unfollowed plot hooks. For each quest give: name, who gave it, the goal, current progress and next step, any reward promised, and any deadline. Under Unfollowed plot hooks list rumours, leads and offers the players heard but have not acted on yet. Use the reference files to name quests consistently with the adventure. Keep entries from your previous output, update their status, and add new ones. Do not invent quests that were not mentioned."
-        }),
-        new("Combat tracker", "Round, initiative, damage, conditions and resources in the current fight.", () => new()
-        {
-            Name = "Combat tracker",
-            MaxTranscriptChars = 20000,
-            Prompt = "Track the current (or most recent) combat from the transcript. Show: the round number, the initiative order with whose turn it is, then one line per combatant with damage taken or HP remaining when stated, conditions and their durations (e.g. prone, poisoned until end of next turn), concentration, and notable resources used (spell slots, rage, ki, legendary actions, potions). List defeated or fled combatants separately. Mark anything you are unsure about with \"(?)\". If no combat is happening, reply with a one-line note and the outcome of the last fight. Keep it compact; no narration."
-        }),
-        new("Rules questions and rulings", "Rules questions raised at the table, the call made, and the rule as written.", () => new()
-        {
-            Name = "Rules questions and rulings",
-            Prompt = "Keep a log of rules questions and rulings from this session. For each: the situation in one line, the ruling the GM made at the table, and what the rules say (search the reference files and cite file and page when you find it). Flag rulings that differ from the rules as written with \"Differs from RAW\" so the GM can decide whether to keep them as house rules. Keep previous entries and add new ones. Skip questions that were never resolved unless they are still open; list those under \"Open questions\"."
-        }),
-        new("Lore and canon log", "World facts established in play, so later sessions stay consistent.", () => new()
-        {
-            Name = "Lore and canon log",
-            Prompt = "Maintain a canon log of facts about the world that were established during play, especially details the GM improvised: history, names, gods, customs, prices, distances, relationships, secrets revealed to the players. Group by topic with short bullets and note who said it when relevant. Compare against the reference files and add a \"Possible contradictions\" section when something said at the table conflicts with the adventure or setting material (cite file and page). Keep previous entries; do not invent facts."
-        }),
-        new("Locations and travel", "Places visited or mentioned, routes, and where the party is now.", () => new()
-        {
-            Name = "Locations and travel",
-            Prompt = "Maintain a gazetteer of locations from this session. Start with \"Party is now at:\" and the current location. Then for each place visited or mentioned: name (spelled as in the reference files when found), region, a one-line description, notable features, who or what is there, and whether the party has visited it. End with a \"Routes\" section listing known paths, travel times and hazards between places. Keep previous entries and update them."
-        }),
-        new("In-game calendar and timeline", "Days passed, time of day, rests, deadlines and countdowns.", () => new()
-        {
-            Name = "In-game calendar and timeline",
-            Prompt = "Track in-world time for this campaign. Give: the current in-game date or day number and time of day, then a timeline of events with in-game times (travel, rests, downtime, scenes), and a \"Deadlines and countdowns\" section with anything time-sensitive (rituals, festivals, ultimatums, spell or effect durations, poison or disease progress) and how much time is left. State assumptions when the transcript is vague (e.g. \"assumed one day of travel\"). Keep previous entries and extend the timeline."
-        }),
-        new("Mysteries and clues", "Clues found, what they point to, and leads the players have missed.", () => new()
-        {
-            Name = "Mysteries and clues",
-            Prompt = "Track the mysteries in this campaign. For each open mystery or question: what the players are trying to find out, the clues they have found so far (and where), what those clues actually point to according to the reference files (GM eyes only), and important clues they have not found or not connected yet. Suggest one or two new ways to deliver a missing clue if the players seem stuck. Mark solved mysteries as solved. Keep previous entries and update them."
-        }),
-        new("Spotlight and player engagement", "Who got the spotlight, character moments, and ideas to involve quieter players.", () => new()
-        {
-            Name = "Spotlight and player engagement",
-            Prompt = "For each player character (and the player's name when known), summarise: their key moments this session, personal goals or backstory threads that came up, and roughly how much spotlight they had (high, medium, low). Then suggest 1–2 concrete ways to give the lower-spotlight characters a moment next session, tied to their goals or abilities and to the adventure in the reference files. Be kind and practical; this is for the GM only."
-        }),
-        new("Memorable quotes and moments", "Funny or epic lines with who said them, plus highlight moments.", () => new()
-        {
-            Name = "Memorable quotes and moments",
-            Prompt = "Collect the memorable moments of this session: great or funny quotes (quote them exactly as transcribed, with the speaker), dramatic dice rolls, clever plans, epic fails and emotional beats. Use two headings, Quotes and Highlights, with short bullets in the order they happened. Keep previous entries and add new ones. Do not invent quotes."
-        }),
-        new("In-character journal", "A journal entry written by a party member, in prose.", () => new()
-        {
-            Name = "In-character journal",
-            UseReferences = false,
-            Prompt = "Write this session as an in-character journal entry by a member of the party (the most talkative player character, unless one is named as the chronicler). Write in first person, past tense, in that character's voice, 300–600 words. Include only what the characters experienced and know; no game mechanics, dice or out-of-character table talk. Update and extend your previous entry instead of starting over."
-        }),
-        new("Player handout (spoiler-free)", "A player-facing summary that is safe to share with the group.", () => new()
-        {
-            Name = "Player handout (spoiler-free)",
-            UseReferences = false,
-            Prompt = "Write a player-facing campaign wiki entry for this session that the GM can share with the players. Include: a short summary, NPCs met (one line each, only what the characters know), places visited, loot gained, and open leads. Leave out anything only the GM knows, any out-of-character table talk and anything the characters did not witness. Use Markdown headings and bullets."
-        }),
-        new("Next session prep", "Likely next scenes, NPCs and stat blocks to prepare, and consequences.", () => new()
-        {
-            Name = "Next session prep",
-            Prompt = "Help the GM prepare the next session based on where this one ended. Give: a strong start for next session, the 3–5 scenes most likely to come up next, NPCs and monsters to have ready (with the file and page of their stat blocks or descriptions from the reference files), secrets and clues the players could discover, how the world reacts to what the players did (consequences, factions moving), and loose ends to follow up. Use short headings and bullets."
-        }),
-        new("XP, milestones and rewards", "Encounters overcome, objectives reached, XP and treasure to hand out.", () => new()
-        {
-            Name = "XP, milestones and rewards",
-            Prompt = "Track advancement and rewards for this session: encounters overcome (with the monsters involved), objectives and milestones reached, XP awarded when mentioned (or a suggested amount from the reference files' rules, marked as a suggestion), treasure and how it was split, and other rewards such as favours, titles or boons. End with whether the party looks ready for a level-up under milestone advancement. Keep previous entries and add new ones."
-        }),
-        new("Character changes and conditions", "Level-ups, new abilities, lasting conditions, curses and attunement.", () => new()
-        {
-            Name = "Character changes and conditions",
-            Prompt = "For each player character, track lasting changes from this session: level-ups, new spells, feats or abilities, ability score or HP changes, lasting conditions (exhaustion, curses, diseases, madness, injuries), attuned or equipped magic items, and resources still spent at the end of the session if no rest happened. Look up rules for conditions and effects in the reference files and note how they end. Keep previous entries and update them."
-        }),
-        new("Improv helper: NPCs on the fly", "Ready-to-use NPCs and names that fit the current scene.", () => new()
-        {
-            Name = "Improv helper: NPCs on the fly",
-            IncludePrevious = false, MaxTranscriptChars = 8000,
-            Prompt = "From the most recent part of the transcript, work out the current scene and setting. Give the GM three ready-to-use NPCs who could plausibly appear here, each with: a name that fits the setting, a one-line look, a voice or mannerism, what they want, and one secret or useful piece of information. Then list 8 spare names (mixed people, taverns and shops) that fit the setting. If the reference files describe this location, prefer NPCs from there and cite file and page. Keep it short."
-        })
-    ];
-}
-
-/// <summary>An entry of the TTRPG template library: <see cref="Create"/> builds a fresh template (new ID) each time.</summary>
-public sealed record TemplateBlueprint(string Name, string Description, Func<OutputTemplate> Create)
-{
-    public override string ToString() => Name;
+    /// <summary>Ready-made tabletop RPG templates, in the TTRPG folder. All start as manual updates.</summary>
+    public static IReadOnlyList<OutputTemplate> TtrpgTemplates()
+    {
+        OutputTemplate[] templates =
+        [
+            new()
+            {
+                Name = "Recap: previously on…",
+                Prompt = "Write a read-aloud recap of this session for the Game Master to open the next session with. Start with \"Previously on…\" and write 1–3 short, vivid paragraphs in second person plural (\"you\"), past tense, covering only what the player characters did and learned, ending on the cliffhanger or the situation where play stopped. Do not reveal GM secrets from the reference files. After the recap add a heading \"Key reminders\" with up to 5 bullets the players will want to remember (names, promises, deadlines)."
+            },
+            new()
+            {
+                Name = "Quest log and plot hooks",
+                Prompt = "Maintain the party's quest log. Use the headings Active quests, Completed or failed, and Unfollowed plot hooks. For each quest give: name, who gave it, the goal, current progress and next step, any reward promised, and any deadline. Under Unfollowed plot hooks list rumours, leads and offers the players heard but have not acted on yet. Use the reference files to name quests consistently with the adventure. Keep entries from your previous output, update their status, and add new ones. Do not invent quests that were not mentioned."
+            },
+            new()
+            {
+                Name = "Combat tracker",
+                MaxTranscriptChars = 20000,
+                Prompt = "Track the current (or most recent) combat from the transcript. Show: the round number, the initiative order with whose turn it is, then one line per combatant with damage taken or HP remaining when stated, conditions and their durations (e.g. prone, poisoned until end of next turn), concentration, and notable resources used (spell slots, rage, ki, legendary actions, potions). List defeated or fled combatants separately. Mark anything you are unsure about with \"(?)\". If no combat is happening, reply with a one-line note and the outcome of the last fight. Keep it compact; no narration."
+            },
+            new()
+            {
+                Name = "Rules questions and rulings",
+                Prompt = "Keep a log of rules questions and rulings from this session. For each: the situation in one line, the ruling the GM made at the table, and what the rules say (search the reference files and cite file and page when you find it). Flag rulings that differ from the rules as written with \"Differs from RAW\" so the GM can decide whether to keep them as house rules. Keep previous entries and add new ones. Skip questions that were never resolved unless they are still open; list those under \"Open questions\"."
+            },
+            new()
+            {
+                Name = "Lore and canon log",
+                Prompt = "Maintain a canon log of facts about the world that were established during play, especially details the GM improvised: history, names, gods, customs, prices, distances, relationships, secrets revealed to the players. Group by topic with short bullets and note who said it when relevant. Compare against the reference files and add a \"Possible contradictions\" section when something said at the table conflicts with the adventure or setting material (cite file and page). Keep previous entries; do not invent facts."
+            },
+            new()
+            {
+                Name = "Locations and travel",
+                Prompt = "Maintain a gazetteer of locations from this session. Start with \"Party is now at:\" and the current location. Then for each place visited or mentioned: name (spelled as in the reference files when found), region, a one-line description, notable features, who or what is there, and whether the party has visited it. End with a \"Routes\" section listing known paths, travel times and hazards between places. Keep previous entries and update them."
+            },
+            new()
+            {
+                Name = "In-game calendar and timeline",
+                Prompt = "Track in-world time for this campaign. Give: the current in-game date or day number and time of day, then a timeline of events with in-game times (travel, rests, downtime, scenes), and a \"Deadlines and countdowns\" section with anything time-sensitive (rituals, festivals, ultimatums, spell or effect durations, poison or disease progress) and how much time is left. State assumptions when the transcript is vague (e.g. \"assumed one day of travel\"). Keep previous entries and extend the timeline."
+            },
+            new()
+            {
+                Name = "Mysteries and clues",
+                Prompt = "Track the mysteries in this campaign. For each open mystery or question: what the players are trying to find out, the clues they have found so far (and where), what those clues actually point to according to the reference files (GM eyes only), and important clues they have not found or not connected yet. Suggest one or two new ways to deliver a missing clue if the players seem stuck. Mark solved mysteries as solved. Keep previous entries and update them."
+            },
+            new()
+            {
+                Name = "Spotlight and player engagement",
+                Prompt = "For each player character (and the player's name when known), summarise: their key moments this session, personal goals or backstory threads that came up, and roughly how much spotlight they had (high, medium, low). Then suggest 1–2 concrete ways to give the lower-spotlight characters a moment next session, tied to their goals or abilities and to the adventure in the reference files. Be kind and practical; this is for the GM only."
+            },
+            new()
+            {
+                Name = "Memorable quotes and moments",
+                Prompt = "Collect the memorable moments of this session: great or funny quotes (quote them exactly as transcribed, with the speaker), dramatic dice rolls, clever plans, epic fails and emotional beats. Use two headings, Quotes and Highlights, with short bullets in the order they happened. Keep previous entries and add new ones. Do not invent quotes."
+            },
+            new()
+            {
+                Name = "In-character journal",
+                UseReferences = false,
+                Prompt = "Write this session as an in-character journal entry by a member of the party (the most talkative player character, unless one is named as the chronicler). Write in first person, past tense, in that character's voice, 300–600 words. Include only what the characters experienced and know; no game mechanics, dice or out-of-character table talk. Update and extend your previous entry instead of starting over."
+            },
+            new()
+            {
+                Name = "Player handout (spoiler-free)",
+                UseReferences = false,
+                Prompt = "Write a player-facing campaign wiki entry for this session that the GM can share with the players. Include: a short summary, NPCs met (one line each, only what the characters know), places visited, loot gained, and open leads. Leave out anything only the GM knows, any out-of-character table talk and anything the characters did not witness. Use Markdown headings and bullets."
+            },
+            new()
+            {
+                Name = "Next session prep",
+                Prompt = "Help the GM prepare the next session based on where this one ended. Give: a strong start for next session, the 3–5 scenes most likely to come up next, NPCs and monsters to have ready (with the file and page of their stat blocks or descriptions from the reference files), secrets and clues the players could discover, how the world reacts to what the players did (consequences, factions moving), and loose ends to follow up. Use short headings and bullets."
+            },
+            new()
+            {
+                Name = "XP, milestones and rewards",
+                Prompt = "Track advancement and rewards for this session: encounters overcome (with the monsters involved), objectives and milestones reached, XP awarded when mentioned (or a suggested amount from the reference files' rules, marked as a suggestion), treasure and how it was split, and other rewards such as favours, titles or boons. End with whether the party looks ready for a level-up under milestone advancement. Keep previous entries and add new ones."
+            },
+            new()
+            {
+                Name = "Character changes and conditions",
+                Prompt = "For each player character, track lasting changes from this session: level-ups, new spells, feats or abilities, ability score or HP changes, lasting conditions (exhaustion, curses, diseases, madness, injuries), attuned or equipped magic items, and resources still spent at the end of the session if no rest happened. Look up rules for conditions and effects in the reference files and note how they end. Keep previous entries and update them."
+            },
+            new()
+            {
+                Name = "Improv helper: NPCs on the fly",
+                IncludePrevious = false, MaxTranscriptChars = 8000,
+                Prompt = "From the most recent part of the transcript, work out the current scene and setting. Give the GM three ready-to-use NPCs who could plausibly appear here, each with: a name that fits the setting, a one-line look, a voice or mannerism, what they want, and one secret or useful piece of information. Then list 8 spare names (mixed people, taverns and shops) that fit the setting. If the reference files describe this location, prefer NPCs from there and cite file and page. Keep it short."
+            }
+        ];
+        foreach (var template in templates) template.Folder = TtrpgFolder;
+        return templates;
+    }
 }
 
 /// <summary>
@@ -600,4 +626,27 @@ public sealed class TemplateSettings
     /// <summary>"Screen N (…)" or a window title (matched exactly, then by "contains").</summary>
     public string CaptureTarget { get; set; } = "";
     public int CaptureMaxWidth { get; set; } = ScreenCapture.DefaultMaxWidth;
+    /// <summary>The template table (CSV) kept in sync with the list; empty uses templates.csv in the library folder.</summary>
+    public string TablePath { get; set; } = "";
+    /// <summary>1 once the built-in TTRPG templates were added to an existing list.</summary>
+    public int LibraryVersion { get; set; }
+}
+
+/// <summary>One row of the template tree: a folder (with children), the Favorites group, or a template.</summary>
+public sealed class TemplateTreeNode(string name, string folderPath, OutputTemplate? template, bool isFavorites = false) : ObservableObject
+{
+    private bool isExpanded = true;
+
+    public string Name { get; } = name;
+    public string FolderPath { get; } = folderPath;
+    public OutputTemplate? Template { get; } = template;
+    public bool IsFavorites { get; } = isFavorites;
+    public bool IsFolder => Template is null;
+    public List<TemplateTreeNode> Children { get; } = [];
+    public string Count => IsFolder ? Leaves().Count().ToString(System.Globalization.CultureInfo.CurrentCulture) : "";
+    public bool IsExpanded { get => isExpanded; set => Set(ref isExpanded, value); }
+    public System.Windows.Input.ICommand ToggleFavoriteCommand => new RelayCommand(() => { if (Template is { } t) t.IsFavorite = !t.IsFavorite; });
+
+    public IEnumerable<TemplateTreeNode> Leaves() => IsFolder ? Children.SelectMany(c => c.Leaves()) : [this];
+    public IEnumerable<TemplateTreeNode> All() => Children.SelectMany(c => c.All()).Prepend(this);
 }

@@ -155,6 +155,15 @@ public static class AppDiagnostics
         OpenFolderProcess(folder);
     }
 
+    /// <summary>Opens a file in its default app (for a .csv table: Excel, LibreOffice or a text editor).</summary>
+    public static void OpenFile(string file)
+    {
+        var start = OperatingSystem.IsWindows()
+            ? new ProcessStartInfo(file) { UseShellExecute = true }
+            : new ProcessStartInfo("xdg-open") { UseShellExecute = false, ArgumentList = { file } };
+        Process.Start(start)?.Dispose();
+    }
+
     private static void OpenFolderProcess(string folder)
     {
         var command = OperatingSystem.IsWindows() ? "explorer.exe" : "xdg-open";
