@@ -8,6 +8,8 @@ Format: newest first; each version is `## vX.Y.Z - YYYY-MM-DD` with `### Added`,
 
 ## Unreleased
 
+## v0.2.6 - 2026-10-09
+
 ### Changed
 
 - LLM connection setup (add, edit, default, models, API keys, test) moved from the Templates tab to the Privacy / models tab; a **Set up…** button next to each template's connection list opens it. (#59)
