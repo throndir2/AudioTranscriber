@@ -11,7 +11,6 @@ using Avalonia.Platform;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using AudioTranscriber.Application;
-using AudioTranscriber.Integrations;
 using AudioTranscriber.Storage;
 
 namespace AudioTranscriber.App;
@@ -20,12 +19,9 @@ public enum NativeDialogIcon { Info, Warning, Error, Question }
 
 public sealed class DesktopDialogs(Func<Window> owner)
 {
-    private Window? signInWindow;
+    public Task<string?> OpenAudioAsync() => PickFileAsync("Choose an audio or video file, or a WebVTT (.vtt) transcript",
+        ["*.wav", "*.flac", "*.mp3", "*.m4a", "*.aac", "*.ogg", "*.opus", "*.wma", "*.mp4", "*.mkv", "*.mov", "*.webm", "*.avi", "*.vtt"]);
 
-    public Task<string?> OpenAudioAsync() => PickFileAsync("Choose an audio or audio-bearing video file",
-        ["*.wav", "*.flac", "*.mp3", "*.m4a", "*.aac", "*.ogg", "*.opus", "*.wma", "*.mp4", "*.mkv", "*.mov", "*.webm", "*.avi"]);
-
-    public Task<string?> OpenVttAsync() => PickFileAsync("Import WebVTT into the selected session", ["*.vtt"]);
     public Task<string?> OpenWhisperModelAsync() => PickFileAsync("Choose an existing compatible whisper.cpp model (no download)", ["*.bin"]);
 
     public Task<string?> SaveExportAsync(string sessionName) => SaveFileAsync("Export the complete selected-session transcript",
@@ -232,68 +228,6 @@ public sealed class DesktopDialogs(Func<Window> owner)
         return await window.ShowDialog<bool>(owner()) ? list.SelectedItem as MediaStreamChoice : null;
     }
 
-    public async Task<TeamsTranscriptRequest?> RequestTeamsTranscriptAsync()
-    {
-        var window = Dialog("Microsoft Teams transcript · configuration required", 680);
-        var panel = new StackPanel { Margin = new Thickness(22), Spacing = 4 };
-        panel.Children.Add(Help("Real delegated Microsoft Graph retrieval, not live Teams audio. Use a work/school tenant and a public-client app configured for device-code sign-in with OnlineMeetingTranscript.Read.All permission. You must already have meeting access; tenant restrictions are not bypassed."));
-        var tenant = Field(panel, "Tenant ID (GUID)");
-        var client = Field(panel, "Public client application ID (GUID)");
-        var user = Field(panel, "User ID or work/school user principal name");
-        var meeting = Field(panel, "Online meeting ID (not a join URL or meeting code)");
-        var transcript = Field(panel, "Transcript ID");
-        var unattributed = new CheckBox { Content = new TextBlock { Text = "Request the documented unattributed content type only if tenant policy permits it (never reconstruct restricted identities).", TextWrapping = TextWrapping.Wrap } };
-        panel.Children.Add(unattributed);
-        var validation = Help(""); validation.Foreground = Brush("ErrorText"); panel.Children.Add(validation);
-        panel.Children.Add(Buttons(window, "Sign in and fetch", () =>
-        {
-            if (!Guid.TryParse(tenant.Text, out _) || !Guid.TryParse(client.Text, out _) || new[] { user.Text, meeting.Text, transcript.Text }.Any(string.IsNullOrWhiteSpace))
-            {
-                validation.Text = "Enter valid tenant and client GUIDs and all three resource identifiers.";
-                return false;
-            }
-            return true;
-        }));
-        window.Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MaxHeight = 760 };
-        return await window.ShowDialog<bool>(owner())
-            ? new TeamsTranscriptRequest(tenant.Text!.Trim(), client.Text!.Trim(), user.Text!.Trim(), meeting.Text!.Trim(), transcript.Text!.Trim(), unattributed.IsChecked == true) : null;
-    }
-
-    public Task ShowDeviceSignInAsync(DeviceSignInPrompt prompt, Action cancel)
-    {
-        CloseDeviceSignIn();
-        return Dispatcher.UIThread.InvokeAsync(() =>
-        {
-            var window = Dialog("Microsoft device-code sign-in", 620);
-            signInWindow = window;
-            var panel = new StackPanel { Margin = new Thickness(24), Spacing = 8 };
-            panel.Children.Add(Help("Sign in with your permitted work/school account. This is a device code, not a token. Authentication and Graph tokens stay inside the Microsoft client."));
-            panel.Children.Add(Help("Open this verification URL:"));
-            panel.Children.Add(new TextBox { Text = prompt.VerificationUrl, IsReadOnly = true });
-            var open = new Button { Content = "Open Microsoft verification page", HorizontalAlignment = HorizontalAlignment.Left };
-            open.Click += (_, _) => { try { Process.Start(new ProcessStartInfo(prompt.VerificationUrl) { UseShellExecute = true }); } catch { _ = ShowMessageAsync(window, "Open verification page", "The browser could not be opened. Copy the verification URL into your browser.", NativeDialogIcon.Warning); } };
-            panel.Children.Add(open);
-            panel.Children.Add(Help("Enter the actual code supplied by Microsoft:"));
-            var code = new TextBox { Text = prompt.UserCode, IsReadOnly = true, FontSize = 28, FontWeight = FontWeight.SemiBold };
-            AutomationProperties.SetName(code, "Microsoft device sign-in code");
-            panel.Children.Add(code);
-            panel.Children.Add(Help($"Expires: {prompt.ExpiresOn.ToLocalTime():yyyy-MM-dd HH:mm:ss zzz}\nThe operation waits for sign-in. Keep this window open until completion."));
-            var cancelButton = new Button { Content = "Cancel sign-in / fetch", HorizontalAlignment = HorizontalAlignment.Left };
-            cancelButton.Click += (_, _) => { cancel(); CloseDeviceSignIn(); };
-            panel.Children.Add(cancelButton);
-            window.Content = panel;
-            window.Closed += (_, _) => { if (ReferenceEquals(signInWindow, window)) { signInWindow = null; cancel(); } };
-            window.Show(owner());
-        }).GetTask();
-    }
-
-    public void CloseDeviceSignIn()
-    {
-        var window = signInWindow;
-        signInWindow = null;
-        window?.Close();
-    }
-
     private async Task<string?> PickFileAsync(string title, IReadOnlyList<string> patterns)
     {
         var result = await owner().StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
@@ -366,15 +300,6 @@ public sealed class DesktopDialogs(Func<Window> owner)
         Margin = new Thickness(0, 0, 0, 12),
         Foreground = Brush("Muted")
     };
-
-    private static TextBox Field(Panel panel, string label)
-    {
-        var input = new TextBox();
-        panel.Children.Add(new TextBlock { Text = label, Foreground = Brush("Muted"), FontSize = 12.5 });
-        AutomationProperties.SetName(input, label);
-        panel.Children.Add(input);
-        return input;
-    }
 
     private static StackPanel Buttons(Window window, string affirmative, Func<bool> validate)
     {

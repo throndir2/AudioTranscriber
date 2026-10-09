@@ -1,7 +1,7 @@
 # Recording and Importing
 
 Open **Record / import** to start a new recording or import an existing audio/video
-file.
+file or WebVTT transcript.
 
 ## Recording
 
@@ -30,13 +30,22 @@ pauses produce fewer, longer phrases.
 
 ## Importing media
 
-Click **Import audio / video** and choose a local file. FFprobe enumerates audio
+Click **Import file…** and choose a local file. FFprobe enumerates audio
 streams; one stream is selected automatically, while multiple streams require a choice.
 The app makes a managed original copy and normalizes it for transcription.
 
 Remote URLs, UNC paths, link files, playlists, and media without valid audio streams are
 rejected by the audio layer. Import progress reports what the controller knows; it does
 not invent percentages.
+
+## Importing WebVTT transcripts
+
+**Import file…** also accepts a WebVTT (`.vtt`) transcript, for example one saved from
+a Teams or Zoom meeting. It becomes a new session with the transcript's timed lines and
+speaker labels. Nothing is transcribed, and the session has no audio to play.
+
+The speaker labels come from the file. They are not verified participant identities.
+You can rename speakers, search, export, and use templates as with any other session.
 
 ## Live activity
 

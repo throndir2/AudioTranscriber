@@ -21,11 +21,7 @@ Short turns, overlap, crowded windows, heavy compression, different rooms, simil
 voices, and character voices can remain unknown or split one person. A speaker label is
 not a verified identity.
 
-## Teams and Discord
-
-Teams transcript retrieval needs configured Graph access and permitted transcript
-access. It is not live Teams media capture, and tenant attribution restrictions must be
-respected.
+## Discord
 
 Discord server voice channels are recorded through your own visible bot (no user token
 or selfbot); see [Discord](Discord). Bots cannot join DM or group-DM calls, so record

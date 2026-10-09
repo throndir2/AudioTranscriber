@@ -139,12 +139,17 @@ provider accuracy, or live Graph access.
    Device removal does not silently select a replacement. Inspect the session
    error and Jobs tab if a device, disk, permission, or processing failure occurs.
 
-For an existing file, click **Import audio / video** with the same new-session
+For an existing file, click **Import file…** with the same new-session
 settings. FFprobe enumerates audio streams. One stream is selected automatically;
 multiple streams require an explicit choice. The backend creates the session and
 retains its managed original. The status strip shows controller progress and an
 indeterminate activity bar where no total is available; it does not invent a
 percentage. Cancel operation is separate from recording Stop.
+
+**Import file…** also accepts a WebVTT (`.vtt`) transcript, for example one saved
+from a Teams or Zoom meeting. It becomes a new session with the transcript's timed
+lines and speaker labels; nothing is transcribed and the session has no audio.
+Source labels remain attributed metadata, not verified participant identities.
 
 ## Transcript, corrections, speakers, and playback
 
@@ -515,29 +520,6 @@ sizes, licenses, and SHA256 values without downloading anything. Its installer
 requires explicit license acceptance and acceptance of the exact download byte
 count; see [provider setup](providers.md). After an explicitly requested install,
 select the resulting `.bin` file in the desktop picker.
-
-## WebVTT and configured Teams retrieval
-
-Select an existing session and use **VTT / Teams** to import local timed WebVTT
-cues and source speaker labels. Source labels remain attributed metadata, not
-inferred participant identities. Imported cue times retain the source transcript
-clock; they are **not automatically aligned** to the selected session's existing
-audio. Do not interpret a cue's timestamp as verified synchronization with an
-unrelated audio track.
-
-The Teams dialog calls real delegated Microsoft Graph transcript retrieval. It
-requires a work/school tenant GUID, a public-client application GUID configured
-for device-code flow, `OnlineMeetingTranscript.Read.All`, and explicit user,
-online meeting, and transcript identifiers. A join link is not the meeting ID.
-The actual device verification URL, code, and expiration appear in a dedicated
-window; tokens are neither displayed nor mixed with NVIDIA credentials.
-An explicit unattributed-content option is available only when tenant policy
-permits it. No identities are reconstructed to bypass attribution restrictions.
-
-Graph integration is **configuration-required**, not a claim of live tenant
-validation. This is retrieval of an existing transcript, not live Teams audio.
-Live Teams audio needs a separate Azure media-bot deployment and policies.
-Discord server voice channels are recorded live on the **Discord** tab (below).
 
 ## Discord server voice channels
 

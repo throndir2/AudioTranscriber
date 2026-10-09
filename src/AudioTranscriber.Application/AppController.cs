@@ -666,22 +666,29 @@ public sealed class AppController : IAppController
         return Store.GetSession(session.Id);
     }
 
-    public async Task ImportVttAsync(Guid sessionId, string path, CancellationToken cancellationToken = default)
+    public async Task<StoredSession> ImportVttAsync(string name, string path, string providerId, string language,
+        CancellationToken cancellationToken = default)
     {
-        var count = await TranscriptImports.ImportWebVttAsync(Store, sessionId, path, cancellationToken);
-        Notify($"Imported {count:N0} source-timed WebVTT cues. Alignment to session audio is not independently verified.");
-    }
-
-    public async Task FetchTeamsTranscriptAsync(Guid sessionId, TeamsTranscriptRequest request,
-        Func<DeviceSignInPrompt, Task> showSignIn, CancellationToken cancellationToken = default)
-    {
-        var directory = Path.Combine(Store.GetSession(sessionId).Directory, "teams");
-        Directory.CreateDirectory(directory);
-        var path = Path.Combine(directory, Guid.NewGuid().ToString("N") + ".vtt");
-        await new TeamsTranscriptClient().DownloadAsync(request, path, showSignIn, cancellationToken);
-        var count = await TranscriptImports.ImportWebVttAsync(Store, sessionId, path, cancellationToken,
-            allowVoiceLabels: !request.Unattributed);
-        Notify($"Imported {count:N0} Teams transcript cues. Attribution policy was respected; this is not live Teams audio capture.");
+        var session = Store.CreateSession(name, providerId, language);
+        try
+        {
+            var count = await TranscriptImports.ImportWebVttAsync(Store, session.Id, path, cancellationToken);
+            Store.SetSessionState(session.Id, "Recorded");
+            AppLog.Info($"Imported {count} WebVTT cues into new session {session.Id}.");
+            Notify($"Imported {count:N0} timed WebVTT cues as a new session.");
+        }
+        catch
+        {
+            try
+            {
+                if (Store.DeleteSession(session.Id) is { } directory && Directory.Exists(directory))
+                    Directory.Delete(directory, true);
+            }
+            catch (Exception error) when (IsOperational(error)) { }
+            throw;
+        }
+        TranscriptChanged?.Invoke(session.Id);
+        return Store.GetSession(session.Id);
     }
 
     public async Task DiarizeSessionAsync(Guid sessionId, CancellationToken cancellationToken = default)

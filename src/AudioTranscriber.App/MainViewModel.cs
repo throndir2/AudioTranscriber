@@ -97,8 +97,6 @@ public sealed class MainViewModel : ObservableObject
         MergeSessionsCommand = new AsyncCommand(MergeSessionsInteractiveAsync, () => Sessions.Count > 1 && !Busy && !closing);
         StopRecordingCommand = new AsyncCommand(StopRecordingAsync, () => IsRecording && !Stopping && !closing);
         ImportAudioCommand = new AsyncCommand(ImportAudioAsync, () => !Busy && HasNewSessionDetails && !closing);
-        ImportVttCommand = new AsyncCommand(ImportVttAsync, CanWorkWithSession);
-        FetchTeamsCommand = new AsyncCommand(FetchTeamsAsync, CanWorkWithSession);
         InstallModelsCommand = new AsyncCommand(InstallModelsAsync, () => !Busy && !closing && !controller.ModelSetupRunning);
         ChooseWhisperModelCommand = new AsyncCommand(ChooseWhisperModelAsync, () => !Busy && !closing);
         InstallWhisperModelCommand = new AsyncCommand(InstallWhisperModelAsync, () => !Busy && !closing && !controller.ModelSetupRunning);
@@ -566,8 +564,6 @@ public sealed class MainViewModel : ObservableObject
     public ICommand MergeSessionsCommand { get; }
     public ICommand StopRecordingCommand { get; }
     public ICommand ImportAudioCommand { get; }
-    public ICommand ImportVttCommand { get; }
-    public ICommand FetchTeamsCommand { get; }
     public ICommand InstallModelsCommand { get; }
     public ICommand ChooseWhisperModelCommand { get; }
     public ICommand InstallWhisperModelCommand { get; }
@@ -1368,6 +1364,17 @@ public sealed class MainViewModel : ObservableObject
         if (path is null || SelectedProvider is not { } provider) return;
         var name = TakeSessionName();
         var locale = Language.Trim();
+        if (string.Equals(Path.GetExtension(path), ".vtt", StringComparison.OrdinalIgnoreCase))
+        {
+            await RunAsync("Importing WebVTT transcript…", async token =>
+            {
+                var imported = await controller.ImportVttAsync(name, path, provider.Id, locale, token);
+                if (sessionNameIsDefault) ResetSessionName();
+                RefreshLibrary();
+                SelectedSession = Sessions.FirstOrDefault(x => x.Id == imported.Id) ?? imported;
+            });
+            return;
+        }
         var consent = NewCloudConsent;
         SaveRecordingPreferences();
         await RunAsync("Probing the selected media file…", async token =>
@@ -1385,26 +1392,6 @@ public sealed class MainViewModel : ObservableObject
             SelectedSession = Sessions.FirstOrDefault(x => x.Id == session.Id) ?? session;
             SetStatus("Audio imported. Jobs and originals are available in the selected session.");
         });
-    }
-
-    private async Task ImportVttAsync()
-    {
-        var path = await dialogs.OpenVttAsync();
-        if (path is not null)
-            await RunForSessionAsync("Importing local WebVTT cues…", (id, token) => controller.ImportVttAsync(id, path, token));
-    }
-
-    private async Task FetchTeamsAsync()
-    {
-        var request = await dialogs.RequestTeamsTranscriptAsync();
-        if (request is null) return;
-        try
-        {
-            await RunForSessionAsync("Connecting to configured Microsoft Graph transcript access…",
-                (id, token) => controller.FetchTeamsTranscriptAsync(id, request,
-                    prompt => dialogs.ShowDeviceSignInAsync(prompt, () => operationCancellation?.Cancel()), token));
-        }
-        finally { dialogs.CloseDeviceSignIn(); }
     }
 
     private async Task InstallModelsAsync()
@@ -1881,6 +1868,7 @@ public sealed class MainViewModel : ObservableObject
             ArgumentException => "Check the entered fields, stream, language, and selected model. The operation could not be completed.",
             FileNotFoundException => "A required file or media tool was not found. Check model/audio paths and FFmpeg installation.",
             UnauthorizedAccessException => "Access was denied. Check file permissions, device access, and account configuration.",
+            InvalidDataException => error.Message,
             IOException => "A file or media operation failed. Check disk space, paths, and device availability; retained audio is not deleted.",
             _ => "The operation failed. Review the selected session's jobs and error state; no automatic cloud fallback is used."
         }, true);
@@ -1949,7 +1937,6 @@ public sealed class MainViewModel : ObservableObject
             controller.Notification -= OnNotification;
             controller.LevelsChanged -= OnLevelsChanged;
             controller.TranscriptChanged -= OnTranscriptChanged;
-            dialogs.CloseDeviceSignIn();
             disposed = true;
         }
         catch

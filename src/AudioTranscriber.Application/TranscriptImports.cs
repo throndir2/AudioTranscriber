@@ -65,8 +65,10 @@ public static class TranscriptImports
         }
         using var reader = new StreamReader(retainedPath, Encoding.UTF8, true, 65_536);
         var index = 0;
+        var end = 0L;
         await foreach (var cue in WebVttReader.ReadAsync(reader, cancellationToken))
         {
+            end = Math.Max(end, cue.EndTicks);
             string? speakerId = null;
             if (allowVoiceLabels && !string.IsNullOrWhiteSpace(cue.SpeakerLabel))
             {
@@ -81,6 +83,7 @@ public static class TranscriptImports
             index++;
         }
         if (index == 0) throw new InvalidDataException("The WebVTT transcript contains no speech cues.");
+        store.SetSessionDuration(sessionId, end);
         return index;
     }
 }

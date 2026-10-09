@@ -8,6 +8,14 @@ Format: newest first; each version is `## vX.Y.Z - YYYY-MM-DD` with `### Added`,
 
 ## Unreleased
 
+### Changed
+
+- **Import file…** on Record / import now also takes a WebVTT (`.vtt`) transcript and opens it as a new session with its timed lines and speaker labels. (#PR)
+
+### Removed
+
+- The **VTT / Teams** tab and the Microsoft Teams transcript download are gone. Import `.vtt` files with **Import file…** instead. (#PR)
+
 ## v0.2.6 - 2026-10-09
 
 ### Changed
