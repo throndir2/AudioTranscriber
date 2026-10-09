@@ -28,11 +28,12 @@ public sealed class LlmConnection : ObservableObject
     private string? protectedKey;
     private bool? supportsImages;
     private bool isDefault;
+    private int contextLimitTokens;
 
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get => name; set => Set(ref name, value ?? ""); }
     public string Kind { get; set; } = "";
-    public string BaseUrl { get => baseUrl; set { if (Set(ref baseUrl, value ?? "")) Changed(nameof(Detail)); } }
+    public string BaseUrl { get => baseUrl; set { if (Set(ref baseUrl, value ?? "")) { Changed(nameof(Detail)); Changed(nameof(ContextStatus)); } } }
     public string Model
     {
         get => model;
@@ -42,6 +43,7 @@ public sealed class LlmConnection : ObservableObject
             if (!string.Equals(model, ImagesCheckedFor, StringComparison.Ordinal)) SupportsImages = null;
             Changed(nameof(ImageSupportStatus));
             Changed(nameof(Detail));
+            Changed(nameof(ContextStatus));
         }
     }
 
@@ -63,6 +65,55 @@ public sealed class LlmConnection : ObservableObject
     }
 
     [JsonIgnore] public string Help => LlmPreset.All.FirstOrDefault(p => p.Name == Kind)?.Help ?? LlmPreset.All[^1].Help;
+
+    /// <summary>The context window the server reported for <see cref="ContextCheckedFor"/>; 0 when it doesn't say.</summary>
+    public int DetectedContextTokens { get; set; }
+    /// <summary>The server is Ollama: templates use its own /api/chat so they can set num_ctx.</summary>
+    public bool IsOllama { get; set; }
+    public string ContextSource { get; set; } = "";
+    /// <summary>The <see cref="ContextKey"/> (base URL and model) that the context fields above belong to.</summary>
+    public string? ContextCheckedFor { get; set; }
+    /// <summary>Most tokens templates may use (0 = the model's full window); also the window when the server doesn't report one.</summary>
+    public int ContextLimitTokens
+    {
+        get => contextLimitTokens;
+        set { if (Set(ref contextLimitTokens, Math.Clamp(value, 0, 100_000_000))) Changed(nameof(ContextStatus)); }
+    }
+
+    [JsonIgnore] public string ContextKey => BaseUrl.Trim() + "\n" + Model.Trim();
+    [JsonIgnore] public bool ContextChecked => ContextCheckedFor == ContextKey;
+    [JsonIgnore] public bool UsesOllamaApi => ContextChecked && IsOllama;
+    /// <summary>The window templates fill: the reported one, lowered to the user's limit; 0 when neither is known.</summary>
+    [JsonIgnore]
+    public int ContextTokens
+    {
+        get
+        {
+            var detected = ContextChecked ? DetectedContextTokens : 0;
+            return detected > 0 && ContextLimitTokens > 0 ? Math.Min(detected, ContextLimitTokens) : Math.Max(detected, ContextLimitTokens);
+        }
+    }
+    /// <summary>The num_ctx last sent to Ollama in this app run; it only grows, so templates don't make Ollama reload the model.</summary>
+    [JsonIgnore] public int OllamaContextInUse { get; set; }
+
+    [JsonIgnore]
+    public string ContextStatus =>
+        (!ContextChecked ? "Context window: not checked yet (choose Test, or run a template)."
+        : DetectedContextTokens > 0 ? $"Context window: {DetectedContextTokens:N0} tokens ({ContextSource})." +
+            (ContextLimitTokens > 0 && ContextLimitTokens < DetectedContextTokens ? $" Templates use at most {ContextLimitTokens:N0}." : "")
+        : ContextLimitTokens > 0 ? $"Context window: the server doesn't say; templates use your limit of {ContextLimitTokens:N0} tokens."
+        : "Context window: unknown (the server doesn't say). Type the model's token limit so templates can fill it.") +
+        (UsesOllamaApi ? " The app sets Ollama's context size itself and makes it larger as the transcript grows." : "");
+
+    public void SetContextWindow(string key, ContextWindow window)
+    {
+        DetectedContextTokens = window.Tokens;
+        IsOllama = window.Ollama;
+        ContextSource = window.Source;
+        ContextCheckedFor = key;
+        OllamaContextInUse = 0;
+        Changed(nameof(ContextStatus));
+    }
 
     /// <summary>Whether <see cref="ImagesCheckedFor"/> accepts images; null when unknown or not checked.</summary>
     public bool? SupportsImages
@@ -119,7 +170,7 @@ public sealed class OutputTemplate : ObservableObject
     private string name = "", prompt = "", outputPath = "", output = "", status = "Not run yet.";
     private Guid? connectionId;
     private bool autoUpdate, writeToFile, includePrevious = true, useReferences = true, useTranscript = true, useScreenshot, running, keepVersions = true, includeTimestamps = true;
-    private int intervalSeconds = 60, maxTranscriptChars = 60000, maxVersions;
+    private int intervalSeconds = 60, maxTranscriptChars, maxVersions;
     private List<Guid> inputTemplateIds = [];
 
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -138,7 +189,8 @@ public sealed class OutputTemplate : ObservableObject
     public List<Guid> InputTemplateIds { get => inputTemplateIds; set { if (Set(ref inputTemplateIds, value ?? [])) Changed(nameof(Summary)); } }
     /// <summary>Attach a screenshot of the shared capture target (the user's virtual tabletop) to every run.</summary>
     public bool UseScreenshot { get => useScreenshot; set => Set(ref useScreenshot, value); }
-    public int MaxTranscriptChars { get => maxTranscriptChars; set => Set(ref maxTranscriptChars, Math.Clamp(value, 1000, 2_000_000)); }
+    /// <summary>Most transcript characters sent; 0 sends as much of the transcript as the model's context window holds.</summary>
+    public int MaxTranscriptChars { get => maxTranscriptChars; set => Set(ref maxTranscriptChars, value <= 0 ? 0 : Math.Clamp(value, 1000, 2_000_000)); }
     public bool WriteToFile { get => writeToFile; set => Set(ref writeToFile, value); }
     public string OutputPath { get => outputPath; set => Set(ref outputPath, value ?? ""); }
     public string Output { get => output; set => Set(ref output, value ?? ""); }
@@ -536,6 +588,9 @@ public sealed class ConnectionChoice(Guid id) : ObservableObject
 
 public sealed class TemplateSettings
 {
+    /// <summary>1: templates on the old 60,000-character default were moved to 0 (fill the context window).</summary>
+    public const int CurrentVersion = 1;
+    public int Version { get; set; }
     public List<LlmConnection> Connections { get; set; } = [];
     /// <summary>Connection used by templates without their own; null in files saved before it existed.</summary>
     public Guid? DefaultConnectionId { get; set; }

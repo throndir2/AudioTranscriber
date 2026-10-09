@@ -12,12 +12,18 @@ selected session. **Update now** runs once with the current inputs; **Stop** can
 template it uses produces new output), no more often than the template's **Every
 (seconds)** setting. Nothing runs while the inputs are unchanged.
 
-**Transcript characters** limits how much of a long transcript is sent (about 4
-characters per token); lower it for small local models. Only the most recent part is
-sent, and the template status says when the start was cut. A 3-hour session is often
-100,000–200,000 characters, so raise the limit for whole-session templates such as the
-summary. The model must also accept that much text (for Ollama, set
-`OLLAMA_CONTEXT_LENGTH`).
+**Transcript chars (0 = fill)**: with **0** (the default) a template sends as much of the
+transcript as the model's context window holds, the whole session when it fits, and keeps
+room for the answer and for reference files the model reads. A number sends at most that
+many characters of the most recent part (about 3 to 4 characters per token). The template
+status says when the start of the transcript was cut.
+
+The app asks the server for the model's **context window** (Ollama, LM Studio, llama.cpp,
+vLLM, OpenRouter and others that report it) on **Test** or the first template run, and
+shows it on the connection. For Ollama it also sets `num_ctx` itself and makes it larger as
+the transcript grows; otherwise Ollama uses only 4,096 tokens on most PCs. **Token limit
+(0 = model's)** on the connection caps this: type the model's limit when the server doesn't
+report one, or a lower number to keep a local model fast and inside memory.
 
 Untick **Timestamps on transcript lines** to send only `Speaker: text`. Each line is then
 about 30 characters shorter, so more of the session fits. The **Session summary**

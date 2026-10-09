@@ -8,6 +8,18 @@ Format: newest first; each version is `## vX.Y.Z - YYYY-MM-DD` with `### Added`,
 
 ## Unreleased
 
+### Added
+
+- Templates can fill the model's whole context window, so long sessions (such as a multi-hour D&D game) are sent in full when they fit. Set **Transcript chars** to 0 (now the default); the connection shows the model's context window and has a **Token limit** to cap it. (#61)
+
+### Changed
+
+- Templates that used the old default of 60,000 transcript characters now fill the model's context window instead. Type a number to set a fixed limit again. (#61)
+
+### Fixed
+
+- Templates on Ollama no longer lose most of a long transcript: the app now sets Ollama's context size to fit the prompt instead of using Ollama's 4,096-token default. (#61)
+
 ## v0.2.7 - 2026-10-09
 
 ### Changed

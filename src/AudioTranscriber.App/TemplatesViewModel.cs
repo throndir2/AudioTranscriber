@@ -299,11 +299,18 @@ public sealed class TemplatesViewModel : ObservableObject
             var ollama = LlmPreset.All.First(p => p.Name == "Ollama");
             saved = new TemplateSettings
             {
+                Version = TemplateSettings.CurrentVersion,
                 Connections = [new LlmConnection { Name = ollama.Name, Kind = ollama.Name, BaseUrl = ollama.BaseUrl, Model = ollama.Model }],
                 Templates = OutputTemplate.Starters().ToList()
             };
             dirty = true;
             freshDefaults = true;
+        }
+        if (saved.Version < 1)
+        {
+            // 60,000 was the old default size; those templates now fill the model's context window instead.
+            foreach (var template in saved.Templates.Where(t => t.MaxTranscriptChars == 60000)) template.MaxTranscriptChars = 0;
+            dirty = true;
         }
         contextFolder = saved.ContextFolder ?? "";
         pinnedFiles = saved.PinnedFiles ?? "";
@@ -339,6 +346,7 @@ public sealed class TemplatesViewModel : ObservableObject
         {
             var settings = new TemplateSettings
             {
+                Version = TemplateSettings.CurrentVersion,
                 Connections = Connections.ToList(),
                 DefaultConnectionId = DefaultConnection?.Id,
                 Templates = Templates.ToList(),
@@ -455,6 +463,8 @@ public sealed class TemplatesViewModel : ObservableObject
                 "You are a connectivity check.", "Reply with exactly: OK", null, null, CancellationToken.None);
             ConnectionStatus = $"Connected. {connection.Model} replied: {(reply.Length > 80 ? reply[..80] + "…" : reply)}";
             ConnectionStatus += " " + await CheckImagesAsync(connection);
+            await CheckContextAsync(connection);
+            ConnectionStatus += " " + connection.ContextStatus;
         }
         catch (Exception error) when (error is LlmException or HttpRequestException or TaskCanceledException)
         {
@@ -479,6 +489,15 @@ public sealed class TemplatesViewModel : ObservableObject
         connection.SetImageSupport(model, supported);
         dirty = true;
         return connection.ImageSupportStatus + ".";
+    }
+
+    private async Task CheckContextAsync(LlmConnection connection)
+    {
+        var key = connection.ContextKey;
+        var window = await LlmClient.ContextWindowAsync(connection.BaseUrl, connection.GetKey(), connection.Model, CancellationToken.None);
+        if (key != connection.ContextKey) return;
+        connection.SetContextWindow(key, window);
+        dirty = true;
     }
 
     private static string Explain(Exception error) => error switch
@@ -695,22 +714,48 @@ public sealed class TemplatesViewModel : ObservableObject
             var library = template.UseReferences ? new ReferenceLibrary(ContextFolder, PinnedList()) : null;
             var references = library is null ? "" : await Task.Run(() => library.PinnedText(MaxReferenceChars), cancellation.Token);
             var tools = library is { HasFolder: true } ? library : null;
+            if (!connection.ContextChecked)
+            {
+                template.Status = "Checking the model's context window…";
+                await CheckContextAsync(connection);
+            }
             var system = BuildSystem(tools is not null, images is not null);
-            var sent = !template.UseTranscript || transcript is null ? null
+            var included = !template.UseTranscript || transcript is null ? null
                 : template.IncludeTimestamps ? transcript : TranscriptPresentation.WithoutTimestamps(transcript);
-            var user = BuildUser(template, sent, inputs.Select(i => (i.Name, i.Output)).ToArray(), references, previous);
+            var namedInputs = inputs.Select(i => (i.Name, i.Output)).ToArray();
+            var window = connection.ContextTokens;
+            var imageTokens = (images?.Count ?? 0) * ContextBudget.ImageTokens;
+            var maxChars = template.MaxTranscriptChars > 0 ? template.MaxTranscriptChars : 60000;
+            if (template.MaxTranscriptChars == 0 && included is not null && window > 0)
+            {
+                var fixedTokens = ContextBudget.EstimateTokens(system) + imageTokens +
+                    ContextBudget.EstimateTokens(BuildUser(template, "", namedInputs, references, previous, 0));
+                var room = window - ContextBudget.OutputReserve(window) - (tools is not null ? ContextBudget.ToolReserve(window) : 0) - fixedTokens;
+                maxChars = ContextBudget.TailChars(included, Math.Max(room, 250));
+            }
+            var user = BuildUser(template, included, namedInputs, references, previous, maxChars);
+            var promptTokens = ContextBudget.EstimateTokens(system) + ContextBudget.EstimateTokens(user) + imageTokens;
+            var numCtx = 0;
+            if (connection.UsesOllamaApi)
+            {
+                var needed = promptTokens + 4096 + (tools is not null ? 8192 : 0);
+                numCtx = connection.OllamaContextInUse = ContextBudget.OllamaContext(connection.OllamaContextInUse, needed, window);
+            }
             var progress = new Progress<string>(message => template.Status = message);
             var key = connection.GetKey();
-            var result = await Task.Run(() => LlmClient.CompleteAsync(connection.BaseUrl, key, connection.Model, system, user, tools, progress, cancellation.Token, images));
+            var result = await Task.Run(() => LlmClient.CompleteAsync(connection.BaseUrl, key, connection.Model, system, user, tools, progress, cancellation.Token, images, numCtx));
             if (string.IsNullOrWhiteSpace(result)) throw new LlmException("The model returned an empty answer.");
             template.Output = result;
             template.OutputSessionId = template.UseTranscript ? session : null;
             template.LastFingerprint = fingerprint;
             var seconds = (DateTime.Now - started).TotalSeconds;
             var status = $"Updated {DateTime.Now:HH:mm:ss} in {seconds:0.#} s · {connection.Name} · {connection.Model}";
-            if (sent is not null && sent.Length > template.MaxTranscriptChars)
-                status += $" · transcript cut: only the last {template.MaxTranscriptChars:N0} of {sent.Length:N0} characters were sent; " +
-                          "raise Transcript characters (or untick timestamps) to include the start";
+            status += window > 0 ? $" · about {promptTokens:N0} of {window:N0} tokens" : $" · about {promptTokens:N0} tokens";
+            if (included is not null && included.Length > maxChars)
+                status += $" · transcript cut: only the last {maxChars:N0} of {included.Length:N0} characters were sent; " +
+                          (template.MaxTranscriptChars > 0 ? "raise Transcript chars, or set it to 0 to fill the model's context window"
+                           : window > 0 ? "the model's context window is full (untick timestamps to fit more)"
+                           : "the model's context window is unknown, so 60,000 were sent; type the model's Token limit on the connection");
             if (template.WriteToFile && template.OutputPath.Trim() is { Length: > 0 } path)
             {
                 var bytes = await Task.Run(() => LiveTranscriptFile.Write(path, result + Environment.NewLine));
@@ -770,17 +815,19 @@ public sealed class TemplatesViewModel : ObservableObject
         return text.ToString();
     }
 
-    private static string BuildUser(OutputTemplate template, string? transcript, IReadOnlyList<(string Name, string Output)> inputs, string references, string previous)
+    private static string BuildUser(OutputTemplate template, string? transcript, IReadOnlyList<(string Name, string Output)> inputs, string references,
+        string previous, int maxTranscriptChars)
     {
+        // Parts that change on every run come last, so servers can reuse the processed start of a long prompt.
         var text = new StringBuilder();
-        text.AppendLine($"Current local time: {DateTime.Now:yyyy-MM-dd HH:mm}").AppendLine();
         if (references.Length > 0) text.AppendLine("## Reference files (always included)").AppendLine(references).AppendLine();
-        if (transcript is not null) text.AppendLine("## Transcript so far").AppendLine(Tail(transcript, template.MaxTranscriptChars)).AppendLine();
+        if (transcript is not null) text.AppendLine("## Transcript so far").AppendLine(Tail(transcript, maxTranscriptChars)).AppendLine();
         foreach (var (name, output) in inputs)
             text.AppendLine($"## Output of \"{name}\"").AppendLine(string.IsNullOrWhiteSpace(output) ? "(no output yet)" : output.Trim()).AppendLine();
         if (previous.Length > 0)
             text.AppendLine("## Your previous output").AppendLine("Update it with what is new in the inputs above; keep what is still correct.")
                 .AppendLine(previous).AppendLine();
+        text.AppendLine($"Current local time: {DateTime.Now:yyyy-MM-dd HH:mm}").AppendLine();
         text.AppendLine("## Template instructions").AppendLine(template.Prompt.Trim());
         return text.ToString();
     }
