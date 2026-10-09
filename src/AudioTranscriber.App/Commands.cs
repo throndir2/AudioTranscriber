@@ -43,6 +43,18 @@ public sealed class RelayCommand(Action execute, Func<bool>? canExecute = null) 
     }
 }
 
+public sealed class RelayCommand<T>(Action<T?> execute) : ICommand
+{
+    public event EventHandler? CanExecuteChanged { add { } remove { } }
+
+    public bool CanExecute(object? parameter) => true;
+    public void Execute(object? parameter)
+    {
+        try { execute(parameter is T value ? value : default); }
+        catch (Exception error) { CommandErrors.Show(error); }
+    }
+}
+
 public sealed class AsyncCommand(Func<Task> execute, Func<bool>? canExecute = null) : ICommand
 {
     private bool running;

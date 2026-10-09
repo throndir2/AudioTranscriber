@@ -375,11 +375,15 @@ their own; combiners re-run whenever one of their inputs changes. Untick **Keep
 updating** on readers you don't need to save GPU time, and raise **max width** if
 small text (names, rolls) is misread.
 
-**LLM connections** use the OpenAI-compatible `/v1/chat/completions` API. Pick a
-type and choose **Add**: OpenRouter (`https://openrouter.ai/api/v1`), NVIDIA Build
+**LLM connections** use the OpenAI-compatible `/v1/chat/completions` API. Choose
+**Add connection** and pick a service: OpenRouter (`https://openrouter.ai/api/v1`), NVIDIA Build
 (`https://integrate.api.nvidia.com/v1`), OpenAI, Ollama (`http://localhost:11434/v1`,
 or `http://other-pc:11434/v1` for Ollama on another machine started with
-`OLLAMA_HOST=0.0.0.0`), LM Studio, or any custom server. The Ollama preset defaults
+`OLLAMA_HOST=0.0.0.0`), LM Studio, or any other OpenAI-compatible server. One connection
+is marked **Default**: templates use it unless you pick another connection in the
+template's **LLM connection** list (next to its name). A new connection becomes the
+default; select another one and choose **Use as default** to change it. Removing a
+connection moves the templates that used it to the default. The Ollama preset defaults
 to `gemma4:e4b` (Gemma 4 E4B: reads text and images, supports tool calling, runs
 locally; install it with `ollama pull gemma4:e4b`). **Load models** lists what
 the server offers; **Test** sends a one-line check and also asks the server whether

@@ -26,15 +26,14 @@ public sealed class TemplatesViewModel : ObservableObject
     private readonly Action<string, bool> log;
     private readonly DispatcherTimer timer;
     private readonly Dictionary<Guid, CancellationTokenSource> running = new();
-    private LlmConnection? selectedConnection;
+    private LlmConnection? selectedConnection, defaultConnection;
     private OutputTemplate? selectedTemplate;
-    private LlmPreset selectedPreset = LlmPreset.All[0];
     private TemplateBlueprint? selectedBlueprint = OutputTemplate.TtrpgLibrary[0];
     private string contextFolder = "", pinnedFiles = "", connectionStatus = "", targetDescription = "No session selected.";
     private string captureTarget = "", captureCaption = "No screenshot taken yet.";
     private int captureMaxWidth = ScreenCapture.DefaultMaxWidth;
     private Avalonia.Media.Imaging.Bitmap? capturePreview;
-    private bool dirty, ticking, closing, loadingModels, capturing;
+    private bool dirty, ticking, closing, loadingModels, capturing, updatingChoices;
 
     public TemplatesViewModel(IAppController controller, DesktopDialogs dialogs, Dispatcher dispatcher, Func<Guid?> targetSession,
         Action<string, bool> log)
@@ -45,7 +44,9 @@ public sealed class TemplatesViewModel : ObservableObject
         this.targetSession = targetSession;
         this.log = log;
         Load();
-        AddConnectionCommand = new RelayCommand(AddConnection);
+        AddConnectionCommand = new RelayCommand<string>(AddConnection);
+        MakeDefaultCommand = new RelayCommand(() => DefaultConnection = SelectedConnection,
+            () => SelectedConnection is not null && SelectedConnection != DefaultConnection);
         RemoveConnectionCommand = new AsyncCommand(RemoveConnectionAsync, () => SelectedConnection is not null);
         LoadModelsCommand = new AsyncCommand(LoadModelsAsync, () => SelectedConnection is not null && !loadingModels);
         TestConnectionCommand = new AsyncCommand(TestConnectionAsync, () => SelectedConnection is not null && !loadingModels);
@@ -78,7 +79,9 @@ public sealed class TemplatesViewModel : ObservableObject
         timer = NewTimer(TimeSpan.FromSeconds(4), (_, _) => _ = TickAsync());
         timer.Stop();
         Templates.CollectionChanged += (_, _) => RebuildInputOptions();
+        Models.CollectionChanged += (_, _) => { Changed(nameof(HasModels)); Changed(nameof(ModelPickerText)); };
         RebuildInputOptions();
+        SyncChoices();
     }
 
     private static DispatcherTimer NewTimer(TimeSpan interval, EventHandler tick)
@@ -89,16 +92,18 @@ public sealed class TemplatesViewModel : ObservableObject
     }
 
     public ObservableCollection<LlmConnection> Connections { get; } = [];
+    /// <summary>The selected template's connection picker: "Default (…)" first, then every connection.</summary>
+    public ObservableCollection<ConnectionChoice> ConnectionChoices { get; } = [];
     public ObservableCollection<OutputTemplate> Templates { get; } = [];
     /// <summary>Checklist of the other templates the selected template can use as inputs.</summary>
     public ObservableCollection<TemplateInputOption> TemplateInputs { get; } = [];
     public ObservableCollection<string> Models { get; } = [];
     public ObservableCollection<string> CaptureSources { get; } = [];
-    public IReadOnlyList<LlmPreset> Presets => LlmPreset.All;
     public ICommand RefreshCaptureSourcesCommand { get; }
     public ICommand TestCaptureCommand { get; }
 
     public ICommand AddConnectionCommand { get; }
+    public ICommand MakeDefaultCommand { get; }
     public ICommand RemoveConnectionCommand { get; }
     public ICommand LoadModelsCommand { get; }
     public ICommand TestConnectionCommand { get; }
@@ -125,9 +130,6 @@ public sealed class TemplatesViewModel : ObservableObject
     public ICommand AddPinnedFilesCommand { get; }
     public ICommand CopyOutputCommand { get; }
 
-    public LlmPreset SelectedPreset { get => selectedPreset; set { if (Set(ref selectedPreset, value ?? LlmPreset.All[0])) Changed(nameof(PresetHelp)); } }
-    public string PresetHelp => SelectedPreset.Help;
-
     public LlmConnection? SelectedConnection
     {
         get => selectedConnection;
@@ -137,21 +139,55 @@ public sealed class TemplatesViewModel : ObservableObject
             Models.Clear();
             ConnectionStatus = "";
             Changed(nameof(HasConnection));
+            Changed(nameof(HasNoConnection));
+            CommandManager.InvalidateRequerySuggested();
         }
     }
+
+    /// <summary>The connection templates use unless they pick their own.</summary>
+    public LlmConnection? DefaultConnection
+    {
+        get => defaultConnection;
+        set
+        {
+            if (!Set(ref defaultConnection, value)) return;
+            foreach (var connection in Connections) connection.IsDefault = connection == value;
+            RefreshChoiceLabels();
+            dirty = true;
+            CommandManager.InvalidateRequerySuggested();
+        }
+    }
+
+    /// <summary>The selected template's connection; <see cref="Guid.Empty"/> means the default connection.</summary>
+    public Guid SelectedTemplateConnectionId
+    {
+        get => SelectedTemplate?.ConnectionId ?? Guid.Empty;
+        set
+        {
+            if (updatingChoices || SelectedTemplate is not { } template) return;
+            Guid? id = value == Guid.Empty ? null : value;
+            if (template.ConnectionId == id) return;
+            template.ConnectionId = id;
+            Changed();
+        }
+    }
+
     /// <summary>Picking from the loaded list fills in the connection's model.</summary>
     public string? PickedModel
     {
         get => null;
         set { if (!string.IsNullOrEmpty(value) && SelectedConnection is { } connection) connection.Model = value; Changed(); }
     }
+    public bool HasModels => Models.Count > 0;
+    public string ModelPickerText => $"Choose one of {Models.Count:N0} models…";
     public bool HasConnection => SelectedConnection is not null;
+    public bool HasNoConnection => Connections.Count == 0;
     public string ConnectionStatus { get => connectionStatus; private set => Set(ref connectionStatus, value); }
 
     public OutputTemplate? SelectedTemplate
     {
         get => selectedTemplate;
-        set { if (Set(ref selectedTemplate, value)) { Changed(nameof(HasTemplate)); RebuildInputOptions(); } }
+        set { if (Set(ref selectedTemplate, value)) { Changed(nameof(HasTemplate)); Changed(nameof(SelectedTemplateConnectionId)); RebuildInputOptions(); } }
     }
     public bool HasTemplate => SelectedTemplate is not null;
 
@@ -273,10 +309,17 @@ public sealed class TemplatesViewModel : ObservableObject
         pinnedFiles = saved.PinnedFiles ?? "";
         captureTarget = saved.CaptureTarget ?? "";
         captureMaxWidth = saved.CaptureMaxWidth > 0 ? Math.Clamp(saved.CaptureMaxWidth, 320, 7680) : ScreenCapture.DefaultMaxWidth;
-        foreach (var connection in saved.Connections) Track(connection, Connections);
+        foreach (var connection in saved.Connections) TrackConnection(connection);
         foreach (var template in saved.Templates) Track(template, Templates);
-        AssignDefaultConnection();
-        selectedConnection = Connections.FirstOrDefault();
+        defaultConnection = Connections.FirstOrDefault(c => c.Id == saved.DefaultConnectionId) ?? Connections.FirstOrDefault();
+        foreach (var connection in Connections) connection.IsDefault = connection == defaultConnection;
+        // Older files pinned every template, mostly to the first connection by accident; those now follow the default.
+        var legacy = saved.DefaultConnectionId is null;
+        foreach (var template in Templates.Where(t => t.ConnectionId is { } id &&
+                     (Connections.All(c => c.Id != id) || legacy && id == defaultConnection?.Id)))
+            template.ConnectionId = null;
+        if (legacy) dirty = true;
+        selectedConnection = defaultConnection;
         selectedTemplate = Templates.FirstOrDefault();
     }
 
@@ -297,6 +340,7 @@ public sealed class TemplatesViewModel : ObservableObject
             var settings = new TemplateSettings
             {
                 Connections = Connections.ToList(),
+                DefaultConnectionId = DefaultConnection?.Id,
                 Templates = Templates.ToList(),
                 ContextFolder = ContextFolder,
                 PinnedFiles = PinnedFiles,
@@ -313,15 +357,51 @@ public sealed class TemplatesViewModel : ObservableObject
 
     // ---------- connections ----------
 
-    private void AddConnection()
+    private void TrackConnection(LlmConnection connection)
     {
-        var preset = SelectedPreset;
-        var connection = new LlmConnection { Name = UniqueName(preset.Name), Kind = preset.Name, BaseUrl = preset.BaseUrl, Model = preset.Model };
+        connection.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(LlmConnection.Name)) RefreshChoiceLabels(); };
         Track(connection, Connections);
-        AssignDefaultConnection();
+    }
+
+    // Connections are only appended or removed, so the picker keeps its items instead of being rebuilt.
+    private void SyncChoices()
+    {
+        updatingChoices = true;
+        try
+        {
+            if (ConnectionChoices.Count == 0) ConnectionChoices.Add(new ConnectionChoice(Guid.Empty));
+            foreach (var stale in ConnectionChoices.Where(c => c.Id != Guid.Empty && Connections.All(x => x.Id != c.Id)).ToList())
+                ConnectionChoices.Remove(stale);
+            foreach (var added in Connections.Where(c => ConnectionChoices.All(x => x.Id != c.Id)).ToList())
+                ConnectionChoices.Add(new ConnectionChoice(added.Id));
+            RefreshChoiceLabels();
+        }
+        finally { updatingChoices = false; }
+        Changed(nameof(SelectedTemplateConnectionId));
+        Changed(nameof(HasNoConnection));
+    }
+
+    private void RefreshChoiceLabels()
+    {
+        foreach (var choice in ConnectionChoices)
+            choice.Label = choice.Id == Guid.Empty
+                ? DefaultConnection is { } fallback ? $"Default ({fallback.Name})" : "Default"
+                : Connections.FirstOrDefault(c => c.Id == choice.Id)?.Name ?? "";
+    }
+
+    private void AddConnection(string? kind)
+    {
+        var preset = LlmPreset.All.FirstOrDefault(p => p.Name == kind) ?? LlmPreset.All[^1];
+        var connection = new LlmConnection { Name = UniqueName(preset.Name), Kind = preset.Name, BaseUrl = preset.BaseUrl, Model = preset.Model };
+        TrackConnection(connection);
+        SyncChoices();
+        DefaultConnection = connection;
         SelectedConnection = connection;
         dirty = true;
-        ConnectionStatus = preset.NeedsKey ? "Added. Paste the API key below and choose Save key, then Load models." : "Added. Choose Load models to see what the server offers.";
+        var pinned = Templates.Count(t => t.ConnectionId is not null);
+        ConnectionStatus = "Added. Templates now use it by default" +
+            (pinned > 0 ? $" (except {pinned} that pick their own connection)" : "") + ". " +
+            (preset.NeedsKey ? "Paste the API key and choose Save key, then Load models." : "Choose Load models to see what the server offers.");
     }
 
     private string UniqueName(string name)
@@ -334,18 +414,15 @@ public sealed class TemplatesViewModel : ObservableObject
     private async Task RemoveConnectionAsync()
     {
         if (SelectedConnection is not { } connection) return;
-        if (!await dialogs.ConfirmAsync("Remove connection", $"Remove the LLM connection \"{connection.Name}\" and its saved API key?")) return;
+        if (!await dialogs.ConfirmAsync("Remove connection",
+                $"Remove the LLM connection \"{connection.Name}\" and its saved API key? Templates that use it switch to the default connection.")) return;
+        foreach (var template in Templates.Where(t => t.ConnectionId == connection.Id)) template.ConnectionId = null;
+        Changed(nameof(SelectedTemplateConnectionId));
         Connections.Remove(connection);
-        AssignDefaultConnection();
-        SelectedConnection = Connections.FirstOrDefault();
+        SyncChoices();
+        if (DefaultConnection == connection) DefaultConnection = Connections.FirstOrDefault();
+        SelectedConnection = DefaultConnection;
         Save();
-    }
-
-    // Templates without a valid connection use the first one, so the picker never shows blank.
-    private void AssignDefaultConnection()
-    {
-        if (Connections.FirstOrDefault() is not { } first) return;
-        foreach (var template in Templates.Where(t => Connections.All(c => c.Id != t.ConnectionId))) template.ConnectionId = first.Id;
     }
 
     private async Task LoadModelsAsync()
@@ -416,7 +493,6 @@ public sealed class TemplatesViewModel : ObservableObject
     private void AddTemplate(OutputTemplate template)
     {
         Track(template, Templates);
-        AssignDefaultConnection();
         SelectedTemplate = template;
         dirty = true;
     }
@@ -484,7 +560,7 @@ public sealed class TemplatesViewModel : ObservableObject
         .Select(p => p.Trim('"')).Where(p => p.Length > 0).ToArray();
 
     private LlmConnection? ConnectionFor(OutputTemplate template) =>
-        Connections.FirstOrDefault(c => c.Id == template.ConnectionId) ?? Connections.FirstOrDefault();
+        Connections.FirstOrDefault(c => c.Id == template.ConnectionId) ?? DefaultConnection ?? Connections.FirstOrDefault();
 
     // ---------- hardware-aware defaults ----------
 
@@ -584,7 +660,7 @@ public sealed class TemplatesViewModel : ObservableObject
     private async Task RunAsync(OutputTemplate template, bool manual, Guid? sessionId = null, string? transcript = null, CaptureResult? shot = null)
     {
         if (template.IsRunning || closing) return;
-        if (ConnectionFor(template) is not { } connection) { template.Status = "Add an LLM connection below first."; return; }
+        if (ConnectionFor(template) is not { } connection) { template.Status = "Add an LLM connection under LLM connections first."; return; }
         var session = sessionId ?? targetSession();
         if (template.UseTranscript && session is null) { template.Status = "Select or record a session first (or untick Transcript in this template's inputs)."; return; }
         if (template.UseScreenshot && connection.SupportsImages == false)

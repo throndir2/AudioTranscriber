@@ -111,10 +111,16 @@ full with every update, about 60,000 characters total, so keep them short.
 
 ## LLM connections
 
-Connections use the OpenAI-compatible `/v1/chat/completions` API. Built-in choices
-include OpenRouter, NVIDIA Build, OpenAI, Ollama, LM Studio, and custom servers. Ollama
-can point to `http://localhost:11434/v1` or another PC running Ollama with
-`OLLAMA_HOST=0.0.0.0`.
+Connections use the OpenAI-compatible `/v1/chat/completions` API. Choose **Add
+connection** to pick OpenRouter, NVIDIA Build, OpenAI, Ollama, LM Studio, or another
+OpenAI-compatible server. Ollama can point to `http://localhost:11434/v1` or another PC
+running Ollama with `OLLAMA_HOST=0.0.0.0`.
+
+One connection is marked **Default** in the list. Templates use it unless you pick a
+different connection in the template's **LLM connection** list, next to its name. A new
+connection becomes the default; select another connection and choose **Use as default**
+to change it. When you remove a connection, the templates that used it switch to the
+default.
 
 The Ollama preset defaults to `gemma4:e4b` (reads text and images, supports tool
 calling; install it with `ollama pull gemma4:e4b`).

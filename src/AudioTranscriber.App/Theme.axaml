@@ -315,6 +315,28 @@
     <Setter Property="Background" Value="{StaticResource WarningCardFill}" />
     <Setter Property="BorderBrush" Value="#5A2A24" />
   </Style>
+  <Style Selector="Border.inset">
+    <Setter Property="Background" Value="#120E0B" />
+    <Setter Property="BorderBrush" Value="{StaticResource Line}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="5" />
+    <Setter Property="Padding" Value="12,8,4,8" />
+    <Setter Property="Margin" Value="0,6,0,0" />
+  </Style>
+  <Style Selector="Border.tag">
+    <Setter Property="Background" Value="#2E2414" />
+    <Setter Property="BorderBrush" Value="{StaticResource GoldDeep}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="9" />
+    <Setter Property="Padding" Value="9,1" />
+    <Setter Property="Margin" Value="8,0,0,0" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.tag TextBlock">
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{StaticResource GoldBright}" />
+  </Style>
 
   <!-- Recording status pill in the title bar. -->
   <Style Selector="Border.pill">
