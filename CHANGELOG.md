@@ -8,6 +8,15 @@ Format: newest first; each version is `## vX.Y.Z - YYYY-MM-DD` with `### Added`,
 
 ## Unreleased
 
+### Changed
+
+- Output templates now use the LLM connection marked **Default** in the connections list, unless you pick another connection in the template's **LLM connection** list (now next to the template name). A connection you add becomes the default. (#56)
+- The LLM connections card is simpler: a list of connections, an **Add connection** menu, and one editor for the selected connection, with a **Check image support** button. (#56)
+
+### Fixed
+
+- A template no longer keeps using the first connection (for example Ollama) after you add another one, such as NVIDIA Build. (#56)
+
 ## v0.2.3 - 2026-10-09
 
 ### Added
