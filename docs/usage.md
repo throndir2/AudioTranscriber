@@ -310,11 +310,20 @@ included (**Add starter templates** brings them back).
   a loop can't be selected. Tip for small local models: give each template one
   narrow job (for example only the turn order, or only the open story beats) and
   combine their outputs in a final template that writes the suggestions.
-- **Transcript characters:** only the most recent part of a long transcript is sent
-  (about 4 characters per token); lower it for small local models. When the start
-  was cut, the template status says so. A 3-hour session is often 100,000–200,000
-  characters, so raise it for whole-session templates such as the summary. The model
-  must also accept that much (for Ollama, set `OLLAMA_CONTEXT_LENGTH`).
+- **Transcript chars (0 = fill):** with **0** (the default), the template sends as
+  much of the transcript as the model's context window holds: the whole session when
+  it fits, otherwise the most recent part. The app keeps room for the answer and for
+  reference files the model reads. Type a number to send at most that many characters
+  of the most recent part (about 3 to 4 characters per token). When the start was
+  cut, the template status says so.
+- **Context window:** the app asks the server how many tokens the model takes in
+  (Ollama, LM Studio, llama.cpp, vLLM, OpenRouter and other servers that report it)
+  when you choose **Test** or run a template, and shows it on the connection. For
+  Ollama, the app also sets the context size (`num_ctx`) itself and makes it larger as
+  the transcript grows, because Ollama otherwise uses only 4,096 tokens on most PCs.
+  **Token limit (0 = model's)** caps the tokens templates use. Type the model's limit
+  when the server doesn't report one (for example OpenAI or NVIDIA Build), or a lower
+  number to keep a local model fast and inside your GPU or system memory.
 - **Timestamps on transcript lines:** untick it to send only `Speaker: text`. Each
   line is then about 30 characters shorter, so more of the session fits. The
   **Session summary** starter has it off.

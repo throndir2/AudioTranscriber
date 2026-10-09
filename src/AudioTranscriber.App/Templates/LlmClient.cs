@@ -17,9 +17,19 @@ public interface ILlmToolHost
 public static partial class LlmClient
 {
     private const int MaxToolRounds = 10;
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromMinutes(10) };
+    // Long transcripts on a local model can take many minutes to read in.
+    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromMinutes(30) };
 
     public static string ChatUrl(string baseUrl) => Endpoint(baseUrl, "chat/completions");
+
+    /// <summary>The API root (usually ending in /v1) and the server root without /v1, or false when the URL is empty.</summary>
+    private static bool TryRoots(string baseUrl, out string root, out string serverRoot)
+    {
+        try { root = Endpoint(baseUrl, "")[..^1]; }
+        catch (LlmException) { root = serverRoot = ""; return false; }
+        serverRoot = root.EndsWith("/v1", StringComparison.OrdinalIgnoreCase) ? root[..^3] : root;
+        return true;
+    }
 
     private static string Endpoint(string baseUrl, string path)
     {
@@ -59,11 +69,7 @@ public static partial class LlmClient
     public static async Task<bool?> SupportsImagesAsync(string baseUrl, string? apiKey, string model, CancellationToken ct)
     {
         model = (model ?? "").Trim();
-        if (model.Length == 0) return null;
-        string root;
-        try { root = Endpoint(baseUrl, "")[..^1]; }
-        catch (LlmException) { return null; }
-        var serverRoot = root.EndsWith("/v1", StringComparison.OrdinalIgnoreCase) ? root[..^3] : root;
+        if (model.Length == 0 || !TryRoots(baseUrl, out var root, out var serverRoot)) return null;
 
         // Ollama
         var ollama = await ProbeAsync(HttpMethod.Post, serverRoot + "/api/show", apiKey,
@@ -98,6 +104,61 @@ public static partial class LlmClient
         return null;
     }
 
+    /// <summary>
+    /// Asks the server how many tokens <paramref name="model"/> takes in. Tokens is 0 when no probe gives an answer.
+    /// Ollama is flagged because its OpenAI endpoint can't set the context size, so templates use its own /api/chat.
+    /// </summary>
+    public static async Task<ContextWindow> ContextWindowAsync(string baseUrl, string? apiKey, string model, CancellationToken ct)
+    {
+        model = (model ?? "").Trim();
+        if (model.Length == 0 || !TryRoots(baseUrl, out var root, out var serverRoot)) return new(0, false, "");
+
+        if (await ProbeAsync(HttpMethod.Post, serverRoot + "/api/show", apiKey, new JsonObject { ["model"] = model }.ToJsonString(), ct) is JsonObject show &&
+            (show.ContainsKey("model_info") || show.ContainsKey("details")))
+        {
+            var trained = show["model_info"] is JsonObject info
+                ? info.Where(p => p.Key.EndsWith(".context_length", StringComparison.Ordinal)).Select(p => Int(p.Value)).FirstOrDefault(v => v > 0)
+                : 0;
+            return new(trained, true, "Ollama");
+        }
+
+        if (await ProbeAsync(HttpMethod.Get, serverRoot + "/api/v0/models/" + Uri.EscapeDataString(model), apiKey, null, ct) is JsonObject lms)
+        {
+            if (Int(lms["loaded_context_length"]) is > 0 and var loaded) return new(loaded, false, "LM Studio, as loaded");
+            if (Int(lms["max_context_length"]) is > 0 and var max) return new(max, false, "LM Studio");
+        }
+
+        if (await ProbeAsync(HttpMethod.Get, serverRoot + "/props", apiKey, null, ct) is JsonObject props &&
+            Int(Get(props["default_generation_settings"], "n_ctx") ?? props["n_ctx"]) is > 0 and var slot)
+            return new(slot, false, "llama.cpp server");
+
+        var list = await ProbeAsync(HttpMethod.Get, root + "/models", apiKey, null, ct);
+        var items = list is JsonObject o ? (o["data"] ?? o["models"]) as JsonArray : list as JsonArray;
+        if (items?.FirstOrDefault(i => i is JsonObject e &&
+                (string.Equals(e["id"]?.ToString(), model, StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(e["name"]?.ToString(), model, StringComparison.OrdinalIgnoreCase))) is JsonObject entry)
+        {
+            // OpenRouter/Together, Groq, vLLM, Mistral, LiteLLM, Gemini, llama.cpp.
+            var tokens = new[]
+            {
+                entry["context_length"], Get(entry["top_provider"], "context_length"), entry["context_window"], entry["max_model_len"],
+                entry["max_context_length"], entry["max_input_tokens"], entry["inputTokenLimit"], Get(entry["meta"], "n_ctx"), Get(entry["meta"], "n_ctx_train")
+            }.Select(Int).FirstOrDefault(v => v > 0);
+            if (tokens > 0) return new(tokens, false, "model list");
+        }
+        return new(0, false, "");
+    }
+
+    private static JsonNode? Get(JsonNode? node, string key) => node is JsonObject o ? o[key] : null;
+
+    private static int Int(JsonNode? node)
+    {
+        if (node is not JsonValue v) return 0;
+        if (v.TryGetValue<long>(out var l)) return (int)Math.Clamp(l, 0, int.MaxValue);
+        if (v.TryGetValue<double>(out var d)) return (int)Math.Clamp(d, 0, int.MaxValue);
+        return v.TryGetValue<string>(out var s) && long.TryParse(s, out l) ? (int)Math.Clamp(l, 0, int.MaxValue) : 0;
+    }
+
     private static async Task<JsonNode?> ProbeAsync(HttpMethod method, string url, string? apiKey, string? json, CancellationToken ct)
     {
         try
@@ -117,13 +178,23 @@ public static partial class LlmClient
         }
     }
 
-    /// <summary>Runs a chat with optional tools until the model returns a final answer. Images (JPEG) go in the user message.</summary>
+    /// <summary>
+    /// Runs a chat with optional tools until the model returns a final answer. Images (JPEG) go in the user message.
+    /// When <paramref name="ollamaContext"/> is set, the request goes to Ollama's own /api/chat with that num_ctx,
+    /// because Ollama's OpenAI endpoint always uses the server's default (often only 4096 tokens).
+    /// </summary>
     public static async Task<string> CompleteAsync(string baseUrl, string? apiKey, string model, string system, string user,
-        ILlmToolHost? tools, IProgress<string>? progress, CancellationToken cancellationToken, IReadOnlyList<byte[]>? images = null)
+        ILlmToolHost? tools, IProgress<string>? progress, CancellationToken cancellationToken, IReadOnlyList<byte[]>? images = null,
+        int ollamaContext = 0)
     {
         if (string.IsNullOrWhiteSpace(model)) throw new LlmException("The connection has no model. Choose or type a model name.");
-        JsonNode userContent = user;
-        if (images is { Count: > 0 })
+        var native = ollamaContext > 0;
+        var url = ChatUrl(baseUrl);
+        if (native && TryRoots(baseUrl, out _, out var serverRoot)) url = serverRoot + "/api/chat";
+        var userMessage = new JsonObject { ["role"] = "user", ["content"] = user };
+        if (images is { Count: > 0 } && native)
+            userMessage["images"] = new JsonArray(images.Select(image => (JsonNode)Convert.ToBase64String(image)).ToArray());
+        else if (images is { Count: > 0 })
         {
             var parts = new JsonArray { new JsonObject { ["type"] = "text", ["text"] = user } };
             foreach (var image in images)
@@ -132,12 +203,12 @@ public static partial class LlmClient
                     ["type"] = "image_url",
                     ["image_url"] = new JsonObject { ["url"] = "data:image/jpeg;base64," + Convert.ToBase64String(image) }
                 });
-            userContent = parts;
+            userMessage["content"] = parts;
         }
         var messages = new JsonArray
         {
             new JsonObject { ["role"] = "system", ["content"] = system },
-            new JsonObject { ["role"] = "user", ["content"] = userContent }
+            userMessage
         };
         var useTools = tools is not null;
         for (var round = 0; ; round++)
@@ -149,9 +220,10 @@ public static partial class LlmClient
                 ["messages"] = messages.DeepClone(),
                 ["stream"] = false
             };
+            if (native) payload["options"] = new JsonObject { ["num_ctx"] = ollamaContext };
             if (useTools && !lastRound) payload["tools"] = tools!.Definitions.DeepClone();
             progress?.Report(round == 0 ? "Asking the model…" : $"Asking the model (step {round + 1})…");
-            using var request = Request(HttpMethod.Post, ChatUrl(baseUrl), apiKey);
+            using var request = Request(HttpMethod.Post, url, apiKey);
             request.Content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json");
             using var response = await Http.SendAsync(request, cancellationToken);
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -174,8 +246,8 @@ public static partial class LlmClient
             try { json = JsonNode.Parse(body); }
             catch (JsonException) { throw new LlmException("The endpoint did not return JSON. Check the base URL (it usually ends in /v1)."); }
             if (json?["error"] is { } error)
-                throw new LlmException("The endpoint returned an error: " + Trim(error["message"]?.ToString() ?? error.ToJsonString()));
-            var message = json?["choices"]?[0]?["message"] as JsonObject
+                throw new LlmException("The endpoint returned an error: " + Trim(ErrorText(error)));
+            var message = (native ? json?["message"] : json?["choices"]?[0]?["message"]) as JsonObject
                 ?? throw new LlmException("The endpoint returned no message. Check the base URL and model.");
             if (useTools && !lastRound && message["tool_calls"] is JsonArray { Count: > 0 } calls)
             {
@@ -195,6 +267,7 @@ public static partial class LlmClient
                     try { result = await tools!.InvokeAsync(name, arguments, cancellationToken); }
                     catch (Exception ex) when (ex is not OperationCanceledException) { result = "Error: " + ex.Message; }
                     var reply = new JsonObject { ["role"] = "tool", ["content"] = result, ["name"] = name };
+                    if (native) reply["tool_name"] = name;
                     if (call?["id"]?.ToString() is { Length: > 0 } id) reply["tool_call_id"] = id;
                     messages.Add(reply);
                 }
@@ -221,8 +294,8 @@ public static partial class LlmClient
     private static string Describe(HttpResponseMessage response, string body)
     {
         string? detail = null;
-        try { detail = JsonNode.Parse(body)?["error"] is { } e ? e["message"]?.ToString() ?? e.ToString() : null; }
-        catch (JsonException) { }
+        try { detail = JsonNode.Parse(body)?["error"] is { } e ? ErrorText(e) : null; }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException) { }
         detail ??= body;
         var hint = (int)response.StatusCode switch
         {
@@ -234,6 +307,10 @@ public static partial class LlmClient
         return $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}: {Trim(detail)}{hint}";
     }
 
+    // OpenAI-style servers send {"error":{"message":…}}; Ollama's own API sends {"error":"…"}.
+    private static string ErrorText(JsonNode error) =>
+        error is JsonObject o ? o["message"]?.ToString() ?? o.ToJsonString() : error.ToString();
+
     private static string Trim(string text)
     {
         text = (text ?? "").ReplaceLineEndings(" ").Trim();
@@ -242,3 +319,6 @@ public static partial class LlmClient
 }
 
 public sealed class LlmException(string message) : Exception(message);
+
+/// <summary>How many tokens a model takes in (0 when unknown), whether the server is Ollama, and where the number came from.</summary>
+public sealed record ContextWindow(int Tokens, bool Ollama, string Source);

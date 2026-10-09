@@ -14,5 +14,7 @@
     <ProjectReference Include="..\..\src\AudioTranscriber.Storage\AudioTranscriber.Storage.csproj" />
     <Compile Include="..\..\src\AudioTranscriber.App\StartupOptions.cs" Link="Presentation\StartupOptions.cs" />
     <Compile Include="..\..\src\AudioTranscriber.App\TranscriptPresentation.cs" Link="Presentation\TranscriptPresentation.cs" />
+    <Compile Include="..\..\src\AudioTranscriber.App\Templates\ContextBudget.cs" Link="Templates\ContextBudget.cs" />
+    <Compile Include="..\..\src\AudioTranscriber.App\Templates\LlmClient.cs" Link="Templates\LlmClient.cs" />
   </ItemGroup>
 </Project>
