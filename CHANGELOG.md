@@ -8,6 +8,14 @@ Format: newest first; each version is `## vX.Y.Z - YYYY-MM-DD` with `### Added`,
 
 ## Unreleased
 
+### Added
+
+- Templates have a **Timestamps on transcript lines** option. Untick it to send only `Speaker: text`, so more of a long session fits; the **Session summary** starter has it off. (#55)
+
+### Changed
+
+- A template's status now says when the start of a long transcript was cut because of **Transcript characters**, so whole-session summaries no longer skip the start without notice. (#55)
+
 ## v0.2.2 - 2026-10-08
 
 ### Fixed

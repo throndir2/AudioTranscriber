@@ -13,7 +13,15 @@ template it uses produces new output), no more often than the template's **Every
 (seconds)** setting. Nothing runs while the inputs are unchanged.
 
 **Transcript characters** limits how much of a long transcript is sent (about 4
-characters per token); lower it for small local models.
+characters per token); lower it for small local models. Only the most recent part is
+sent, and the template status says when the start was cut. A 3-hour session is often
+100,000–200,000 characters, so raise the limit for whole-session templates such as the
+summary. The model must also accept that much text (for Ollama, set
+`OLLAMA_CONTEXT_LENGTH`).
+
+Untick **Timestamps on transcript lines** to send only `Speaker: text`. Each line is then
+about 30 characters shorter, so more of the session fits. The **Session summary**
+starter has it off.
 
 ## Context and chaining
 

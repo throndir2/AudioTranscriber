@@ -438,7 +438,7 @@ public sealed class TemplatesViewModel : ObservableObject
         {
             Name = source.Name + " (copy)", Prompt = source.Prompt, ConnectionId = source.ConnectionId, IntervalSeconds = source.IntervalSeconds,
             IncludePrevious = source.IncludePrevious, UseReferences = source.UseReferences, MaxTranscriptChars = source.MaxTranscriptChars,
-            UseTranscript = source.UseTranscript, InputTemplateIds = [.. source.InputTemplateIds], UseScreenshot = source.UseScreenshot,
+            UseTranscript = source.UseTranscript, IncludeTimestamps = source.IncludeTimestamps, InputTemplateIds = [.. source.InputTemplateIds], UseScreenshot = source.UseScreenshot,
             KeepVersions = source.KeepVersions, MaxVersions = source.MaxVersions
         });
     }
@@ -620,7 +620,9 @@ public sealed class TemplatesViewModel : ObservableObject
             var references = library is null ? "" : await Task.Run(() => library.PinnedText(MaxReferenceChars), cancellation.Token);
             var tools = library is { HasFolder: true } ? library : null;
             var system = BuildSystem(tools is not null, images is not null);
-            var user = BuildUser(template, template.UseTranscript ? transcript : null, inputs.Select(i => (i.Name, i.Output)).ToArray(), references, previous);
+            var sent = !template.UseTranscript || transcript is null ? null
+                : template.IncludeTimestamps ? transcript : TranscriptPresentation.WithoutTimestamps(transcript);
+            var user = BuildUser(template, sent, inputs.Select(i => (i.Name, i.Output)).ToArray(), references, previous);
             var progress = new Progress<string>(message => template.Status = message);
             var key = connection.GetKey();
             var result = await Task.Run(() => LlmClient.CompleteAsync(connection.BaseUrl, key, connection.Model, system, user, tools, progress, cancellation.Token, images));
@@ -630,6 +632,9 @@ public sealed class TemplatesViewModel : ObservableObject
             template.LastFingerprint = fingerprint;
             var seconds = (DateTime.Now - started).TotalSeconds;
             var status = $"Updated {DateTime.Now:HH:mm:ss} in {seconds:0.#} s · {connection.Name} · {connection.Model}";
+            if (sent is not null && sent.Length > template.MaxTranscriptChars)
+                status += $" · transcript cut: only the last {template.MaxTranscriptChars:N0} of {sent.Length:N0} characters were sent; " +
+                          "raise Transcript characters (or untick timestamps) to include the start";
             if (template.WriteToFile && template.OutputPath.Trim() is { Length: > 0 } path)
             {
                 var bytes = await Task.Run(() => LiveTranscriptFile.Write(path, result + Environment.NewLine));

@@ -96,7 +96,7 @@ public sealed class OutputTemplate : ObservableObject
 {
     private string name = "", prompt = "", outputPath = "", output = "", status = "Not run yet.";
     private Guid? connectionId;
-    private bool autoUpdate, writeToFile, includePrevious = true, useReferences = true, useTranscript = true, useScreenshot, running, keepVersions = true;
+    private bool autoUpdate, writeToFile, includePrevious = true, useReferences = true, useTranscript = true, useScreenshot, running, keepVersions = true, includeTimestamps = true;
     private int intervalSeconds = 60, maxTranscriptChars = 60000, maxVersions;
     private List<Guid> inputTemplateIds = [];
 
@@ -109,6 +109,8 @@ public sealed class OutputTemplate : ObservableObject
     public bool IncludePrevious { get => includePrevious; set => Set(ref includePrevious, value); }
     public bool UseReferences { get => useReferences; set => Set(ref useReferences, value); }
     public bool UseTranscript { get => useTranscript; set => Set(ref useTranscript, value); }
+    /// <summary>Send each transcript line with its start and end time; off sends only "Speaker: text", so more of the session fits.</summary>
+    public bool IncludeTimestamps { get => includeTimestamps; set => Set(ref includeTimestamps, value); }
     /// <summary>Other templates whose latest output is fed into this one; a change in any of them triggers an automatic update.</summary>
     public List<Guid> InputTemplateIds { get => inputTemplateIds; set { if (Set(ref inputTemplateIds, value ?? [])) Changed(nameof(Summary)); } }
     /// <summary>Attach a screenshot of the shared capture target (the user's virtual tabletop) to every run.</summary>
@@ -140,6 +142,7 @@ public sealed class OutputTemplate : ObservableObject
         new()
         {
             Name = "Session summary",
+            IncludeTimestamps = false,
             Prompt = "Write a running summary of this session so far: a 3–5 sentence overview, then the key events in order as bullets, decisions made, open threads and unresolved questions, and next steps or action items (with who owns them when mentioned). Be concise and factual; do not invent details."
         },
         new()

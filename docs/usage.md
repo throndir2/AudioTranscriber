@@ -302,7 +302,13 @@ included (**Add starter templates** brings them back).
   narrow job (for example only the turn order, or only the open story beats) and
   combine their outputs in a final template that writes the suggestions.
 - **Transcript characters:** only the most recent part of a long transcript is sent
-  (about 4 characters per token); lower it for small local models.
+  (about 4 characters per token); lower it for small local models. When the start
+  was cut, the template status says so. A 3-hour session is often 100,000–200,000
+  characters, so raise it for whole-session templates such as the summary. The model
+  must also accept that much (for Ollama, set `OLLAMA_CONTEXT_LENGTH`).
+- **Timestamps on transcript lines:** untick it to send only `Speaker: text`. Each
+  line is then about 30 characters shorter, so more of the session fits. The
+  **Session summary** starter has it off.
 - **Output:** always shown on the right (with **Copy**). **Also write the output to
   a file** rewrites a `.md`/`.txt` file on every update without locking it, so VS
   Code, Obsidian or a browser can keep it open.
