@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Globalization;
+using System.Text.RegularExpressions;
 using AudioTranscriber.Storage;
 
 namespace AudioTranscriber.App;
@@ -100,4 +101,9 @@ public static class TranscriptPresentation
         var span = TimeSpan.FromTicks(Math.Max(0, ticks));
         return $"{(long)span.TotalHours:00}:{span.Minutes:00}:{span.Seconds:00}";
     }
+
+    private static readonly Regex LineTimes = new(@"^\[\d+:\d{2}:\d{2}\.\d{3} - \d+:\d{2}:\d{2}\.\d{3}\] ", RegexOptions.Multiline | RegexOptions.Compiled);
+
+    /// <summary>A rendered transcript without the "[start - end] " time prefix on each line, so only "Speaker: text" remains.</summary>
+    public static string WithoutTimestamps(string transcript) => LineTimes.Replace(transcript, "");
 }

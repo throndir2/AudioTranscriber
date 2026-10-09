@@ -31,6 +31,16 @@ public sealed class PresentationTests
         Assert.False(TranscriptPresentation.TryTimestamp(text, out _));
 
     [Fact]
+    public void TemplateTranscriptCanDropLineTimestamps()
+    {
+        var transcript = "Session 1\r\nSource language: en\r\n\r\n" +
+            "[00:00:01.000 - 00:00:04.500] DM: You enter the tavern [at dusk].\r\n" +
+            "[103:59:58.250 - 104:00:01.000] Speaker 2: I roll [d20].\r\n";
+        Assert.Equal("Session 1\r\nSource language: en\r\n\r\nDM: You enter the tavern [at dusk].\r\nSpeaker 2: I roll [d20].\r\n",
+            TranscriptPresentation.WithoutTimestamps(transcript));
+    }
+
+    [Fact]
     public void PresentationRetainsRawTextTrackAndGranularity()
     {
         var trackId = Guid.NewGuid();
