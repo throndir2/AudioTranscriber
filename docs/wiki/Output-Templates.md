@@ -111,6 +111,9 @@ full with every update, about 60,000 characters total, so keep them short.
 
 ## LLM connections
 
+Set up connections in **Privacy / models > Template LLM connections**. On a template,
+**Set up…** next to the **LLM connection** list opens that card.
+
 Connections use the OpenAI-compatible `/v1/chat/completions` API. Choose **Add
 connection** to pick OpenRouter, NVIDIA Build, OpenAI, Ollama, LM Studio, or another
 OpenAI-compatible server. Ollama can point to `http://localhost:11434/v1` or another PC

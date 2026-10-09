@@ -379,7 +379,9 @@ their own; combiners re-run whenever one of their inputs changes. Untick **Keep
 updating** on readers you don't need to save GPU time, and raise **max width** if
 small text (names, rolls) is misread.
 
-**LLM connections** use the OpenAI-compatible `/v1/chat/completions` API. Choose
+**LLM connections** are set up in **Privacy / models > Template LLM connections**;
+on a template, **Set up…** next to the connection list opens that card. They use the
+OpenAI-compatible `/v1/chat/completions` API. Choose
 **Add connection** and pick a service: OpenRouter (`https://openrouter.ai/api/v1`), NVIDIA Build
 (`https://integrate.api.nvidia.com/v1`), OpenAI, Ollama (`http://localhost:11434/v1`,
 or `http://other-pc:11434/v1` for Ollama on another machine started with

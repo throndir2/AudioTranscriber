@@ -67,6 +67,12 @@ public partial class MainWindow : Window
         viewModel.Templates.SetKey("");
     }
 
+    private void OpenConnectionsClick(object? sender, RoutedEventArgs e)
+    {
+        ModelsTab.IsSelected = true;
+        Dispatcher.UIThread.Post(() => ConnectionsCard.BringIntoView(), DispatcherPriority.Background);
+    }
+
     private void TranscriptDoubleTapped(object? sender, TappedEventArgs e)
     {
         if (FindAncestor<DataGridRow>(e.Source as Avalonia.Visual) is not null && viewModel.PlayRowCommand.CanExecute(null))
