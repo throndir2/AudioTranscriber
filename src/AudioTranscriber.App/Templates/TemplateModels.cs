@@ -27,11 +27,12 @@ public sealed class LlmConnection : ObservableObject
     private string name = "", baseUrl = "", model = "";
     private string? protectedKey;
     private bool? supportsImages;
+    private bool isDefault;
 
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get => name; set => Set(ref name, value ?? ""); }
     public string Kind { get; set; } = "";
-    public string BaseUrl { get => baseUrl; set => Set(ref baseUrl, value ?? ""); }
+    public string BaseUrl { get => baseUrl; set { if (Set(ref baseUrl, value ?? "")) Changed(nameof(Detail)); } }
     public string Model
     {
         get => model;
@@ -40,8 +41,28 @@ public sealed class LlmConnection : ObservableObject
             if (!Set(ref model, value ?? "")) return;
             if (!string.Equals(model, ImagesCheckedFor, StringComparison.Ordinal)) SupportsImages = null;
             Changed(nameof(ImageSupportStatus));
+            Changed(nameof(Detail));
         }
     }
+
+    /// <summary>Templates set to "Default" use this connection.</summary>
+    [JsonIgnore] public bool IsDefault { get => isDefault; set => Set(ref isDefault, value); }
+
+    /// <summary>One-line summary for the connection list: model, server and key state.</summary>
+    [JsonIgnore]
+    public string Detail
+    {
+        get
+        {
+            var host = Uri.TryCreate(BaseUrl.Trim(), UriKind.Absolute, out var uri) ? uri.Authority : BaseUrl.Trim();
+            var parts = new List<string> { Model.Length > 0 ? Model : "no model chosen" };
+            if (host.Length > 0) parts.Add(host);
+            if (HasKey) parts.Add("key saved");
+            return string.Join("  ·  ", parts);
+        }
+    }
+
+    [JsonIgnore] public string Help => LlmPreset.All.FirstOrDefault(p => p.Name == Kind)?.Help ?? LlmPreset.All[^1].Help;
 
     /// <summary>Whether <see cref="ImagesCheckedFor"/> accepts images; null when unknown or not checked.</summary>
     public bool? SupportsImages
@@ -72,11 +93,12 @@ public sealed class LlmConnection : ObservableObject
     public string? ProtectedKey
     {
         get => protectedKey;
-        set { if (Set(ref protectedKey, value)) { Changed(nameof(HasKey)); Changed(nameof(KeyStatus)); } }
+        set { if (Set(ref protectedKey, value)) { Changed(nameof(HasKey)); Changed(nameof(KeyStatus)); Changed(nameof(KeyHint)); Changed(nameof(Detail)); } }
     }
 
     [JsonIgnore] public bool HasKey => !string.IsNullOrEmpty(ProtectedKey);
     [JsonIgnore] public string KeyStatus => HasKey ? $"An API key is saved for this connection ({AudioTranscriber.Providers.UserSecretProtection.Description})." : "No API key saved (not needed for Ollama / LM Studio).";
+    [JsonIgnore] public string KeyHint => HasKey ? "Key saved. Paste a new key to replace it." : "Paste the API key (not needed for Ollama / LM Studio)";
 
     public string? GetKey()
     {
@@ -103,6 +125,7 @@ public sealed class OutputTemplate : ObservableObject
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get => name; set => Set(ref name, value ?? ""); }
     public string Prompt { get => prompt; set => Set(ref prompt, value ?? ""); }
+    /// <summary>The connection this template always uses; null uses the default connection.</summary>
     public Guid? ConnectionId { get => connectionId; set => Set(ref connectionId, value); }
     public bool AutoUpdate { get => autoUpdate; set { if (Set(ref autoUpdate, value)) Changed(nameof(Summary)); } }
     public int IntervalSeconds { get => intervalSeconds; set => Set(ref intervalSeconds, Math.Clamp(value, 10, 24 * 3600)); }
@@ -502,9 +525,20 @@ public static class TemplateGraph
     }
 }
 
+/// <summary>An entry in a template's connection picker: the default connection (<see cref="Guid.Empty"/>) or a specific one.</summary>
+public sealed class ConnectionChoice(Guid id) : ObservableObject
+{
+    private string label = "";
+    public Guid Id { get; } = id;
+    public string Label { get => label; set => Set(ref label, value ?? ""); }
+    public override string ToString() => Label;
+}
+
 public sealed class TemplateSettings
 {
     public List<LlmConnection> Connections { get; set; } = [];
+    /// <summary>Connection used by templates without their own; null in files saved before it existed.</summary>
+    public Guid? DefaultConnectionId { get; set; }
     public List<OutputTemplate> Templates { get; set; } = [];
     public string ContextFolder { get; set; } = "";
     public string PinnedFiles { get; set; } = "";
