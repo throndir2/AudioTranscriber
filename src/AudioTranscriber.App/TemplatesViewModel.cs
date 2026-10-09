@@ -660,7 +660,7 @@ public sealed class TemplatesViewModel : ObservableObject
     private async Task RunAsync(OutputTemplate template, bool manual, Guid? sessionId = null, string? transcript = null, CaptureResult? shot = null)
     {
         if (template.IsRunning || closing) return;
-        if (ConnectionFor(template) is not { } connection) { template.Status = "Add an LLM connection under LLM connections first."; return; }
+        if (ConnectionFor(template) is not { } connection) { template.Status = "Add an LLM connection in Privacy / models first."; return; }
         var session = sessionId ?? targetSession();
         if (template.UseTranscript && session is null) { template.Status = "Select or record a session first (or untick Transcript in this template's inputs)."; return; }
         if (template.UseScreenshot && connection.SupportsImages == false)
