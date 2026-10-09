@@ -1715,7 +1715,8 @@ public sealed class MainViewModel : ObservableObject
         var names = await controller.RecognizeKnownVoicesAsync(id, token);
         SetStatus(names.Count > 0
             ? $"Recognized {string.Join(", ", names)} by voice."
-            : "No unnamed speaker in this session matched a remembered voice closely enough, so nothing was renamed.");
+            : "No unnamed speaker in this session matched a remembered voice closely enough, so nothing was renamed. " +
+              "A speaker is compared once it has about 20 seconds of clear speech.");
     });
 
     private Task RememberSessionVoicesAsync() => RunForSessionAsync("Remembering this session's named voices…", async (id, token) =>

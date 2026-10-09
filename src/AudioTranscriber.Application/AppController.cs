@@ -968,7 +968,8 @@ public sealed class AppController : IAppController
             {
                 var current = Store.GetSpeakers(sessionId);
                 if (!current.Any(item => item.Id == candidate.Id) || !Guid.TryParse(candidate.Id, out var guid)) continue;
-                if (VoiceLibrary.FromSession(registry, guid) is not { } print || VoiceLibrary.BestMatch(print, prints, out _) is not { } index) continue;
+                if (VoiceLibrary.EvidenceSeconds(registry, guid) < VoiceLibrary.MinimumEvidenceSeconds ||
+                    VoiceLibrary.FromSession(registry, guid) is not { } print || VoiceLibrary.BestMatch(print, prints, out _) is not { } index) continue;
                 var voice = voices[index].Voice;
                 var named = current.FirstOrDefault(item => item.Id != candidate.Id && SameName(item.Name, voice.Name));
                 string keep;

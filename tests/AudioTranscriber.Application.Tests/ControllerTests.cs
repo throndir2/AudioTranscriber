@@ -706,7 +706,7 @@ public sealed class ControllerTests
                 var vector = Enumerable.Range(0, 256).Select(index => index == 0 ? 1f : 0f).ToImmutableArray();
                 var embedding = new SpeakerEmbedding(Guid.NewGuid(), request.SessionId, identity.Id,
                     DiarizationModels.EmbeddingSha256, vector, request.SessionStartTicks, end);
-                speaker = new(identity, DiarizationModels.EmbeddingSha256, vector, [embedding], end - request.SessionStartTicks);
+                speaker = new(identity, DiarizationModels.EmbeddingSha256, vector, [embedding], TimeSpan.FromSeconds(30).Ticks);
             }
             return Task.FromResult(new DiarizationResult(
                 [new(request.TrackId, request.SessionStartTicks, end, speaker.Identity.Id)],

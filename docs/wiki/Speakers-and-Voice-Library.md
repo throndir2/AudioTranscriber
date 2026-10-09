@@ -44,15 +44,15 @@ When you give a speaker a name, up to three voice samples from that session are 
 the voice library. They are 256-number embeddings, not audio. A voice keeps the newest
 15 samples, at most 3 per session speaker.
 
-New sessions compare automatic speakers such as **Speaker 1** to the library. A close,
-clear match renames the speaker; if that name is already present in the session, the
-speakers merge.
+New sessions compare automatic speakers such as **Speaker 1** to the library once
+that speaker has about 20 seconds of clear speech. A close, clear match renames the
+speaker; if that name is already present in the session, the speakers merge.
 
 Automatic matches never add samples, so a wrong match cannot reinforce itself. Rename a
 remembered speaker to move samples to the new name, or rename back to **Speaker N** to
 keep that session's speaker unnamed.
 
-Use **Speaker names → Match known voices** for an older session, **Remember this
+Use **Speaker names → Match known voices** for the open session (also while recording), **Remember this
 session's named voices** to add one session, and **Privacy / models → Voice library** to
 rename or forget remembered voices. Forgetting deletes the library samples; past
 sessions keep their labels.
