@@ -14,7 +14,17 @@ Use PowerShell from the repository root on Windows x64.
 
 `global.json` pins SDK **10.0.401** with roll-forward disabled. `Setup.ps1` installs
 that SDK only into `.tools\dotnet`; it does not install globally or change machine PATH.
-Downloads, CLI home, and NuGet cache stay under `.tools`.
+The CLI home stays under `.tools`. NuGet packages go to the shared per-user cache
+`%USERPROFILE%\.nuget\packages` (or `NUGET_PACKAGES` if you set it), so all worktrees
+share one copy.
+
+## Disk cleanup
+
+Each worktree holds its own SDK, build output, and model downloads, often 5 GB or more.
+Run `.\scripts\Clean.ps1 -DryRun` to see what it would delete, and
+`.\scripts\Clean.ps1 -All` to delete it. The script deletes only generated, git-ignored
+folders. See
+[docs/cleanup.md](https://github.com/throndir2/AudioTranscriber/blob/main/docs/cleanup.md).
 
 Setup finds the Windows x64 SDK ZIP in Microsoft's official .NET 10 release metadata,
 accepts only approved Microsoft HTTPS download hosts, verifies SHA-512, and reuses an

@@ -35,7 +35,7 @@ run from the repository with the local SDK environment configured:
 
 ```powershell
 $env:DOTNET_ROOT = (Resolve-Path .tools\dotnet).Path
-$env:NUGET_PACKAGES = (Resolve-Path .tools\nuget).Path
+$env:NUGET_PACKAGES = Join-Path $HOME '.nuget\packages'
 $env:DOTNET_CLI_HOME = (Resolve-Path .tools\cli-home).Path
 & .tools\dotnet\dotnet.exe build src\AudioTranscriber.Worker --verbosity quiet
 & .tools\dotnet\dotnet.exe `

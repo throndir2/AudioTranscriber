@@ -224,4 +224,5 @@ are in [`docs`](docs).
 .\scripts\Start-App.ps1  # run the app
 .\scripts\Test.ps1       # run the tests
 .\scripts\Publish.ps1    # build artifacts\publish\win-x64 (-Runtime linux-x64 for Linux)
+.\scripts\Clean.ps1      # delete build output; -All also deletes .tools and .models (docs\cleanup.md)
 ```

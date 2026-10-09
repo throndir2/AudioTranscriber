@@ -77,12 +77,12 @@ Turn the checkbox off to only check when you choose **Check for updates now**.
 
 ## Start and isolated smoke check
 
-From the worktree, use the pinned SDK and local caches:
+From the worktree, use the pinned SDK and the shared NuGet package cache:
 
 ```powershell
 $env:DOTNET_ROOT = Join-Path $PWD '.tools\dotnet'
 $env:DOTNET_CLI_HOME = Join-Path $PWD '.tools\cli-home'
-$env:NUGET_PACKAGES = Join-Path $PWD '.tools\nuget'
+$env:NUGET_PACKAGES = Join-Path $HOME '.nuget\packages'
 & .\.tools\dotnet\dotnet.exe run --project src\AudioTranscriber.App -- --data-root "$PWD\artifacts\desktop-library"
 ```
 

@@ -133,8 +133,11 @@ public sealed class AppController : IAppController
               ?? throw new InvalidDataException("The local preferences file is invalid.")
             : new(null);
         var checkout = FindCheckout();
+        // Dev-only: AUDIOTRANSCRIBER_DEV_MODELS lets every source checkout share one model folder (docs/cleanup.md).
+        var sharedModels = Environment.GetEnvironmentVariable("AUDIOTRANSCRIBER_DEV_MODELS");
         modelDirectory = checkout is null ? Path.Combine(root, "models", "diarization")
-            : Path.Combine(checkout, ".models", "diarization");
+            : Path.Combine(string.IsNullOrWhiteSpace(sharedModels) ? Path.Combine(checkout, ".models")
+                : Path.GetFullPath(sharedModels), "diarization");
         if (settings.WhisperModelPath is null || !File.Exists(settings.WhisperModelPath))
         {
             var installed = LocalWhisperModelCatalog.All.OrderByDescending(model => model.Bytes)
