@@ -38,9 +38,11 @@ Text and subtitle exports include a provenance sidecar.
 ## Live transcript file
 
 On **Record / import**, check **Write the transcript to a live text file** and choose a
-path. The default is `Documents\AudioTranscriber\live-transcript.txt`; an existing file
-is overwritten. The app rewrites the file when recognized text changes and at least
-every about 3 seconds.
+folder. The default is `Documents\AudioTranscriber\Live transcripts`. Each session gets
+its own file, named after the session and its start time, for example
+`Session 2026-10-09 14-05.txt`. To use one fixed file, type a path that ends in a file
+name, such as `C:\Notes\live.txt`. The app rewrites the file when recognized text
+changes and at least every about 3 seconds.
 
 The live file uses the same merged TXT-style lines as export: `[hh:mm:ss.fff -
 hh:mm:ss.fff] Speaker: text`. Corrections and speaker renames appear on the next

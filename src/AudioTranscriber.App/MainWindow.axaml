@@ -163,7 +163,7 @@
                       <StackPanel>
                         <local:SectionHeader Text="Live transcript file" />
                         <CheckBox IsChecked="{Binding LiveFileEnabled}" AutomationProperties.Name="Mirror new sessions to a live transcript file" Content="Write transcript to a live text file" />
-                        <DockPanel><Button DockPanel.Dock="Right" Content="Browse…" Command="{Binding BrowseLiveFileCommand}" /><TextBox Text="{Binding LiveFilePath, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Live transcript file path" /></DockPanel>
+                        <DockPanel><Button DockPanel.Dock="Right" Content="Browse…" Command="{Binding BrowseLiveFileCommand}" /><TextBox Text="{Binding LiveFilePath, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Live transcript folder or file path" ToolTip.Tip="A folder gets one file per session, named after the session. A path that ends in a file name, such as .txt, is used as one fixed file." /></DockPanel>
                         <TextBlock Text="{Binding LiveFileStatus}" Classes="caption" />
                       </StackPanel>
                     </Border>

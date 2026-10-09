@@ -8,6 +8,10 @@ Format: newest first; each version is `## vX.Y.Z - YYYY-MM-DD` with `### Added`,
 
 ## Unreleased
 
+### Changed
+
+- Each session now gets its own live transcript file, named after the session (for example `Session 2026-10-09 14-05.txt`), in `Documents\AudioTranscriber\Live transcripts` by default. Type a path that ends in a file name to keep using one fixed file. (#60)
+
 ## v0.2.4 - 2026-10-09
 
 ### Changed
