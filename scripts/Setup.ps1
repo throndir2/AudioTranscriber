@@ -16,7 +16,9 @@ $env:DOTNET_ROOT = $sdkRoot
 $env:DOTNET_ROOT_X64 = $sdkRoot
 $env:DOTNET_MULTILEVEL_LOOKUP = '0'
 $env:DOTNET_CLI_HOME = Join-Path $root '.tools\cli-home'
-$env:NUGET_PACKAGES = Join-Path $root '.tools\nuget'
+if ([string]::IsNullOrWhiteSpace($env:NUGET_PACKAGES)) {
+    $env:NUGET_PACKAGES = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.nuget\packages'
+}
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 $env:DOTNET_NOLOGO = '1'
 $env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
@@ -71,6 +73,7 @@ if (-not $installed) {
     }
     Write-Host 'SHA-512 verified against official HTTPS release metadata. Extracting locally...'
     Expand-Archive -LiteralPath $zipPath -DestinationPath $sdkRoot -Force
+    Remove-Item -LiteralPath $zipPath -Force
 }
 
 Push-Location $root
@@ -80,6 +83,7 @@ try {
         throw "Pinned local SDK $version could not be selected."
     }
     Write-Host "Using local SDK $actual at $sdkRoot"
+    Write-Host "Using the shared NuGet package cache at $env:NUGET_PACKAGES"
     if (-not $SkipRestore) {
         & $dotnet restore (Join-Path $root 'AudioTranscriber.slnx') --nologo
         if ($LASTEXITCODE -ne 0) { throw 'Package restore failed.' }

@@ -19,7 +19,9 @@ if (-not $PrepareOnly -and (-not $ApprovePublicAudioCloud -or -not $ProductionCo
 }
 $env:DOTNET_ROOT = $sdk
 $env:DOTNET_CLI_HOME = Join-Path $root '.tools\cli-home'
-$env:NUGET_PACKAGES = Join-Path $root '.tools\nuget'
+if ([string]::IsNullOrWhiteSpace($env:NUGET_PACKAGES)) {
+    $env:NUGET_PACKAGES = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.nuget\packages'
+}
 $project = Join-Path $root 'tools\AudioTranscriber.Benchmarks\AudioTranscriber.Benchmarks.csproj'
 Push-Location $root
 try {

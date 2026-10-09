@@ -28,3 +28,10 @@ instructions: |
   `GITHUB_REPOSITORY=throndir2/AudioTranscriber`.
 
   Local build: run `.\scripts\Setup.ps1` once per worktree, then use `.tools\dotnet\dotnet.exe`.
+
+  Cleanup: before you finish a session, after your last build, test, or app run, run
+  `.\scripts\Clean.ps1 -All` in your worktree (`-DryRun` previews it). It deletes only
+  generated, git-ignored output (bin/obj, test output, `.tools`, `.models`), about 5 GB per
+  worktree, and never tracked files or uncommitted work. Run `Setup.ps1` again before a
+  later build. Clean other worktrees or remove worktrees only when the user asks. See
+  `docs\cleanup.md`.

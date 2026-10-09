@@ -233,7 +233,7 @@ Run only this project's suite:
 ```powershell
 $env:DOTNET_ROOT = Join-Path $PWD '.tools\dotnet'
 $env:DOTNET_CLI_HOME = Join-Path $PWD '.tools\cli-home'
-$env:NUGET_PACKAGES = Join-Path $PWD '.tools\nuget'
+$env:NUGET_PACKAGES = Join-Path $HOME '.nuget\packages'
 $env:AUDIO_RUN_SOAK = '1' # optional: actually writes and deletes slightly over 4 GiB
 & .tools\dotnet\dotnet.exe test tests\AudioTranscriber.Audio.Tests\AudioTranscriber.Audio.Tests.csproj
 ```
