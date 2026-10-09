@@ -8,6 +8,8 @@ Format: newest first; each version is `## vX.Y.Z - YYYY-MM-DD` with `### Added`,
 
 ## Unreleased
 
+## v0.2.2 - 2026-10-08
+
 ### Fixed
 
 - The app looks like before again on Windows: the dark title bar with the logo, gold small-caps section headings, tab icons and styled buttons, lists and tables are back, and the error banner shows only when there is an error. (#53)
