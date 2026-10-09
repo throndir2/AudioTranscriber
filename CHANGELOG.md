@@ -8,6 +8,8 @@ Format: newest first; each version is `## vX.Y.Z - YYYY-MM-DD` with `### Added`,
 
 ## Unreleased
 
+## v0.2.4 - 2026-10-09
+
 ### Changed
 
 - Output templates now use the LLM connection marked **Default** in the connections list, unless you pick another connection in the template's **LLM connection** list (now next to the template name). A connection you add becomes the default. (#56)
