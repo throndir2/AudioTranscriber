@@ -21,6 +21,14 @@ public partial class MainWindow : Window
         this.viewModel = viewModel;
         DataContext = viewModel;
         Closing += OnClosing;
+        // Rows and list items handle right presses themselves, so listen in the tunnel phase to select the
+        // row first; the menus are then built when they open (mouse, Menu key or Shift+F10).
+        TranscriptGrid.AddHandler(PointerPressedEvent, TranscriptPointerPressed, RoutingStrategies.Tunnel);
+        SessionList.AddHandler(PointerPressedEvent, SessionListPointerPressed, RoutingStrategies.Tunnel);
+        TranscriptGrid.ContextMenu!.Opening += (_, e) => e.Cancel = !BuildTranscriptMenu();
+        SessionList.ContextMenu!.Opening += (_, e) => e.Cancel = !BuildSessionMenu();
+        if (OperatingSystem.IsWindows()) UseCustomTitleBar();
+        else foreach (var tab in MainTabs.Items.OfType<TabItem>()) tab.Tag = null;
         viewModel.TranscriptReloading += () => followTranscriptEnd = true;
         viewModel.TranscriptReloaded += RestoreTranscriptSelection;
         viewModel.SessionsReloaded += RestoreSessionSelection;
@@ -97,16 +105,15 @@ public partial class MainWindow : Window
             TranscriptGrid.SelectedItem = item;
             row.Focus();
         }
-        BuildTranscriptMenu();
     }
 
-    private void BuildTranscriptMenu()
+    private bool BuildTranscriptMenu()
     {
-        if (TranscriptGrid.ContextMenu is null) return;
+        if (TranscriptGrid.ContextMenu is null) return false;
         var menu = TranscriptGrid.ContextMenu;
         menu.Items.Clear();
         var rows = viewModel.SelectedRows;
-        if (rows.Count == 0) return;
+        if (rows.Count == 0) return false;
         var ids = rows.Select(row => row.Row.SpeakerId).Distinct().ToArray();
         var shared = ids.Length == 1 ? ids[0] : null;
         var count = rows.Count == 1 ? "this line" : $"{rows.Count} lines";
@@ -131,6 +138,7 @@ public partial class MainWindow : Window
             SelectedLineTab.IsSelected = true;
             Dispatcher.UIThread.Post(() => { CorrectionInput.Focus(); CorrectionInput.SelectAll(); }, DispatcherPriority.Input);
         }, enabled: rows.Count == 1));
+        return true;
     }
 
     private void SessionListPointerPressed(object? sender, PointerPressedEventArgs e)
@@ -141,7 +149,6 @@ public partial class MainWindow : Window
             if (!item.IsSelected) SessionList.SelectedItem = item.DataContext;
             item.Focus();
         }
-        BuildSessionMenu();
     }
 
     private void SessionListSelectionChanged(object? sender, SelectionChangedEventArgs e) =>
@@ -153,9 +160,9 @@ public partial class MainWindow : Window
             if (ids.Contains(session.Id) && !SessionList.SelectedItems.Contains(session)) SessionList.SelectedItems.Add(session);
     }
 
-    private void BuildSessionMenu()
+    private bool BuildSessionMenu()
     {
-        if (SessionList.ContextMenu is null) return;
+        if (SessionList.ContextMenu is null) return false;
         var menu = SessionList.ContextMenu;
         menu.Items.Clear();
         Action Later(Action action) => () => Dispatcher.UIThread.Post(action, DispatcherPriority.Input);
@@ -178,6 +185,7 @@ public partial class MainWindow : Window
             menu.Items.Add(new Separator());
         }
         menu.Items.Add(Item("Delete old sessions…", Later(() => viewModel.DeleteSessionsCommand.Execute(null)), enabled: viewModel.DeleteSessionsCommand.CanExecute(null)));
+        return true;
     }
 
     private void SessionListKeyDown(object? sender, KeyEventArgs e)
@@ -195,6 +203,47 @@ public partial class MainWindow : Window
         item.Click += (_, _) => action();
         return item;
     }
+
+    private void UseCustomTitleBar()
+    {
+        Classes.Add("windows");
+        ExtendClientAreaToDecorationsHint = true;
+        ExtendClientAreaChromeHints = Avalonia.Platform.ExtendClientAreaChromeHints.NoChrome;
+        ExtendClientAreaTitleBarHeightHint = 40;
+        // NoChrome greys out SC_CLOSE, which also blocks Alt+F4 and the taskbar's "Close window"; route them back to Close().
+        Win32Properties.AddWndProcHookCallback(this, (IntPtr _, uint msg, IntPtr wParam, IntPtr _, ref bool handled) =>
+        {
+            const uint WmSysCommand = 0x0112, WmSysKeyDown = 0x0104;
+            if ((msg == WmSysCommand && ((int)wParam & 0xFFF0) == 0xF060) || (msg == WmSysKeyDown && (int)wParam == 0x73))
+            {
+                handled = true;
+                Dispatcher.UIThread.Post(Close);
+            }
+            return IntPtr.Zero;
+        });
+        PropertyChanged += (_, e) =>
+        {
+            if (e.Property != WindowStateProperty && e.Property != OffScreenMarginProperty) return;
+            Padding = OffScreenMargin;
+            UpdateMaximizeGlyph();
+        };
+    }
+
+    private void UpdateMaximizeGlyph()
+    {
+        var maximized = WindowState == WindowState.Maximized;
+        MaximizeButton.Content = maximized ? "\uE923" : "\uE922";
+        var label = maximized ? "Restore" : "Maximize";
+        ToolTip.SetTip(MaximizeButton, label);
+        AutomationProperties.SetName(MaximizeButton, label);
+    }
+
+    private void MinimizeClick(object? sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
+
+    private void MaximizeClick(object? sender, RoutedEventArgs e) =>
+        WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+
+    private void CloseClick(object? sender, RoutedEventArgs e) => Close();
 
     private async void OnClosing(object? sender, WindowClosingEventArgs e)
     {

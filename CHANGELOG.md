@@ -8,6 +8,13 @@ Format: newest first; each version is `## vX.Y.Z - YYYY-MM-DD` with `### Added`,
 
 ## Unreleased
 
+### Fixed
+
+- The app looks like before again on Windows: the dark title bar with the logo, gold small-caps section headings, tab icons and styled buttons, lists and tables are back, and the error banner shows only when there is an error. (#PR)
+- Right-click menus work again on transcript lines (set speaker, play line, edit text) and on sessions in the library (continue recording, merge, delete). (#PR)
+- Windows setup no longer shows a false Microsoft Visual C++ runtime error, installs that runtime when it is really missing, and closes a running copy of the app before it updates it. (#PR)
+- Jobs no longer fail with "Reparse-point paths are not accepted" when the library or a model folder is under a OneDrive, moved or linked folder. (#PR)
+
 ## v0.2.1 - 2026-10-06
 
 ### Added

@@ -229,14 +229,7 @@ internal static class LocalPaths
         var full = Path.GetFullPath(path);
         if (full.AsSpan(Path.GetPathRoot(full)!.Length).Contains(':'))
             throw new ArgumentException("Alternate data streams are not accepted.");
-        var current = full;
-        while (!string.IsNullOrEmpty(current))
-        {
-            if ((File.Exists(current) || Directory.Exists(current)) &&
-                (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
-                throw new ArgumentException("Reparse-point paths are not accepted.");
-            current = Path.GetDirectoryName(current);
-        }
+        // Junctions and symlinks are allowed: moved profiles, OneDrive folders and linked Linux homes are normal local paths.
         return full == Path.GetPathRoot(full) ? full : full.TrimEnd(Path.DirectorySeparatorChar);
     }
 
