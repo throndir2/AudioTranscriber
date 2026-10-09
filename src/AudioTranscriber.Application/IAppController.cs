@@ -69,9 +69,9 @@ public interface IAppController : IAsyncDisposable
     Task StopRecordingAsync(CancellationToken cancellationToken = default);
     Task<StoredSession> ImportAudioAsync(string name, string path, int streamIndex, string providerId,
         string language, bool cloudConsent, CancellationToken cancellationToken = default);
-    Task ImportVttAsync(Guid sessionId, string path, CancellationToken cancellationToken = default);
-    Task FetchTeamsTranscriptAsync(Guid sessionId, TeamsTranscriptRequest request,
-        Func<DeviceSignInPrompt, Task> showSignIn, CancellationToken cancellationToken = default);
+    // Creates a new session from a WebVTT transcript's timed cues and speaker labels; no audio is transcribed.
+    Task<StoredSession> ImportVttAsync(string name, string path, string providerId, string language,
+        CancellationToken cancellationToken = default);
     Task DiarizeSessionAsync(Guid sessionId, CancellationToken cancellationToken = default);
     // Re-cuts the session's audio into phrases with PhrasePauseMilliseconds and transcribes it again; hand-set speakers carry over.
     Task ResplitSessionAsync(Guid sessionId, IProgress<string>? progress = null, CancellationToken cancellationToken = default);

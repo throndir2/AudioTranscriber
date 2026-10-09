@@ -9,8 +9,8 @@ original audio on disk so slow inference or a network problem does not erase the
 recording.
 
 It works locally by default with Parakeet TDT v3, speaker analysis, searchable
-transcripts, corrections, playback, exports, WebVTT import, optional Teams transcript
-retrieval, and optional output templates powered by OpenAI-compatible LLMs. NVIDIA cloud
+transcripts, corrections, playback, exports, WebVTT import, and optional output
+templates powered by OpenAI-compatible LLMs. NVIDIA cloud
 routes are opt-in per session.
 
 Latest release: get the Windows setup `.exe`, a Linux `.deb`/`.rpm`, or the portable
@@ -32,18 +32,17 @@ themselves from GitHub.
 | --- | --- |
 | [Installing](Installing-AudioTranscriber) | Windows installer, Linux packages, portable downloads and prerequisites. |
 | [First Steps](First-Steps) | The default first recording: output, microphone, local Parakeet, models, and consent. |
-| [Recording and Importing](Recording-and-Importing) | Recording output/mic audio, importing media, phrase pauses, and live activity. |
+| [Recording and Importing](Recording-and-Importing) | Recording output/mic audio, importing media or WebVTT transcripts, phrase pauses, and live activity. |
 | [Transcripts and Search](Transcripts-and-Search) | Searching, correcting, playing, exporting, and mirroring transcripts to a live file. |
 | [Speakers and Voice Library](Speakers-and-Voice-Library) | Naming speakers, filling speakers, remembering voices, and merging names. |
 | [Managing Sessions](Managing-Sessions) | Continuing recordings, merging, deleting, re-transcribing, and job controls. |
 | [Output Templates](Output-Templates) | LLM-generated notes, summaries, file context, and output files. |
 | [Transcription Providers](Transcription-Providers) | Local Parakeet/Whisper, NVIDIA cloud routes, GPU Parakeet, and CUDA downloads. |
-| [Teams and WebVTT](Teams-and-WebVTT) | Importing WebVTT and retrieving configured Teams transcripts. |
 | [Discord](Discord) | Recording Discord server voice channels with your own bot, speakers named per user. |
 | [Privacy and Uploads](Privacy-and-Uploads) | Upload consent, credentials, local models, output templates, and participant metadata. |
 | [Data and Recovery](Data-and-Recovery) | Data root contents, backups, originals, recovery, and isolated libraries. |
 | [Updates and Closing](Updates-and-Closing) | Self-updates, restart-to-update, and safe shutdown. |
-| [Limits and Known Gaps](Limits-and-Known-Gaps) | Documented limits around timing, diarization, Teams, and validation. |
+| [Limits and Known Gaps](Limits-and-Known-Gaps) | Documented limits around timing, diarization, Discord, and validation. |
 | [Troubleshooting / FAQ](Troubleshooting-FAQ) | Common fixes from the shipped docs. |
 
 ## For developers

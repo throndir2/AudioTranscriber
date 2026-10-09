@@ -132,6 +132,26 @@ public sealed class ControllerTests
     }
 
     [Fact]
+    public async Task ImportVttCreatesATranscriptOnlySession()
+    {
+        await using var fixture = new Fixture();
+        var path = Path.Combine(fixture.Root, "meeting.vtt");
+        await File.WriteAllTextAsync(path, "WEBVTT\n\n00:00:01.000 --> 00:00:03.500\n<v Alice>Hello there.\n\n00:00:04.000 --> 00:00:07.250\n<v Bob>Hi Alice.\n");
+        var session = await fixture.App.ImportVttAsync("Synthetic VTT", path, "local-whisper", "en");
+        Assert.Equal("Recorded", session.State);
+        Assert.Equal(TimeSpan.FromSeconds(7.25).Ticks, session.DurationTicks);
+        Assert.Equal("Transcript", Assert.Single(fixture.App.Store.GetTracks(session.Id)).Kind);
+        var rows = fixture.App.Store.GetTranscriptPage(session.Id);
+        Assert.Equal(["Alice", "Bob"], rows.Select(row => row.SpeakerName));
+        Assert.Equal("Hi Alice.", rows[1].RawText);
+
+        var bad = Path.Combine(fixture.Root, "bad.vtt");
+        await File.WriteAllTextAsync(bad, "not a transcript\n");
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.App.ImportVttAsync("Bad VTT", bad, "local-whisper", "en"));
+        Assert.Single(fixture.App.Store.GetSessions());
+    }
+
+    [Fact]
     public async Task ResumeRecoversSealedImportWithoutTheExternalSource()
     {
         await using var fixture = new Fixture();

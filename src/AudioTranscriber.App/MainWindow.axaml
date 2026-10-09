@@ -120,7 +120,8 @@
                       <Button Content="●  Start recording" Classes="primary" Command="{Binding StartRecordingCommand}" />
                       <Button Content="{Binding ContinueRecordingLabel}" Command="{Binding ContinueRecordingCommand}" />
                       <Button Content="■  Stop recording" Classes="stop" Command="{Binding StopRecordingCommand}" />
-                      <Button Content="Import audio / video…" Command="{Binding ImportAudioCommand}" />
+                      <Button Content="Import file…" Command="{Binding ImportAudioCommand}"
+                              ToolTip.Tip="Import an audio or video file to transcribe, or a WebVTT (.vtt) transcript with its timed lines and speaker labels. Each import becomes a new session." />
                       <Button Content="Refresh devices" Command="{Binding RefreshDevicesCommand}" />
                     </WrapPanel>
                     <TextBlock Text="{Binding SetupStatus}" IsVisible="{Binding HasSetupStatus}" Foreground="{StaticResource Accent}" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,6,0,0" AutomationProperties.LiveSetting="Polite" />
@@ -324,12 +325,6 @@
                 </StackPanel>
               </Grid>
             </ScrollViewer>
-          </TabItem>
-          <TabItem Header="VTT / Teams" Tag="&#xE8B5;">
-            <ScrollViewer><Grid Margin="16,14,16,6" ColumnDefinitions="*,16,*">
-              <StackPanel><Border Classes="card"><StackPanel><local:SectionHeader Text="Transcript sources with provenance" /><TextBlock Classes="help" Text="Import a local WebVTT file to add timed cues and source speaker labels to the selected session." /><Button Content="Import local .vtt into selected session…" Command="{Binding ImportVttCommand}" HorizontalAlignment="Left" /></StackPanel></Border><Border Classes="card"><StackPanel><local:SectionHeader Text="Not included: live Teams or Discord audio" /><TextBlock Classes="help" Text="Live Teams and Discord capture require separate bots; selected-output capture is a local action." /></StackPanel></Border></StackPanel>
-              <Border Grid.Column="2" Classes="card" VerticalAlignment="Top"><StackPanel><local:SectionHeader Text="Microsoft Teams · configuration required" /><TextBlock Classes="help" Text="Fetch an existing meeting transcript using delegated Microsoft Graph with explicit tenant/app/resource IDs." /><Button Content="Fetch configured Teams transcript…" Command="{Binding FetchTeamsCommand}" HorizontalAlignment="Left" /></StackPanel></Border>
-            </Grid></ScrollViewer>
           </TabItem>
         </TabControl>
       </Grid>

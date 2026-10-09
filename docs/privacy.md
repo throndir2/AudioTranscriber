@@ -75,7 +75,6 @@ output the parsed configuration. Never print that production file to troubleshoo
 the comparison.
 
 NVIDIA credentials are attached only to the explicitly approved NVIDIA transport
-authority. Microsoft Graph uses its own Microsoft sign-in token and fixed Graph
 authority. Endpoint overrides must not redirect credentials to arbitrary servers.
 
 ## Diagnostic logs
@@ -114,11 +113,6 @@ screenshot stays on your machines. Screenshots are kept in memory only, not save
 is a user-assigned label. A WebVTT voice label is an attribution from the imported
 source; identical names do not prove identical participants. Character annotations
 must remain distinct from participant identifiers.
-
-Teams transcript access depends on a work/school account, configured application,
-consent, meeting access, and tenant policy. Respect denied transcript access and
-speaker-attribution restrictions. Unattributed access is not permission to
-reconstruct identities that the tenant prohibited.
 
 Discord server voice channels are recorded through the user's own visible bot
 (never a user token or selfbot). Everyone in the channel sees the bot join; get

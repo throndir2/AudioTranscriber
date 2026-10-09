@@ -129,7 +129,7 @@ The speech model downloads by itself the first time you start the app.
 ### 📤 Takes your words anywhere
 - Export **text, JSON, SRT and WebVTT**.
 - A **live transcript file** that refreshes as you talk. Keep it open in VS Code or any other app.
-- Import **WebVTT** files and **Microsoft Teams** meeting transcripts.
+- Import **WebVTT** transcripts (for example from Teams or Zoom) as new sessions.
 - **MCP servers** for AI agents, both headless and driving the real window.
 
 </td>

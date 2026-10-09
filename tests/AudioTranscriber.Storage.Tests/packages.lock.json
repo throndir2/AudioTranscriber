@@ -42,19 +42,6 @@
           "SQLitePCLRaw.core": "2.1.12"
         }
       },
-      "Microsoft.Identity.Client": {
-        "type": "Transitive",
-        "resolved": "4.77.1",
-        "contentHash": "K1BS0wRwh48xjsU2y7bwVh8qE9eqdRkroHX0EPp9GGo3GmS+B2gaPd95jq+HRpyFj8h3nn8LubDnIti+M/9YoQ==",
-        "dependencies": {
-          "Microsoft.IdentityModel.Abstractions": "8.14.0"
-        }
-      },
-      "Microsoft.IdentityModel.Abstractions": {
-        "type": "Transitive",
-        "resolved": "8.14.0",
-        "contentHash": "iwbCpSjD3ehfTwBhtSNEtKPK0ICun6ov7Ibx6ISNA9bfwIyzI2Siwyi9eJFCJBwxowK9xcA1mj+jBWiigeqgcQ=="
-      },
       "Microsoft.TestPlatform.ObjectModel": {
         "type": "Transitive",
         "resolved": "18.10.0",
@@ -130,10 +117,7 @@
         }
       },
       "audiotranscriber.integrations": {
-        "type": "Project",
-        "dependencies": {
-          "Microsoft.Identity.Client": "[4.77.1, )"
-        }
+        "type": "Project"
       },
       "audiotranscriber.storage": {
         "type": "Project",
