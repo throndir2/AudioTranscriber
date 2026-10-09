@@ -223,8 +223,9 @@ never add samples.
 
 After each speaker job commits, `RecognizeVoicesLocked` compares every session
 speaker that still has an automatic "Speaker N" name and no library link against
-the library. It uses `VoiceLibrary.BestMatch`: the same 0.70 score and 0.08
-runner-up margin as in-session matching. The score is centroid cosine averaged
+the library, once that speaker (with speakers merged into it) has at least 20
+seconds of clean evidence. It uses `VoiceLibrary.BestMatch` with a 0.60 score and
+the in-session 0.08 runner-up margin. The score is centroid cosine averaged
 with the best sample-pair cosine. A match renames the speaker, or merges it with
 the session speaker that already has the name, and stores `voice:<id>` in
 `speakers.participant_id`. `voice:manual` marks a speaker the user renamed back to
@@ -240,7 +241,15 @@ speakers named before the library existed are learned on the first start.
 
 Short interjections, overlap-only speech, crowding, noise, roleplayed voices,
 similar voices and recording changes can remain Unknown or split one person.
-Thresholds are conservative defaults, not calibrated D&D operating points.
+In-session thresholds are conservative defaults, not calibrated D&D operating points.
+
+The library values come from a small local check on AMI meetings ES2002 and
+ES2003 (the same people in several meetings, headset mix), run through the live
+20-second speaker windows. True matches across meetings scored 0.45-0.86, and
+more than half scored below 0.70. Speakers not in the library scored at most 0.57. All wrong names came
+from session speakers with less than 20 seconds of evidence. Compared with 0.70,
+the new rule named 18-45% more speech and gave no wrong names. Discord audio and
+roleplayed voices were not measured.
 The models do not identify people by name or perform reliable speech separation.
 
 ## Cancellation and local data

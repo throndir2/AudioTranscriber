@@ -219,11 +219,16 @@ profiles that speaker analysis already stores, so it is instant.
   so one wrong match can't reinforce itself. A voice keeps the newest 15 samples
   (at most 3 per session speaker). Naming someone in two or three sessions,
   ideally with different mics or rooms, makes matching much more reliable.
-- Matching uses the same conservative thresholds as within a session. A speaker
-  who sounds like two remembered people, or like nobody, stays unnamed.
+- Matching uses a 0.60 score (lower than the 0.70 used within a session, because
+  the same voice sounds less alike across days and mics) and a speaker must be
+  clearly closer to one remembered person than to the next. A speaker is first
+  compared once it has about 20 seconds of clear speech, so names appear about a
+  minute after a person starts talking. A speaker who sounds like two remembered
+  people, or like nobody, stays unnamed.
 - Renaming a remembered speaker to a different name moves that session's samples
   to the new name. Renaming a speaker back to "Speaker N" keeps it unnamed for good.
-- **Speaker names → Match known voices** applies the library to an older session.
+- **Speaker names → Match known voices** applies the library to the open session
+  now, including one you are still recording or an older one.
   **Remember this session's named voices** adds one session's named speakers.
 - Speakers you named before the voice library existed are learned automatically
   the first time the app starts with remembering on (oldest session first, so
