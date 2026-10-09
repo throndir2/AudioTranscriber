@@ -10,6 +10,16 @@ Format: newest first; each version is `## vX.Y.Z - YYYY-MM-DD` with `### Added`,
 
 ## v0.2.9 - 2026-10-09
 
+### Added
+
+- Templates are shown in a **folder tree**: set a template's folder (with `/` for subfolders) to organize them, and **New template** adds to the selected folder. (#62)
+- Star templates as **favorites** to list them under **★ Favorites** at the top of the tree. (#62)
+- The template list is kept in a **template table** (`templates.csv`), so you can add, remove, reorder and edit templates in Excel, LibreOffice or any editor; changes show up in the app within seconds, and **Browse…** links another table file. (#62)
+
+### Changed
+
+- All 16 TTRPG templates are now in the list from the start, in the **TTRPG** folder; existing lists get them once. Delete the ones you don't need; **Add missing built-in templates** brings deleted starter and TTRPG templates back. The TTRPG library picker is gone. (#62)
+
 ### Fixed
 
 - Speakers you named in earlier sessions are now recognized by voice much more often while you record: an automatic "Speaker N" gets the remembered name once that speaker has about 20 seconds of clear speech. (#67)
@@ -19,14 +29,10 @@ Format: newest first; each version is `## vX.Y.Z - YYYY-MM-DD` with `### Added`,
 ### Added
 
 - Templates can fill the model's whole context window, so long sessions (such as a multi-hour D&D game) are sent in full when they fit. Set **Transcript chars** to 0 (now the default); the connection shows the model's context window and has a **Token limit** to cap it. (#61)
-- Templates are shown in a **folder tree**: set a template's folder (with `/` for subfolders) to organize them, and **New template** adds to the selected folder. (#62)
-- Star templates as **favorites** to list them under **★ Favorites** at the top of the tree. (#62)
-- The template list is kept in a **template table** (`templates.csv`), so you can add, remove, reorder and edit templates in Excel, LibreOffice or any editor; changes show up in the app within seconds, and **Browse…** links another table file. (#62)
 
 ### Changed
 
 - Templates that used the old default of 60,000 transcript characters now fill the model's context window instead. Type a number to set a fixed limit again. (#61)
-- All 16 TTRPG templates are now in the list from the start, in the **TTRPG** folder; existing lists get them once. Delete the ones you don't need; **Add missing built-in templates** brings deleted starter and TTRPG templates back. The TTRPG library picker is gone. (#62)
 
 ### Fixed
 
