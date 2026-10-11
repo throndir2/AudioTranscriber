@@ -8,6 +8,12 @@ Format: newest first; each version is `## vX.Y.Z - YYYY-MM-DD` with `### Added`,
 
 ## Unreleased
 
+## v0.2.10 - 2026-10-11
+
+### Fixed
+
+- Copies installed with the Windows setup now update themselves automatically. Setup from v0.2.9 or earlier showed "Development build" and never updated; run the new setup once to fix it. (#72)
+
 ## v0.2.9 - 2026-10-09
 
 ### Added

@@ -56,7 +56,8 @@ Each release receives exactly these files, each with a matching `.sha256`:
 - `audiotranscriber_<version>_amd64.deb` (written by `Release.ps1` itself, no `dpkg-deb` needed)
 - `audiotranscriber-<version>-1.x86_64.rpm` (needs `rpmbuild`; skipped with a warning on hosts without it)
 
-The ZIP and tarball contain the complete distribution and `BUILD-PROVENANCE.json`. They
+The ZIP, setup executable, tarball, `.deb`, and `.rpm` all contain the complete distribution
+and `BUILD-PROVENANCE.json`, which the in-app updater reads to find the installed version. They
 omit model weights, credentials, recordings, databases, tool caches, other platforms'
 natives, and raw public benchmark transcripts/data. The `.deb`/`.rpm` install to
 `/opt/audiotranscriber` with `/usr/bin/audiotranscriber`, a desktop entry, hicolor icons and

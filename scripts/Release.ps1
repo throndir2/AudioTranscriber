@@ -191,9 +191,12 @@ function Add-Checksum([string]$File) {
     $hash = (Get-FileHash -LiteralPath $File -Algorithm SHA256).Hash.ToLowerInvariant()
     [IO.File]::WriteAllText("$File.sha256", "$hash  $([IO.Path]::GetFileName($File))`n", [Text.UTF8Encoding]::new($false)); $hash
 }
+function Get-ProvenanceJson([object]$Version, [string]$SourceCommit, [string]$Runtime) {
+    [ordered]@{ schemaVersion = 1; tag = $Version.Tag; commit = $SourceCommit; runtime = $Runtime; sdk = (Get-Content (Join-Path $PSScriptRoot '..\global.json') -Raw | ConvertFrom-Json).sdk.version } | ConvertTo-Json -Compress
+}
 function New-WindowsZipPackage([object]$Version, [string]$SourceCommit, [string]$Directory, [string]$Destination, [DateTimeOffset]$Timestamp) {
     $files = Get-ReleasePackageFiles $Directory 'win-x64'; $names = Get-AssetNames $Version.Tag; $zip = Join-Path $Destination $names.WinZip; $partial = "$zip.partial"
-    $provenance = [ordered]@{ schemaVersion = 1; tag = $Version.Tag; commit = $SourceCommit; runtime = 'win-x64'; sdk = (Get-Content (Join-Path $PSScriptRoot '..\global.json') -Raw | ConvertFrom-Json).sdk.version } | ConvertTo-Json -Compress
+    $provenance = Get-ProvenanceJson $Version $SourceCommit 'win-x64'
     $stream = [IO.File]::Open($partial, [IO.FileMode]::CreateNew)
     try { $archive = [IO.Compression.ZipArchive]::new($stream, [IO.Compression.ZipArchiveMode]::Create, $true); try { foreach ($name in ($files.Keys | Sort-Object -CaseSensitive)) { Add-ZipEntry $archive $name $files[$name] $Timestamp }; $entry=$archive.CreateEntry('BUILD-PROVENANCE.json'); $entry.LastWriteTime=$Timestamp; $writer=[IO.StreamWriter]::new($entry.Open(), [Text.UTF8Encoding]::new($false)); try { $writer.Write($provenance) } finally { $writer.Dispose() } } finally { $archive.Dispose() }; $stream.Dispose(); [IO.File]::Move($partial, $zip) } finally { $stream.Dispose(); if ([IO.File]::Exists($partial)) { [IO.File]::Delete($partial) } }
     [void](Add-Checksum $zip); $zip
@@ -209,13 +212,21 @@ function Get-NsisPath([string]$ToolsRoot) {
     if (Test-Path -LiteralPath $nsisRoot) { Remove-Item -LiteralPath $nsisRoot -Recurse -Force }; New-Item -ItemType Directory -Force $nsisRoot | Out-Null
     [IO.Compression.ZipFile]::ExtractToDirectory($package, $nsisRoot); if (-not (Test-Path -LiteralPath $makensis)) { throw 'The portable NSIS package did not contain makensis.exe.' }; $makensis
 }
-function New-WindowsSetupPackage([object]$Version, [string]$SourceDirectory, [string]$Destination, [DateTimeOffset]$Timestamp) {
+function New-WindowsSetupPackage([object]$Version, [string]$SourceCommit, [string]$SourceDirectory, [string]$Destination, [DateTimeOffset]$Timestamp) {
     $names = Get-AssetNames $Version.Tag; $installer = Join-Path $Destination $names.WinSetup; $nsis = Get-NsisPath (Join-Path $PSScriptRoot '..\.tools')
-    $source = [IO.Path]::GetFullPath($SourceDirectory); $sizeKb = [math]::Max(1, [math]::Ceiling(((Get-ChildItem -LiteralPath $source -Recurse -File | Measure-Object Length -Sum).Sum) / 1kb))
-    $script = Join-Path $PSScriptRoot '..\installer\windows\AudioTranscriber.nsi'
-    # makensis on Linux only accepts "-" switches ("/" is read as a path); Windows accepts both.
-    & $nsis -V2 "-DAPP_VERSION=$($Version.SemVer)" "-DSOURCE_DIR=$source" "-DOUT_FILE=$installer" "-DICON_FILE=$(Join-Path $PSScriptRoot '..\src\AudioTranscriber.App\Assets\AppIcon.ico')" "-DEST_SIZE_KB=$sizeKb" $script
-    if ($LASTEXITCODE -ne 0) { throw 'NSIS failed to build the Windows setup executable.' }
+    # Install exactly the ZIP payload, including BUILD-PROVENANCE.json: the in-app updater needs it to know the installed version.
+    $files = Get-ReleasePackageFiles $SourceDirectory 'win-x64'; $source = Join-Path ([IO.Path]::GetFullPath($Destination)) '.setup-root'
+    if (Test-Path -LiteralPath $source) { Remove-Item -LiteralPath $source -Recurse -Force }
+    try {
+        foreach ($name in $files.Keys) { $target = Join-Path $source ($name -replace '/', [IO.Path]::DirectorySeparatorChar); New-Item -ItemType Directory -Force (Split-Path $target -Parent) | Out-Null; Copy-Item -LiteralPath $files[$name] -Destination $target -Force }
+        [IO.File]::WriteAllText((Join-Path $source 'BUILD-PROVENANCE.json'), (Get-ProvenanceJson $Version $SourceCommit 'win-x64'), [Text.UTF8Encoding]::new($false))
+        $sizeKb = [math]::Max(1, [math]::Ceiling(((Get-ChildItem -LiteralPath $source -Recurse -File | Measure-Object Length -Sum).Sum) / 1kb))
+        $script = Join-Path $PSScriptRoot '..\installer\windows\AudioTranscriber.nsi'
+        # makensis on Linux only accepts "-" switches ("/" is read as a path); Windows accepts both.
+        & $nsis -V2 "-DAPP_VERSION=$($Version.SemVer)" "-DSOURCE_DIR=$source" "-DOUT_FILE=$installer" "-DICON_FILE=$(Join-Path $PSScriptRoot '..\src\AudioTranscriber.App\Assets\AppIcon.ico')" "-DEST_SIZE_KB=$sizeKb" $script
+        if ($LASTEXITCODE -ne 0) { throw 'NSIS failed to build the Windows setup executable.' }
+    }
+    finally { if (Test-Path -LiteralPath $source) { Remove-Item -LiteralPath $source -Recurse -Force } }
     (Get-Item -LiteralPath $installer).LastWriteTimeUtc = $Timestamp.UtcDateTime; [void](Add-Checksum $installer); $installer
 }
 function Ensure-TarAssembly { if (-not $script:TarAssemblyLoaded) { Add-Type -AssemblyName System.Formats.Tar; $script:TarAssemblyLoaded = $true } }
@@ -350,7 +361,7 @@ function New-ReleasePackage([object]$Version, [string]$SourceCommit, [string]$Wi
     foreach ($name in $names.Files) { if (Test-Path -LiteralPath (Join-Path $destinationPath $name)) { throw 'Release assets already exist locally; refusing to overwrite them.' } }
     $timestampText = & git show -s --format=%cI $SourceCommit; if ($LASTEXITCODE -ne 0) { throw 'Could not read the source commit timestamp.' }; $timestamp = [DateTimeOffset]::Parse($timestampText).ToUniversalTime()
     [void](New-WindowsZipPackage $Version $SourceCommit $WindowsDirectory $destinationPath $timestamp)
-    [void](New-WindowsSetupPackage $Version $WindowsDirectory $destinationPath $timestamp)
+    [void](New-WindowsSetupPackage $Version $SourceCommit $WindowsDirectory $destinationPath $timestamp)
     if ([string]::IsNullOrWhiteSpace($LinuxDirectory)) { $LinuxDirectory = $WindowsDirectory }
     [void](New-LinuxTarPackage $Version $SourceCommit $LinuxDirectory $destinationPath $timestamp)
     [void](New-DebianPackage $Version $SourceCommit $LinuxDirectory $destinationPath $timestamp)

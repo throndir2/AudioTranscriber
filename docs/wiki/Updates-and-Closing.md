@@ -1,7 +1,10 @@
 # Updates and Closing
 
 Release builds update from the repository's latest GitHub release. Drafts and
-prereleases are ignored.
+prereleases are ignored. This works for the Windows setup and ZIP and for the Linux
+tarball, `.deb`, and `.rpm`. Copies installed with the Windows setup from v0.2.9 or
+earlier show "Development build" and cannot update themselves. Run the latest setup
+once; later releases then install automatically.
 
 ## Automatic updates
 
