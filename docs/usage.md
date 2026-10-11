@@ -57,9 +57,12 @@ recording. Choose **Resume transcription** after fixing the prerequisite to repl
 ## Updates
 
 Release builds update themselves from the repository's **latest GitHub release**
-(drafts and prereleases are ignored). The installed version comes from the
-`BUILD-PROVENANCE.json` shipped in the release ZIP; development builds never
-update. With **Automatically download new releases and install them when the app
+(drafts and prereleases are ignored). This includes copies installed with the
+Windows setup, the ZIP, the Linux tarball, and the `.deb`/`.rpm` packages. The
+installed version comes from the `BUILD-PROVENANCE.json` shipped in every release
+package. Copies installed with the Windows setup from v0.2.9 or earlier lack that
+file and cannot update themselves; run the latest setup once to fix this.
+Development builds never update. With **Automatically download new releases and install them when the app
 closes** on (the default), the app checks shortly after startup and every six
 hours, downloads `AudioTranscriber-<tag>-win-x64.zip` into
 `%LOCALAPPDATA%\AudioTranscriber.Updates`, and verifies it against both GitHub's

@@ -94,7 +94,8 @@ Each GitHub Release receives exactly these workflow-owned assets (each with a ma
 - `audiotranscriber-<version>-1.x86_64.rpm`
 
 The Windows ZIP contains the complete Windows x64 distribution and a
-`BUILD-PROVENANCE.json` identifying its tag, commit, SDK, and platform. It omits
+`BUILD-PROVENANCE.json` identifying its tag, commit, SDK, and platform. The setup
+executable installs exactly the same files, including `BUILD-PROVENANCE.json`. It omits
 other-architecture Whisper runtimes and the documentation's raw public benchmark
 transcripts/data. It bundles a pinned, SHA-256-verified LGPL FFmpeg/FFprobe build
 in `ffmpeg\` with its license and provenance under `licenses\`. The Linux tarball,
@@ -104,7 +105,8 @@ credentials, recordings, databases, and tool caches are not release payloads.
 Framework/runtime JSON and documentation remain included.
 
 The in-app updater relies on this layout: it reads the tag from
-`BUILD-PROVENANCE.json`, uses the Windows ZIP on Windows, the Linux tarball for
+`BUILD-PROVENANCE.json`, uses the Windows ZIP on Windows (for both ZIP and setup
+installs), the Linux tarball for
 writable Linux installs, and the `.deb`/`.rpm` package for non-writable `/opt`
 installs. It verifies each asset with GitHub SHA-256 metadata and the matching
 `.sha256` file. Keep the asset names and provenance file stable. The GitHub API it

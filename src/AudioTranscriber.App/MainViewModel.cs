@@ -199,7 +199,7 @@ public sealed class MainViewModel : ObservableObject
         refreshTimer.Stop();
         updateStatus = updater.IsSupported
             ? updater.StagedTag is { } staged ? $"{staged} is downloaded and installs when you close the app." : "Updates have not been checked yet."
-            : "Automatic updates are available only in release ZIP builds.";
+            : "Automatic updates are available only in release builds (installer, ZIP, or Linux packages).";
         CheckForUpdatesCommand = new AsyncCommand(() => CheckForUpdatesAsync(manual: true), () => updater.IsSupported && !updateBusy && !closing);
         RestartToUpdateCommand = new RelayCommand(() =>
         {
@@ -255,7 +255,7 @@ public sealed class MainViewModel : ObservableObject
     public ICommand RestartToUpdateCommand { get; }
     public string CurrentVersionText => updater.IsSupported
         ? $"Installed version: {updater.CurrentTag} · updates come from the latest GitHub release of {AppUpdater.Repository}"
-        : "Development build: automatic updates are disabled (they apply to release ZIP builds only).";
+        : "Development build: automatic updates are disabled (they apply to release builds only).";
     public string UpdateStatus { get => updateStatus; private set => Set(ref updateStatus, value); }
     public bool UpdateReady => updater.StagedTag is not null;
     public string RestartToUpdateLabel => $"Restart to update ({updater.StagedTag})";
