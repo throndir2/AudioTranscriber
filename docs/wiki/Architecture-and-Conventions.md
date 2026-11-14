@@ -1,5 +1,11 @@
 # Architecture and Conventions
 
+**Status:** Implemented
+**Last Updated:** 2026-11-14
+**Audience:** Users and contributors
+**Last verified:** 2026-11-14 against b3ed981
+**Code:** `src`, `tools`
+
 The solution contains these main projects:
 
 - `AudioTranscriber.Core`
@@ -9,11 +15,30 @@ The solution contains these main projects:
 - `AudioTranscriber.Worker`
 - `AudioTranscriber.Storage`
 - `AudioTranscriber.Integrations`
+- `AudioTranscriber.Discord`
 - `AudioTranscriber.Application`
 - `AudioTranscriber.App`
 - `tools\AudioTranscriber.Benchmarks`
+- `tools\AudioTranscriber.UiMcp`
 
 Test projects cover Storage, Application, Audio, Providers, Diarization, and App.
+
+## Project responsibilities
+
+| Project | Responsibility |
+| --- | --- |
+| Core | Shared audio, transcription, and speaker contracts. |
+| Audio | Capture, import, normalization, archive, and playback. |
+| Providers | Local and hosted recognition, model setup, and credential protection. |
+| Diarization | Speaker segmentation and voice embeddings. |
+| Worker | Separate process for speaker analysis. |
+| Storage | SQLite library, transcript export, and live transcript file. |
+| Integrations | Transcript and meeting integration code. |
+| Discord | Discord bot, voice reception, and network setup. |
+| Application | Controller, recording pipeline, jobs, and speaker state. |
+| App | Avalonia desktop, settings, templates, updater, and headless MCP. |
+| Benchmarks | Public model comparison tool. |
+| UiMcp | Windows UI Automation MCP server. |
 
 ## Core boundaries
 
@@ -33,8 +58,8 @@ are separate tracks. Stop recording separately from transcription cancellation.
 
 ## Audio conventions
 
-Constructors and device enumeration do not capture. Only explicit `StartAsync` starts
-WASAPI. Event handlers must be short, nonthrowing, and enqueue application persistence
+Constructors and device enumeration do not capture. Explicit capture starts WASAPI on
+Windows or PulseAudio on Linux. Event handlers must be short, nonthrowing, and enqueue application persistence
 or UI work; never perform ASR in capture callbacks.
 
 Original audio, normalized derivatives, provider evidence, speaker state, and SQLite
@@ -47,7 +72,7 @@ through documented user actions and conservative matching; it is not participant
 authentication.
 
 More detail is in
-[docs/audio.md](https://github.com/throndir2/AudioTranscriber/blob/main/docs/audio.md),
-[docs/diarization.md](https://github.com/throndir2/AudioTranscriber/blob/main/docs/diarization.md),
+[docs/audio.md](../audio.md),
+[docs/diarization.md](../diarization.md),
 and
-[docs/providers.md](https://github.com/throndir2/AudioTranscriber/blob/main/docs/providers.md).
+[docs/providers.md](../providers.md).

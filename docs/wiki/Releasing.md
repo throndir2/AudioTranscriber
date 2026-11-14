@@ -1,7 +1,13 @@
 # Releasing
 
+**Status:** Implemented
+**Last Updated:** 2026-11-14
+**Audience:** Users and contributors
+**Last verified:** 2026-11-14 against b3ed981
+**Code:** `scripts/Release.ps1`, `scripts/Publish.ps1`, `installer`, `.github/workflows/release.yml`
+
 The GitHub workflow `.github\workflows\release.yml` is release-only. It has one Ubuntu
-24.04 job, a 15-minute timeout, and no matrix, PR/branch checks, schedules, tests, lint,
+24.04 job, a 25-minute timeout, and no matrix, PR/branch checks, schedules, tests, lint,
 benchmarks, model downloads, or deployment.
 
 ## Release notes (CHANGELOG.md)
@@ -63,8 +69,8 @@ natives, and raw public benchmark transcripts/data. The `.deb`/`.rpm` install to
 `/opt/audiotranscriber` with `/usr/bin/audiotranscriber`, a desktop entry, hicolor icons and
 AppStream metadata, and declare the system libraries they need.
 
-The in-app updater depends on these names and verifies both GitHub asset metadata and
-the `.sha256` file.
+The in-app updater depends on these names and verifies the download against the available
+GitHub digest and checksum file. At least one checksum source is required.
 
 ## Local release tests
 
@@ -75,4 +81,4 @@ pwsh -NoProfile -File .\tests\Release.Tests.ps1
 ```
 
 More detail is in
-[docs/releases.md](https://github.com/throndir2/AudioTranscriber/blob/main/docs/releases.md).
+[docs/releases.md](../releases.md).

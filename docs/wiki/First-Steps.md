@@ -1,5 +1,11 @@
 # First Steps
 
+**Status:** Implemented
+**Last Updated:** 2026-11-14
+**Audience:** Users and contributors
+**Last verified:** 2026-11-14 against b3ed981
+**Code:** `src/AudioTranscriber.App/MainViewModel.cs`, `src/AudioTranscriber.Application/AppController.cs`, `src/AudioTranscriber.Providers`
+
 The fastest path is: extract the release ZIP, run `AudioTranscriber.App.exe`, and click
 **Start recording**.
 
@@ -20,12 +26,12 @@ languages.
 
 On first start, the app downloads and verifies:
 
-- Parakeet TDT v3, a 487,170,055-byte archive that unpacks to about 640 MB.
+- Parakeet TDT v3, a 487,170,055-byte archive that unpacks to about 640 MiB.
 - Small speaker-labeling models, about 33.49 MB.
 
 You can record while these download. Audio waits in durable jobs and is processed when
-the models are ready. Local Whisper's recommended large-v3-turbo model downloads only
-when a Whisper session needs it.
+the models are ready. The recommended Local Whisper model downloads only when a Whisper
+session needs it. The hardware plan selects its size.
 
 ## While recording
 
@@ -38,9 +44,9 @@ it, and export TXT, JSON, SRT, or WebVTT.
 
 ## Optional choices
 
-If the app finds a supported NVIDIA GPU, it asks once whether to download the CUDA
-runtime and full-precision Parakeet model, about 4.4 GB, to run Parakeet locally on the
+If the hardware plan recommends a supported NVIDIA GPU, the app asks whether to download the CUDA
+runtime and full-precision Parakeet model to run Parakeet locally on the
 GPU. Declining keeps CPU Parakeet.
 
 If you choose an NVIDIA cloud provider, you must enter a key and grant upload consent
-for that session. Review [Privacy and Uploads](Privacy-and-Uploads) first.
+for that session. Review [Privacy and Uploads](Privacy-and-Uploads.md) first.

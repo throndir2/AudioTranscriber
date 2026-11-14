@@ -1,5 +1,11 @@
 # Output Templates
 
+**Status:** Implemented
+**Last Updated:** 2026-11-14
+**Audience:** Users and contributors
+**Last verified:** 2026-11-14 against b3ed981
+**Code:** `src/AudioTranscriber.App/Templates`, `src/AudioTranscriber.App/TemplatesViewModel.cs`, `src/AudioTranscriber.App/MainWindow.axaml`
+
 The **Templates** tab turns a transcript into documents you define with prompts: DM
 guidance, a running session summary, NPC/item/place lists, or similar notes. The list
 starts with four starter templates in **General** and the whole TTRPG set in **TTRPG**;
@@ -27,8 +33,8 @@ connection), Transcript characters, Write to file, Output file, Keep versions, M
 versions, and Id. Use `yes` or `no` for the options.
 
 Add, delete, reorder, or edit rows and save the file. The app picks up the changes within
-a few seconds. A row without an Id becomes a new template; a template without a row is
-removed. Changes made in the app are written back to the table. While a spreadsheet app
+a few seconds. It matches rows by Id, then by name; unmatched rows become new templates.
+A template without a matching row is removed. Changes made in the app are written back to the table. While a spreadsheet app
 keeps the file locked, those changes wait until it is closed. If both change, the table
 wins.
 
@@ -44,7 +50,8 @@ template it uses produces new output), no more often than the template's **Every
 transcript as the model's context window holds, the whole session when it fits, and keeps
 room for the answer and for reference files the model reads. A number sends at most that
 many characters of the most recent part (about 3 to 4 characters per token). The template
-status says when the start of the transcript was cut.
+status says when the start of the transcript was cut. When the context window is unknown,
+the default limit is 60,000 characters.
 
 The app asks the server for the model's **context window** (Ollama, LM Studio, llama.cpp,
 vLLM, OpenRouter and others that report it) on **Test** or the first template run, and
@@ -73,14 +80,15 @@ or only the open story beats) and combine them in a final template.
 
 The shared **Table screenshot** card lets templates see your virtual tabletop. Pick your
 Roll20 or Foundry browser window, or a whole screen, from **Capture** (a shortened title
-such as `Roll20` matches any window containing it), set the **max width** (default
-1280 px), and use **Test capture** to preview. Window capture works while other windows
-cover it, but not while it is minimized.
+such as `Roll20` matches a Windows window containing it), set the **max width** (default
+1280 px), and use **Test capture** to preview. On Windows, window capture can work when
+other windows cover it, but not when the window is minimized. On Linux, window capture
+requires X11, ImageMagick and `wmctrl`; full-screen capture needs a screenshot tool.
 
-Tick **Include a screenshot of the table** on a template to attach a fresh JPEG on each
+Tick **Include a screenshot of the table** on a template to attach a fresh image on each
 update. Templates updating together share the same frame, and they also re-run when the
-screen changes. This needs a vision model, for example Ollama `gemma4:e4b`. Screenshots
-are kept in memory only and go to that template's LLM connection.
+screen changes. This needs a vision model, for example Ollama `gemma4:e4b`. Images go to that template's LLM connection.
+Linux capture also creates a temporary PNG and attempts to delete it after capture.
 
 ## Virtual tabletop assistant
 
@@ -164,8 +172,8 @@ calling; install it with `ollama pull gemma4:e4b`).
 
 **Load models** lists what the server offers. **Test** sends a one-line check and also
 asks whether the model accepts images; **Check image support** runs just that check. API keys
-are saved only when you choose to save them; saved keys are encrypted with Windows DPAPI
-for your Windows account in `templates.json`.
+are saved only when you choose to save them; saved keys in `templates.json` use Windows
+DPAPI or the Linux per-user secret key.
 
-Running a hosted template sends transcript text and any reference text the model reads
-to that endpoint. Ollama and LM Studio keep text on your own machines.
+Running a template sends its selected inputs to the configured endpoint. Ollama and
+LM Studio can run locally or on another configured host.

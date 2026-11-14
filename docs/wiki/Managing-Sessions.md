@@ -1,5 +1,11 @@
 # Managing Sessions
 
+**Status:** Implemented
+**Last Updated:** 2026-11-14
+**Audience:** Users and contributors
+**Last verified:** 2026-11-14 against b3ed981
+**Code:** `src/AudioTranscriber.App/MainViewModel.cs`, `src/AudioTranscriber.Application/AppController.cs`, `src/AudioTranscriber.Storage`
+
 The session list is on the left. Right-click a session, or select it and press
 **Delete**, for session actions. Shift-click selects a range and Ctrl-click adds or
 removes one.
@@ -21,8 +27,9 @@ Right-click one or more sessions, press **Delete**, or use the trash button abov
 list. **Delete sessions** can select sessions by age: older than a week, 30/90 days, 6
 months, or a year.
 
-Deleting removes that session's transcript, speakers, jobs, and retained audio from this
-PC and cannot be undone. Exported files and the live transcript file are left alone.
+Deleting removes that session's transcript, speakers, and jobs. The app also attempts to
+delete its retained audio folders. Files in use can remain; the app reports those folders.
+Deletion cannot be undone. Exported files and the live transcript file are left alone.
 Stop a recording before deleting its session.
 
 ## Re-transcribe with the current phrase pause

@@ -1,5 +1,11 @@
 # Discord
 
+**Status:** Implemented
+**Last Updated:** 2026-11-14
+**Audience:** Users and contributors
+**Last verified:** 2026-11-14 against b3ed981
+**Code:** `src/AudioTranscriber.Discord`, `src/AudioTranscriber.App/DiscordViewModel.cs`, `src/AudioTranscriber.Providers/UserSecretProtection.cs`
+
 The **Discord** tab records a voice channel in a Discord server through **your own
 Discord bot**. Discord sends each person's voice as a separate stream, so every
 transcript line is named after the Discord user who said it (server nickname, else
@@ -17,8 +23,9 @@ Discord has no API that creates an application, so the tab walks you through it:
 1. **Open the Discord Developer Portal** (<https://discord.com/developers/applications>)
    and choose **New Application**.
 2. On **Bot**, choose **Reset Token**, copy the token, paste it into the tab and choose
-   **Save and connect**. The token is encrypted for your Windows account (DPAPI) in
-   `discord.json` in the library folder and is only sent to Discord. You may turn off
+   **Save and connect**. The token is encrypted in `discord.json` in the library folder
+   and is only sent to Discord. Windows uses DPAPI; Linux uses the per-user secret key.
+   You may turn off
    **Public Bot**; no privileged gateway intents are needed.
 3. **Add the bot to a server** opens Discord's invite page with only **View Channels**
    and **Connect**. You need **Manage Server** there, or send the copied link to someone
@@ -57,8 +64,8 @@ come in; if Discord reports people talking but **no audio arrives**, UDP is bloc
 ## Privacy
 
 Voice stays end-to-end encrypted by Discord (DAVE) until this PC decrypts it with
-Discord's official `libdave.dll`. The audio is then archived and transcribed like any
+Discord's `libdave` library. The audio is then archived and transcribed like any
 other track, following the session's provider and consent. Voice prints are embeddings,
 never audio.
 
-More detail: [docs/usage.md](https://github.com/throndir2/AudioTranscriber/blob/main/docs/usage.md#discord-server-voice-channels).
+More detail: [docs/usage.md](../usage.md#discord-server-voice-channels).

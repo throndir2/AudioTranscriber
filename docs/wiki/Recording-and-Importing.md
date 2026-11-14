@@ -1,5 +1,11 @@
 # Recording and Importing
 
+**Status:** Implemented
+**Last Updated:** 2026-11-14
+**Audience:** Users and contributors
+**Last verified:** 2026-11-14 against b3ed981
+**Code:** `src/AudioTranscriber.App/MainViewModel.cs`, `src/AudioTranscriber.Application/AppController.cs`, `src/AudioTranscriber.Audio`
+
 Open **Record / import** to start a new recording or import an existing audio/video
 file or WebVTT transcript.
 
@@ -55,4 +61,4 @@ such as model downloads, errors, and live-file writes. **Copy** places the log o
 clipboard.
 
 For low-level audio details, see
-[docs/audio.md](https://github.com/throndir2/AudioTranscriber/blob/main/docs/audio.md).
+[docs/audio.md](../audio.md).

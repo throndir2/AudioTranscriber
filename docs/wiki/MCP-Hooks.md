@@ -1,21 +1,29 @@
 # MCP Hooks
 
-AudioTranscriber ships two stdio Model Context Protocol servers inside the desktop
-executable so agents can drive and test the real app.
+**Status:** Implemented
+**Last Updated:** 2026-11-14
+**Audience:** Users and contributors
+**Last verified:** 2026-11-14 against b3ed981
+**Code:** `src/AudioTranscriber.App/Mcp`, `src/AudioTranscriber.App/Program.cs`, `tools/AudioTranscriber.UiMcp`, `scripts/Start-Mcp.ps1`
+
+AudioTranscriber provides two stdio Model Context Protocol servers. The headless server
+is in the desktop executable. The Windows-only UI server is a separate development tool.
 
 | Mode | Command | What it drives |
 | --- | --- | --- |
 | Headless | `AudioTranscriber.App.exe --mcp [--data-root PATH]` | The real `AppController` with no window |
-| UI | `AudioTranscriber.App.exe --mcp-ui [--data-root PATH]` | The real desktop window through Windows UI Automation |
+| UI | `.\scripts\Start-Mcp.ps1 -Mode ui` | The real desktop window through Windows UI Automation |
 
-Without `--data-root`, each MCP session uses a fresh isolated library under `%TEMP%`, so
+Without a data root, each MCP session uses a fresh isolated library under the system temporary directory, so
 the personal library is not touched unless named explicitly. Only one process can own a
 library at a time.
 
 ## Setup
 
-The repository `.mcp.json` registers `audiotranscriber` and `audiotranscriber-ui`
-through `scripts\Start-Mcp.ps1`, which builds the development app and starts it.
+Run `scripts\Start-Mcp.ps1` to launch either server. For headless mode, `-AppPath` runs
+the specified executable directly. Otherwise, the script builds the required project unless
+`-NoBuild` is set and the assembly already exists. The repository `.github/mcp.json`
+registers the documentation search server, not these two servers.
 
 ```powershell
 .\scripts\Setup.ps1
@@ -39,4 +47,4 @@ set text, select options, read text/grid data, wait, press keys, and play audio.
 fixture under `artifacts\fixtures`. It downloads and uploads nothing.
 
 Full details are in
-[docs/mcp.md](https://github.com/throndir2/AudioTranscriber/blob/main/docs/mcp.md).
+[docs/mcp.md](../mcp.md).
