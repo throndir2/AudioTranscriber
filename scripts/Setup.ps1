@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([switch]$SkipRestore)
+param([switch]$SkipRestore, [switch]$InstallKnowledgeBase)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -7,6 +7,20 @@ $root = Split-Path $PSScriptRoot -Parent
 $sdkRoot = Join-Path $root '.tools\dotnet'
 $dotnet = Join-Path $sdkRoot 'dotnet.exe'
 $version = (Get-Content (Join-Path $root 'global.json') -Raw | ConvertFrom-Json).sdk.version
+
+$npx = Get-Command npx -ErrorAction SilentlyContinue
+if (-not $npx) {
+    if ($InstallKnowledgeBase) { throw 'Install Node.js 20 or later and put npx on PATH to index the knowledge base.' }
+    Write-Warning 'npx is not on PATH. Install Node.js 20 or later to use the local knowledge base.'
+}
+if ($InstallKnowledgeBase) {
+    Push-Location $root
+    try {
+        & $npx -y github:throndir2/repo-kb index
+        if ($LASTEXITCODE -ne 0) { throw 'Knowledge base indexing failed.' }
+    }
+    finally { Pop-Location }
+}
 
 if (-not [Environment]::Is64BitOperatingSystem -or $env:OS -ne 'Windows_NT') {
     throw 'This application requires 64-bit Windows.'

@@ -12,6 +12,10 @@ Use PowerShell from the repository root on Windows x64.
 
 ## Local SDK
 
+Setup checks whether `npx` is on PATH. Node.js 20 or later provides it.
+Use `Setup.ps1 -InstallKnowledgeBase` to build the local documentation search index.
+The repository MCP configuration starts `repo-kb` with `npx`; it does not use a hosted service.
+
 `global.json` pins SDK **10.0.401** with roll-forward disabled. `Setup.ps1` installs
 that SDK only into `.tools\dotnet`; it does not install globally or change machine PATH.
 The CLI home stays under `.tools`. NuGet packages go to the shared per-user cache
