@@ -13,6 +13,7 @@ TestResults/
 .idea/
 *.nupkg
 *.snupkg
+**/__pycache__/
 *.partial
 
 # Never commit credentials or private recordings.
