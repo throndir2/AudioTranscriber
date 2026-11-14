@@ -1,4 +1,10 @@
-# Windows audio module
+# Audio capture, archive, and playback
+
+**Status:** Implemented
+**Last Updated:** 2026-11-14
+**Audience:** Contributors
+**Last verified:** 2026-11-14 against b3ed981
+**Code:** `src/AudioTranscriber.Audio`, `src/AudioTranscriber.Core`
 
 ## Application integration
 
@@ -59,6 +65,35 @@ The concrete lower-level APIs are also usable independently:
   stereo float32 little-endian PCM at 48 kHz; it opens no audio device.
 - `PlaybackTimeline.FrameAt(original, sessionTicks)` resolves stored QPC anchors.
 - `AudioContracts.ToCore(...)` maps rich archive/derivative records to Core.
+
+## Linux capture and playback (PulseAudio and PipeWire)
+
+`WasapiAudioCaptureService` is the shared capture adapter on both platforms.
+On Linux it calls `PulseAudio` through `libpulse-simple`; PipeWire works when
+`pipewire-pulse` provides the PulseAudio client interface.
+
+The app lists output sinks and microphone sources with `pactl`. It records a
+sink's monitor source for output audio and excludes monitor sources from the
+microphone list. The microphone is a separate track. Output capture uses
+48 kHz, stereo float32 PCM; microphone capture uses 48 kHz, mono float32 PCM.
+The common archive writer stores these native samples before normalization.
+
+PulseAudio does not provide a per-packet device clock. Capture estimates packet
+times from sample counts, a system-clock anchor, and the reported stream latency.
+It re-anchors with a discontinuity flag when the estimate drifts by more than
+250 ms. This timing path does not provide WASAPI device-frame positions.
+
+`AudioOutput` uses PulseAudio for Linux playback. `TimelinePlayer` supplies the
+same track and seek behavior used by Windows playback. Playback writes float32
+samples to the selected sink or the default sink.
+
+Install the system clients if the app reports missing audio support:
+
+- Debian or Ubuntu: `libpulse0` and `pulseaudio-utils`.
+- Fedora: `pulseaudio-libs` and `pulseaudio-utils`.
+
+PulseAudio or PipeWire with `pipewire-pulse` must be running. This section
+describes the implementation; it does not claim a live Linux device test.
 
 ## Capture, clocks and archive durability
 
@@ -213,7 +248,9 @@ remain independent. Output underruns emit an error rather than being described
 as source silence. Core playback-position notifications are output-clock
 estimates (100 ms), not frame-accurate word-alignment claims.
 
-Tests open **no capture or physical playback endpoint**. Executed validation:
+The test results below are historical evidence from earlier local runs. They
+were not rerun for this documentation audit. Tests open **no capture or physical
+playback endpoint**.
 
 - Native sample conservation, correct silent-flag representations, partial tails,
   both rotation limits, positions beyond 32 bits, pooled queue overflow and

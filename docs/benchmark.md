@@ -1,5 +1,11 @@
 # Bounded public ASR comparison
 
+**Status:** Partial
+**Last Updated:** 2026-11-14
+**Audience:** Contributors
+**Last verified:** 2026-11-14 against b3ed981
+**Code:** `tools/AudioTranscriber.Benchmarks`, `scripts/Compare-Models.ps1`, `src/AudioTranscriber.Providers`, `src/AudioTranscriber.Audio`
+
 The console tool uses **the shipping `NvidiaRivaProvider`**, Core request/result
 contracts, `MediaImporter` and `PersistentNormalizer`. The PowerShell wrapper
 only configures the local SDK and launches that tool. There is no independent
@@ -60,6 +66,13 @@ and ignores all endpoint/chat/model settings. Neither the wrapper nor an
 external reader opens or prints the config. Do not redirect secrets to another
 file, CLI argument, environment variable, or log.
 
+**Known wrapper defect:** `Compare-Models.ps1` and `Install-WhisperModel.ps1`
+build the benchmark project, then launch it from `bin\Release\net10.0-windows`.
+The project targets `net10.0`, so that output path does not match the project.
+The documented wrapper commands are blocked until the source paths are corrected.
+The checked-in benchmark results remain historical evidence; they do not prove
+that either wrapper works now.
+
 NVIDIA receives only these authorized public fixture clips. Service availability,
 authentication, quota, and terms still apply. The provider rechecks explicit
 session/provider/track consent immediately before each send. See
@@ -96,6 +109,15 @@ where demonstrated. No reference text is sent, no chat prompt and no translation
 No cloud comparison was run by the implementation agent. A coordinator invocation
 must produce `results.json` before any claim of measured hosted accuracy or live
 account availability. Build success and mock transport tests are not cloud tests.
+
+## Local model comparison
+
+This tool compares the three NVIDIA hosted routes. It does not compare the local
+Parakeet and Whisper models. The local comparison figures in
+[ASR providers](providers.md#local-parakeet-default) are historical results from
+a separate 48-clip run. This repository does not include that run's fixture set
+or a command that reproduces its local-model comparison. Do not treat those
+figures as current performance guarantees.
 
 ## Metrics and artifacts
 

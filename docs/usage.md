@@ -1,7 +1,14 @@
-# Windows desktop usage
+# Desktop usage
 
-AudioTranscriber is a native .NET 10 x64 WPF application. It works out of the
-box: open it and click **Start recording**. Defaults are the default Windows
+**Status:** Implemented
+**Last Updated:** 2026-11-14
+**Audience:** Users
+**Last verified:** 2026-11-14 against b3ed981
+**Code:** `src/AudioTranscriber.App`, `src/AudioTranscriber.Application`, `src/AudioTranscriber.Audio`, `src/AudioTranscriber.Storage`, `src/AudioTranscriber.Providers`, `src/AudioTranscriber.Diarization`, `src/AudioTranscriber.Discord`, `src/AudioTranscriber.Integrations`
+
+AudioTranscriber is a native .NET 10 x64 Avalonia application for Windows and
+Linux. It works out of the
+box: open it and click **Start recording**. Defaults are the default system
 output device, your default microphone as a separate track (when one exists),
 local Parakeet, and English. It never starts audio capture or requests cloud
 consent when its window opens. On first start it downloads and verifies the
@@ -14,8 +21,8 @@ pause jobs when you do not want further processing.
 
 ## Layout
 
-The window uses a dark, candlelit theme and a single custom title bar instead of
-the Windows caption plus a banner. The title bar shows the selected session and
+The window uses a dark, candlelit theme. On Windows, it uses a custom title bar;
+Linux uses the system window decorations. The Windows title bar shows the selected session and
 its status, the recording indicator (a pulsing red **RECORDING** pill with the
 recording's session name), a **Record** quick-start button (or **Stop recording**
 while capturing), **Restart to update** when an update is staged, and the window
@@ -89,8 +96,9 @@ $env:NUGET_PACKAGES = Join-Path $HOME '.nuget\packages'
 & .\.tools\dotnet\dotnet.exe run --project src\AudioTranscriber.App -- --data-root "$PWD\artifacts\desktop-library"
 ```
 
-Without `--data-root`, the normal app uses
-`%LOCALAPPDATA%\AudioTranscriber`. Never put credentials on the command line.
+Without `--data-root`, the app uses `%LOCALAPPDATA%\AudioTranscriber` on Windows.
+On Linux, it appends `AudioTranscriber` to the platform's local application data
+directory. Never put credentials on the command line.
 
 ```powershell
 & .\.tools\dotnet\dotnet.exe run --project src\AudioTranscriber.App -- --smoke --data-root "$PWD\artifacts\desktop-smoke"
@@ -98,7 +106,7 @@ Get-Content .\artifacts\desktop-smoke\app-smoke.json
 ```
 
 Smoke mode requires an explicitly supplied isolated library with **no sessions**.
-It shows the real WPF window, initializes SQLite, enumerates actual output and
+It shows the real Avalonia window, initializes SQLite, enumerates actual output and
 microphone endpoints, then writes `app-smoke.json` **inside that data root** and
 closes after dispatcher startup. Reusing an empty smoke library is supported;
 using a populated library is rejected before constructing the controller, so
@@ -120,7 +128,7 @@ provider accuracy, or live Graph access.
    supported locales for other languages.
 2. Leave cloud consent off for private/local work. Missing local models do not
    enable a NVIDIA provider or change cloud consent.
-3. The default Windows output endpoint is preselected. The **separate
+3. The default system output endpoint is preselected. The **separate
    microphone track** is on by default when a microphone exists; loopback does not implicitly contain your microphone.
    Mic rows that speaker analysis hasn't attributed show as **Me (mic)**, so the
    live file separates your lines from everyone else's. **Reduce echo from
@@ -296,6 +304,26 @@ each chunk as it starts and finishes transcribing (including "no speech detected
 every new transcript line, errors and waits (for example a model still downloading),
 and every live file write. **Copy** puts the log on the clipboard.
 
+### Re-transcribe with a different pause
+
+The **Pause that ends a phrase** setting controls live phrase cuts. It defaults
+to 800 ms and accepts 200–3000 ms. Longer pauses make fewer, longer phrases.
+The setting applies to the next recording.
+
+Use **Re-transcribe** to cut recorded or imported audio again with the current
+pause setting. The app removes the old recognition rows and jobs, then queues
+recognition and speaker analysis again. Your original audio stays unchanged.
+Text corrections are discarded. Speakers you set by hand are kept as time-based
+hints and applied to the new lines. Use **Fill speakers from my labels** after
+the new transcript is ready to copy matching labels to other lines.
+
+### Session library storage
+
+The default library is `%LOCALAPPDATA%\AudioTranscriber` on Windows. The app
+stores its SQLite catalog in `library.sqlite3` and session media in that
+library's `sessions` folder. A custom `--data-root` changes the library location.
+See [Session storage](storage.md) for the database and file layout.
+
 ## Output templates (AI notes from the transcript)
 
 The **Templates** tab turns the transcript into documents you define with a prompt,
@@ -375,9 +403,13 @@ Files are read without locking them. The folder tools need a model with tool
 tabletop. Pick your Roll20 or Foundry browser window, or a whole screen, from the
 **Capture** list (**Refresh** reloads it; a shortened title such as `Roll20` matches
 any window whose title contains it), set the **max width** (default 1280 px), and use
-**Test capture** to preview. Window capture works while other windows cover it, but
-not while it is minimized. Tick **Include a screenshot of the table** on a template to
-attach a fresh JPEG on each update; templates updating together share the same frame,
+**Test capture** to preview. On Windows, window capture can work while other windows
+cover it, but not while it is minimized. On Linux, the window list uses `wmctrl`;
+window capture needs X11 and ImageMagick `import`. Full-screen capture uses an
+available screenshot tool such as `grim`, `gnome-screenshot`, `spectacle`, `scrot`,
+or ImageMagick.
+Tick **Include a screenshot of the table** on a template to attach a fresh image
+on each update; templates updating together share the same frame,
 and they also re-run when the screen changes even if the transcript did not. This
 needs a vision model (for example Ollama `gemma4:e4b`); keep each template to one
 narrow job, such as turn order or token positions.
@@ -432,11 +464,12 @@ the server offers; **Test** sends a one-line check and also asks the server whet
 the model accepts images (Ollama `/api/show` capabilities, LM Studio model type, or
 the OpenRouter-style `/models` input modalities). **Check image support** runs just
 that check; the result shows under the connection as supported, not supported, or
-unknown, and resets when you change the model. API keys are encrypted with
-Windows DPAPI for your account in the library's `templates.json` and sent only to
-that connection's URL. Running a template sends the transcript text, and any
-reference text the model reads, to that endpoint; Ollama and LM Studio keep it on
-your machines.
+unknown, and resets when you change the model. API keys are encrypted for your
+OS user in the library's `templates.json` and sent only to that connection's URL.
+Windows uses DPAPI; Linux uses the protected per-user key described in
+[privacy](privacy.md#secrets). Running a template sends the transcript text, and any
+reference text the model reads, to that endpoint. A self-hosted Ollama or LM Studio
+connection sends the data to the computer where that server runs.
 
 ## Processing and privacy
 
@@ -463,8 +496,9 @@ required) and show `nvidia-parakeet-tdt-v3`.
 
 Enter a key only in the **Privacy / models** password box. **Use entered key**
 clears the field and uses memory-only storage by default. Explicitly checking
-Remember uses the controller's Windows current-user DPAPI store. **Clear key**
-removes the active and remembered key. The UI never binds the secret into a view
+Remember uses the operating system's per-user protection. Windows uses DPAPI;
+Linux uses the protected per-user key described in [privacy](privacy.md#secrets).
+**Clear key** removes the active and remembered key. The UI never binds the secret into a view
 model string property, logs it, exports it, or accepts it as an argument.
 
 ## Local models
@@ -568,8 +602,10 @@ Discord has no API that creates an application, so the tab walks you through it:
 1. **Open the Discord Developer Portal**
    (<https://discord.com/developers/applications>) and choose **New Application**.
 2. On **Bot**, choose **Reset Token**, copy the token, paste it into the tab and
-   choose **Save and connect**. The token is encrypted for your Windows account
-   (DPAPI) in `discord.json` in the library folder and is only sent to Discord.
+   choose **Save and connect**. The token is protected for your OS user in
+   `discord.json` in the library folder and is only sent to Discord. Windows
+   uses DPAPI; Linux uses the protected per-user key described in
+   [privacy](privacy.md#secrets).
    You may turn off **Public Bot**. No privileged gateway intents are needed: the
    bot only asks for servers and voice states.
 3. **Add the bot to a server** opens Discord's invite page with only **View

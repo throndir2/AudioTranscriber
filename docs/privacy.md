@@ -1,6 +1,12 @@
 # Recording, uploads, and credentials
 
-AudioTranscriber is a Windows desktop application. A selected render endpoint
+**Status:** Implemented
+**Last Updated:** 2026-11-14
+**Audience:** Users
+**Last verified:** 2026-11-14 against b3ed981
+**Code:** `src/AudioTranscriber.App`, `src/AudioTranscriber.Application`, `src/AudioTranscriber.Audio`, `src/AudioTranscriber.Providers`, `src/AudioTranscriber.Integrations`, `src/AudioTranscriber.Storage`, `src/AudioTranscriber.Discord`
+
+AudioTranscriber is a Windows and Linux desktop application. A selected render endpoint
 captures audio played to that endpoint, not every other output device. A local
 microphone is a separate, optional track. Start capture deliberately, keep its
 visible recording state in view, and obtain the permission required for everyone
@@ -56,16 +62,19 @@ download servers, are pinned by SHA256, and require accepting NVIDIA's CUDA and 
 licence terms. GPU Parakeet runs in a local worker process. No audio is uploaded, and
 no key or consent is involved.
 
-No paid or LLM transcription service is used. Six OpenRouter audio models were
-evaluated on public clips only (see `docs\providers.md`) and did not improve
-accuracy enough to justify uploading audio.
+No paid LLM is used for speech recognition. Six OpenRouter audio models were
+evaluated on public clips only (see `providers.md`) and did not improve accuracy
+enough to justify uploading audio. Output templates use separate LLM connections
+when you choose to run them.
 
 ## Secrets
 
-Use memory-only keys unless you explicitly choose Windows-protected persistence.
-Persisted keys use DPAPI for the current Windows user, not plaintext application
-configuration. A password field, a protected credential file, and the in-process
-provider client are the credential boundary; keys do not belong in logs,
+Use memory-only keys unless you explicitly choose protected persistence.
+Windows encrypts saved keys with DPAPI for the current user. Linux uses AES-GCM
+with a random key in `~/.config/AudioTranscriber/secret.key`, readable only by
+that account; `XDG_CONFIG_HOME` can change the config directory. The application
+does not store these keys as plaintext. A password field, a protected credential
+file, and the in-process provider client are the credential boundary. Keys do not belong in logs,
 transcripts, examples, model catalogs, command-line arguments, or benchmark output.
 
 The authorized existing-production credential reader takes a **configuration
@@ -92,20 +101,26 @@ Output templates never run until you choose **Update now** or tick **Keep updati
 for a template. A run sends the transcript text (not audio), the always-included
 reference files, and any reference text the model asks to read to that template's
 LLM connection. Hosted services (OpenRouter, NVIDIA Build, OpenAI) apply their own
-terms, logging and quotas; Ollama or LM Studio on your own machines keep the text
-local. Template API keys are saved only when you choose **Save key**, encrypted with
-DPAPI for the current Windows user in `templates.json`, and sent only to the
-connection's own base URL. The model's file tools are read-only and limited to the
+terms, logging and quotas. A self-hosted Ollama or LM Studio endpoint receives the
+text on the computer where that server runs. Template API keys are saved only when
+you choose **Save key**, encrypted for the
+current OS user in `templates.json`, and sent only to the connection's own base
+URL. The model's file tools are read-only and limited to the
 chosen context folder and always-included files. Unless you untick **Save a versioned
 copy of each update**, every changed template output is also kept on disk as a
 timestamped copy (next to the template's output file, or in `template-versions` in the
 library folder); delete them there or limit them with **Keep only the latest N
 versions**.
 
-Templates with **Include a screenshot of the table** also send a screenshot (JPEG) of
-the window or screen chosen under **Table screenshot** with every run, so anything
-visible there goes to that template's LLM connection. With Ollama or LM Studio the
-screenshot stays on your machines. Screenshots are kept in memory only, not saved.
+Templates with **Include a screenshot of the table** send the selected window or
+screen with every run, so anything visible there goes to that template's LLM
+connection. The capture code encodes the image as PNG bytes. On Linux, the
+selected screenshot tool first writes a temporary PNG file. The app reads that
+file and tries to delete it; a deletion failure is ignored. Windows capture uses
+memory instead of this temporary file. The image bytes remain in memory while
+the app sends them. The current LLM client labels these PNG bytes as JPEG in its
+request, which is a format mismatch. A self-hosted Ollama or LM Studio endpoint
+receives the image on the computer where that server runs.
 
 ## Participant metadata
 
@@ -116,8 +131,9 @@ must remain distinct from participant identifiers.
 
 Discord server voice channels are recorded through the user's own visible bot
 (never a user token or selfbot). Everyone in the channel sees the bot join; get
-their consent. The bot token is encrypted for the Windows user (DPAPI) in
-`discord.json` and sent only to Discord. Voice stays end-to-end encrypted (DAVE)
+their consent. The bot token is protected for the current OS user in
+`discord.json` and sent only to Discord. Windows uses DPAPI; Linux uses the
+protected per-user key described above. Voice stays end-to-end encrypted (DAVE)
 until this PC decrypts it; the audio is archived and transcribed like any other
 track, following the session's provider and consent. Discord display names become
 speaker names, and with Remember voices on their voice prints (embeddings, never

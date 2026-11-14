@@ -1,8 +1,16 @@
-# First-version validation
+# Historical first-version validation
 
-Validation used Windows x64, worktree-local SDK 10.0.401, and runtime 10.0.12.
-The model comparison is separately retained in `benchmarks\2026-09-11`; no
-private recording was uploaded and no desktop capture was started for testing.
+**Status:** Superseded
+**Last Updated:** 2026-11-14
+**Audience:** Contributors
+**Last verified:** 2026-11-14 against b3ed981
+**Code:** `tests`, `scripts/Test.ps1`, `scripts/Start-App.ps1`, `scripts/Publish.ps1`, `scripts/Release.ps1`
+
+This page preserves an earlier validation report. Its test counts, environment
+details, and execution results are historical; they were not rerun for this
+audit. Use the current test projects and their source for present-day coverage.
+The model comparison artifacts are retained in
+[`benchmarks/2026-09-11`](benchmarks/2026-09-11/README.md).
 
 ## Final automated coverage
 

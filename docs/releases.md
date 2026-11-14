@@ -1,5 +1,11 @@
 # GitHub release build
 
+**Status:** Implemented
+**Last Updated:** 2026-11-14
+**Audience:** Contributors
+**Last verified:** 2026-11-14 against b3ed981
+**Code:** `.github/workflows/release.yml`, `scripts/Release.ps1`, `scripts/Publish.ps1`, `scripts/Setup.ps1`, `installer`
+
 `.github\workflows\release.yml` builds releases only. It has **one Ubuntu 24.04 job**, a 25-minute timeout, and no matrix, PR/branch-push checks, schedules, tests, lint, benchmarks, model downloads, or deployment. It installs only NSIS and rpm packaging tools before building release assets.
 
 ## Release notes (CHANGELOG.md)
@@ -136,6 +142,9 @@ prevents a later run from canceling a publish halfway through.
 
 ## Local validation boundary
 
+The validation results below describe earlier local development runs. They were
+not rerun for this documentation audit.
+
 Run the offline release-discovery and draft-finalization regression tests with
 `pwsh -NoProfile -File .\tests\Release.Tests.ps1`. They exercise the production
 release functions with simulated GitHub responses, without network requests,
@@ -155,6 +164,10 @@ Those are local checks, not extra CI jobs. No hosted Actions minutes, tag push,
 or real GitHub Release was used during validation.
 
 ## Local package fallback
+
+On Linux, pass `-DotnetPath` with the installed `dotnet` executable. The default
+script path is the Windows worktree SDK at `.tools\dotnet\dotnet.exe`; the
+repository's `Setup.ps1` installs that SDK on Windows only.
 
 Windows fallback packaging is:
 
