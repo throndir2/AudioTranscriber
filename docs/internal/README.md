@@ -6,3 +6,4 @@
 **Last verified:** 2026-11-14 against 0b9c0c8
 
 - [Knowledge base contract](knowledge-base.md): How do agents find code and keep the documentation true?
+- [Local check](local-check.md): How are Code paths, folder indexes, and changed source coverage checked?

@@ -4,7 +4,7 @@
 **Last Updated:** 2026-11-14
 **Audience:** Contributors and coding agents
 **Last verified:** 2026-11-14 against 0b9c0c8
-**Code:** `.github/mcp.json`, `scripts/Setup.ps1`
+**Code:** `.github/mcp.json`, `scripts/Setup.ps1`, `scripts/kb/check_kb.py`, `scripts/kb/test_check_kb.py`
 
 ## Find code through the knowledge base
 
@@ -60,7 +60,8 @@ The wiki repository currently returns "Repository not found"; the optional new m
 
 Update the page, Code map, verification field, and folder index in the same pull request as the related change.
 If documentation needs no change, state `KB: no change needed` and give the reason in the pull request body.
-The local KB check and search evaluation are added in later rollout steps.
+Run `python scripts/kb/check_kb.py --diff origin/main` before merging. Fix every error.
+See [the local check](local-check.md) for path, index, and changed-source checks.
 
 ## Search quality
 
