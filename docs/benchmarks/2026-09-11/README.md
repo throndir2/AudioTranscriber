@@ -1,9 +1,15 @@
 # Initial hosted ASR baseline
 
-This is the **one authorized live comparison**, not a D&D model ranking.
-The canonical `results.json`, `results.csv`, and `fixture-manifest.json` are
-unchanged copies of the sanitized public run. No private recording or credential
-value appears in these artifacts.
+**Status:** Implemented
+**Last Updated:** 2026-11-14
+**Audience:** Contributors
+**Last verified:** 2026-11-14 against b3ed981
+**Code:** `tools/AudioTranscriber.Benchmarks`, `src/AudioTranscriber.Providers`, `src/AudioTranscriber.Audio`
+
+This page records the authorized hosted comparison run on 2026-09-11. It is
+historical evidence, not a current performance or account-availability claim.
+The tracked `results.json`, `results.csv`, and `fixture-manifest.json` preserve
+the sanitized run. No private recording or credential value appears in them.
 
 ## Data and budget
 
