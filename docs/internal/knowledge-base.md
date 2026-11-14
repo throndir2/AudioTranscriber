@@ -3,8 +3,8 @@
 **Status:** Implemented
 **Last Updated:** 2026-11-14
 **Audience:** Contributors and coding agents
-**Last verified:** 2026-11-14 against dd2b650
-**Code:** `.github/mcp.json`, `.github/github-app.yml`, `.github/copilot-instructions.md`, `AGENTS.md`, `scripts/Setup.ps1`, `scripts/kb/check_kb.py`, `scripts/kb/test_check_kb.py`
+**Last verified:** 2026-11-14 against 381c859
+**Code:** `.github/mcp.json`, `.github/github-app.yml`, `.github/copilot-instructions.md`, `AGENTS.md`, `scripts/Setup.ps1`, `scripts/kb/check_kb.py`, `scripts/kb/test_check_kb.py`, `docs/internal/repo-kb-eval.json`
 
 ## Find code through the knowledge base
 
@@ -69,5 +69,21 @@ See [the local check](local-check.md) for path, index, and changed-source checks
 ## Search quality
 
 The evaluation uses real repository questions with expected page paths.
-Record hit@1, hit@3, and hit@5 after running the local evaluation.
-Results are not measured yet.
+The [evaluation set](repo-kb-eval.json) has 32 questions about the implemented systems and contributor workflow.
+Each entry has a `q` question and an `expect` array of acceptable document paths.
+Run `npx -y github:throndir2/repo-kb eval docs/internal/repo-kb-eval.json` from the repository root.
+The default mode uses keyword search and local embeddings together.
+
+The initial evaluation, before the documentation audit, gave hit@1 78.1%, hit@3 93.8%, and hit@5 96.9%.
+The audited pages place all 32 expected answers in the top three results.
+
+The final local hybrid evaluation on 2026-11-14 gave these results:
+
+| Questions | hit@1 | hit@3 | hit@5 |
+| --- | --- | --- | --- |
+| 32 | 81.3% | 100% | 100% |
+
+A hit means that at least one expected page appears in the first one, three, or five results.
+These results measure page retrieval, not the correctness of every statement on a page.
+The audit added missing Linux audio, application, and storage coverage.
+It also corrected stale claims and kept historical benchmark evidence separate from current behavior.
