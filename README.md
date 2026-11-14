@@ -4,13 +4,23 @@
 
 # AudioTranscriber
 
+**Status:** Implemented
+
+**Last Updated:** 2026-11-14
+
+**Audience:** Users and contributors
+
+**Last verified:** 2026-11-14 against b3ed981
+
+**Code:** `src/AudioTranscriber.App`, `src/AudioTranscriber.Application`, `src/AudioTranscriber.Audio`, `src/AudioTranscriber.Diarization`, `src/AudioTranscriber.Providers`, `src/AudioTranscriber.Storage`, `src/AudioTranscriber.Integrations`, `src/AudioTranscriber.Discord`
+
 ### Everything your PC hears, turned into a searchable transcript that knows who said what.
 
 [![Latest release](https://img.shields.io/github/v/release/throndir2/AudioTranscriber?style=for-the-badge&color=c9a227&label=latest)](https://github.com/throndir2/AudioTranscriber/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/throndir2/AudioTranscriber/total?style=for-the-badge&color=a67c00)](https://github.com/throndir2/AudioTranscriber/releases)
 ![Windows x64](https://img.shields.io/badge/Windows-x64-8d6e1f?style=for-the-badge&logo=windows&logoColor=white)
 ![Linux x64](https://img.shields.io/badge/Linux-x64-8d6e1f?style=for-the-badge&logo=linux&logoColor=white)
-![Runs locally](https://img.shields.io/badge/runs-100%25%20local-6b5414?style=for-the-badge)
+![Runs locally](https://img.shields.io/badge/runs-local%20by%20default-6b5414?style=for-the-badge)
 ![Free](https://img.shields.io/badge/price-free-4e3d0e?style=for-the-badge)
 
 <a href="https://github.com/throndir2/AudioTranscriber/releases/latest"><img src="https://img.shields.io/badge/Download-for%20Windows-c9a227?style=for-the-badge&logo=windows&logoColor=white" alt="Download AudioTranscriber for Windows" height="44"></a>
@@ -38,7 +48,8 @@ call, a stream, a game session, a lecture) plus your own microphone. It writes
 the words down **live** as people talk, figures out **who is talking**, and
 keeps everything in a library you can search.
 
-It runs **on your own PC**: no account, no API key, no upload, no subscription.
+Local sessions run **on your own PC**: they need no account, API key, upload, or
+subscription. You can choose hosted providers and approve specific uploads.
 The speech model downloads by itself the first time you start the app.
 
 <table>
@@ -83,7 +94,7 @@ The speech model downloads by itself the first time you start the app.
 
 ### ⚡ Fast, accurate, local
 - **NVIDIA Parakeet TDT v3** on your CPU by default: 25 European languages, detected automatically.
-- In testing it made **about a third fewer word errors** than Whisper large-v3-turbo and used far less CPU.
+- In a small 48-clip test, it made **about a third fewer word errors** than Whisper large-v3-turbo and used far less CPU ([historical results](docs/providers.md#local-parakeet-default)).
 - Have an **NVIDIA GPU**? On Windows the app offers to run Parakeet on it instead.
 - **Recommended setup for this PC** reads your CPU, RAM and graphics card and fits the speech models and a local AI model to them.
 - **Local Whisper** for any other language.
