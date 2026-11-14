@@ -1,14 +1,21 @@
 # Troubleshooting / FAQ
 
+**Status:** Implemented
+**Last Updated:** 2026-11-14
+**Audience:** Users and contributors
+**Last verified:** 2026-11-14 against b3ed981
+**Code:** `src/AudioTranscriber.App/AppDiagnostics.cs`, `src/AudioTranscriber.App/MainViewModel.cs`, `src/AudioTranscriber.Application`
+
 ## Reporting a problem (diagnostics ZIP)
 
 Open **Privacy / models → Diagnostics and bug reports**, choose **Save diagnostics
 ZIP…**, and attach the ZIP to a [GitHub issue](https://github.com/throndir2/AudioTranscriber/issues).
 It holds the app's local logs (last 14 days), the updater log, the Activity panel
-without transcript lines, and a system summary (version, Windows/.NET, GPU, FFmpeg and
-Visual C++ status, model status). It never includes audio, transcript text, the library
-database, or keys, and your Windows user name and profile path are replaced. Open it to
-review before sharing. **Open log folder** shows the raw logs in the data root's `logs`
+without transcript lines, and a system summary (version, operating system, .NET, GPU,
+FFmpeg, prerequisites, and model status). It does not include the audio, database, or
+settings files. The app replaces the user name and profile path in text, but error
+messages can contain other sensitive details. Open it to review before sharing.
+**Open log folder** shows the raw logs in the data root's `logs`
 folder; if the app cannot start, the startup error names that folder.
 
 ## The app says FFmpeg is missing
@@ -53,7 +60,8 @@ timing. Playback is one stored track at a time, not a hidden mix.
 
 ## Can I run more than one app instance?
 
-Only one process can own a data root. Use `-DataRoot PATH` for an isolated library.
+Only one process can own a data root. Use `--data-root PATH` with the app or
+`-DataRoot PATH` with `Start-App.ps1` for an isolated library.
 
 ## Can I edit the live transcript file?
 

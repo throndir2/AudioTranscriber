@@ -1,13 +1,24 @@
 # Data and Recovery
 
-The normal data root is `%LOCALAPPDATA%\AudioTranscriber`. Use `-DataRoot PATH` for an
-isolated library. Only one application instance can own a data root at a time.
+**Status:** Implemented
+**Last Updated:** 2026-11-14
+**Audience:** Users and contributors
+**Last verified:** 2026-11-14 against b3ed981
+**Code:** `src/AudioTranscriber.Storage`, `src/AudioTranscriber.Audio`, `src/AudioTranscriber.Application`, `scripts/Start-App.ps1`
 
-## What to back up
+The normal data root is `%LOCALAPPDATA%\AudioTranscriber` on Windows. The app uses the
+platform's local application data directory on Linux. Use `--data-root PATH` with the app
+or `-DataRoot PATH` with `Start-App.ps1` for an isolated library. Only one application
+instance can own a data root at a time.
+
+## SQLite library location and backup
 
 Back up the whole data root, not only exported text. It contains `library.sqlite3`,
 session folders, original chunks or managed imports, normalized derivatives, provider
 evidence, and speaker state.
+
+The SQLite database is `library.sqlite3` directly inside the selected data root. The
+session audio files are also needed for a complete backup.
 
 Do not edit retained originals or move individual files behind the app.
 

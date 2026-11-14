@@ -1,5 +1,11 @@
 # Transcripts and Search
 
+**Status:** Implemented
+**Last Updated:** 2026-11-14
+**Audience:** Users and contributors
+**Last verified:** 2026-11-14 against b3ed981
+**Code:** `src/AudioTranscriber.App/MainViewModel.cs`, `src/AudioTranscriber.App/TranscriptPresentation.cs`, `src/AudioTranscriber.Storage`
+
 Select a session and open **Transcript**. The grid shows the whole transcript. During
 recording, new lines appear at the bottom and the grid follows them while you are
 already scrolled to the end.
@@ -41,8 +47,8 @@ On **Record / import**, check **Write the transcript to a live text file** and c
 folder. The default is `Documents\AudioTranscriber\Live transcripts`. Each session gets
 its own file, named after the session and its start time, for example
 `Session 2026-10-09 14-05.txt`. To use one fixed file, type a path that ends in a file
-name, such as `C:\Notes\live.txt`. The app rewrites the file when recognized text
-changes and at least every about 3 seconds.
+name, such as `C:\Notes\live.txt`. The app checks for changes every three seconds and
+also reacts when recognized text changes. It rewrites the file only when its content changes.
 
 The live file uses the same merged TXT-style lines as export: `[hh:mm:ss.fff -
 hh:mm:ss.fff] Speaker: text`. Corrections and speaker renames appear on the next

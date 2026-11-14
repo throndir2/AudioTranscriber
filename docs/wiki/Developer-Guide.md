@@ -1,5 +1,11 @@
 # Developer Guide
 
+**Status:** Implemented
+**Last Updated:** 2026-11-14
+**Audience:** Users and contributors
+**Last verified:** 2026-11-14 against b3ed981
+**Code:** `scripts`, `global.json`, `tools/AudioTranscriber.UiMcp`
+
 Use PowerShell from the repository root on Windows x64.
 
 ```powershell
@@ -28,7 +34,7 @@ Each worktree holds its own SDK, build output, and model downloads, often 5 GB o
 Run `.\scripts\Clean.ps1 -DryRun` to see what it would delete, and
 `.\scripts\Clean.ps1 -All` to delete it. The script deletes only generated, git-ignored
 folders. See
-[docs/cleanup.md](https://github.com/throndir2/AudioTranscriber/blob/main/docs/cleanup.md).
+[docs/cleanup.md](../cleanup.md).
 
 Setup finds the Windows x64 SDK ZIP in Microsoft's official .NET 10 release metadata,
 accepts only approved Microsoft HTTPS download hosts, verifies SHA-512, and reuses an
@@ -51,15 +57,13 @@ under `artifacts\TestResults`, and passes the pinned local dotnet host to VSTest
 ## Publish
 
 `Publish.ps1` publishes the self-contained Windows x64 app and worker to
-`artifacts\publish\win-x64` by default; `-Runtime linux-x64` cross-builds the Linux app to
-`artifacts\publish\linux-x64` from Windows or Linux. Keep the entire output directory together. It
+`artifacts\publish\win-x64` by default; `-Runtime linux-x64` selects the Linux build.
+On Linux, pass a Linux SDK executable with `-DotnetPath`; the default SDK path ends in `dotnet.exe`.
+Keep the entire output directory together. It
 includes FFmpeg/FFprobe, docs, model notices, dependency license files, package
 inventory, and provenance.
 
-To try the Linux build on a Windows PC, run the published `linux-x64` folder in Docker or WSL
-with Xvfb and PulseAudio (`pulseaudio -D`, `pactl load-module module-null-sink`), then
-`./AudioTranscriber.App --smoke --data-root /tmp/smoke`. `tools\AudioTranscriber.UiMcp` (the UI
-Automation MCP) is Windows-only.
+`tools\AudioTranscriber.UiMcp` (the UI Automation MCP) is Windows-only.
 
 Native apphost or image-loading failures were observed intermittently on the development
 machine despite valid on-disk bytes. Published executables are a separate validation

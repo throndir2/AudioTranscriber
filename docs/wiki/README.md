@@ -3,10 +3,13 @@
 **Status:** Implemented
 **Last Updated:** 2026-11-14
 **Audience:** Users and contributors
-**Last verified:** 2026-11-14 against 0b9c0c8
+**Last verified:** 2026-11-14 against b3ed981
+**Code:** `src/AudioTranscriber.App`, `src/AudioTranscriber.Application`, `src/AudioTranscriber.Storage`
 
-These checked-in pages are the source documents. The optional wiki is not a separate source of truth.
+These checked-in pages are the source documents. The optional wiki mirror is not
+available: its Git repository returns "Repository not found".
 
+- [Guide index](README.md): Where are all the desktop feature guides?
 - [Architecture and conventions](Architecture-and-Conventions.md): Which projects own each part of the application?
 - [Benchmarks](Benchmarks.md): What do the historical model comparisons show?
 - [Data and recovery](Data-and-Recovery.md): Where does the library store data, and how does recovery work?
@@ -28,6 +31,6 @@ These checked-in pages are the source documents. The optional wiki is not a sepa
 - [Troubleshooting](Troubleshooting-FAQ.md): How does a user resolve common failures?
 - [Updates and closing](Updates-and-Closing.md): How does the desktop update and close?
 - [Validation and testing](Validation-and-Testing.md): Which checks are local, and which results are historical?
-- [Footer](_Footer.md): What source-of-truth notice appears below wiki pages?
+- [Footer](_Footer.md): Where are the repository, release, and issue links?
 - [Sidebar](_Sidebar.md): What navigation links appear beside wiki pages?
 

@@ -1,5 +1,11 @@
 # Speakers and Voice Library
 
+**Status:** Implemented
+**Last Updated:** 2026-11-14
+**Audience:** Users and contributors
+**Last verified:** 2026-11-14 against b3ed981
+**Code:** `src/AudioTranscriber.App/MainViewModel.cs`, `src/AudioTranscriber.Application/AppController.cs`, `src/AudioTranscriber.Diarization`, `src/AudioTranscriber.Storage`
+
 Speaker labels are editable display labels, not verified identities. The speaker model
 matches voices, not names.
 
@@ -20,8 +26,9 @@ The quickest way to label a whole recording:
 1. Right-click a few lines for each person and **Set speaker**.
 2. Press **Fill speakers from my labels** on the **Transcript** tab.
 
-Every other line in the recording gets the labeled person whose voice it sounds closest
-to. Lines you labeled are never changed; unclear lines keep their label (label a few of
+Eligible lines are compared with labeled examples of the same track kind.
+Tracks without labeled examples are left unchanged. Lines you labeled are never changed;
+unclear lines keep their label (label a few of
 those and run it again). It runs locally.
 
 When you label clear speech, the app also embeds that voice into the speaker's profile
@@ -38,7 +45,7 @@ microphone lines…**; lines transcribed later get the same speaker.
 Short lines can be labeled but may be too short to learn. Overlap, crowding, similar
 voices, character voices, or too little clean speech can stay unknown.
 
-## Voice library
+## Remember speakers across sessions with the voice library
 
 When you give a speaker a name, up to three voice samples from that session are saved to
 the voice library. They are 256-number embeddings, not audio. A voice keeps the newest
@@ -58,4 +65,4 @@ rename or forget remembered voices. Forgetting deletes the library samples; past
 sessions keep their labels.
 
 For implementation limits and thresholds, see
-[docs/diarization.md](https://github.com/throndir2/AudioTranscriber/blob/main/docs/diarization.md).
+[docs/diarization.md](../diarization.md).
