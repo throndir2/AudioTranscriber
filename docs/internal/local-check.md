@@ -3,7 +3,7 @@
 **Status:** Implemented
 **Last Updated:** 2026-11-14
 **Audience:** Contributors and coding agents
-**Last verified:** 2026-11-14 against b3ed981
+**Last verified:** 2026-11-14 against dd2b650
 **Code:** `scripts/kb/check_kb.py`, `scripts/kb/test_check_kb.py`
 
 ## Run the check
