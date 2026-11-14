@@ -3,8 +3,8 @@
 **Status:** Implemented
 **Last Updated:** 2026-11-14
 **Audience:** Contributors and coding agents
-**Last verified:** 2026-11-14 against 0b9c0c8
-**Code:** `.github/mcp.json`, `scripts/Setup.ps1`, `scripts/kb/check_kb.py`, `scripts/kb/test_check_kb.py`
+**Last verified:** 2026-11-14 against dd2b650
+**Code:** `.github/mcp.json`, `.github/github-app.yml`, `.github/copilot-instructions.md`, `AGENTS.md`, `scripts/Setup.ps1`, `scripts/kb/check_kb.py`, `scripts/kb/test_check_kb.py`
 
 ## Find code through the knowledge base
 
@@ -57,6 +57,9 @@ The existing wiki publisher copies pages from `docs/wiki`; the wiki must not bec
 The wiki repository currently returns "Repository not found"; the optional new mirror is skipped.
 
 ## Keep the source of truth current
+
+`AGENTS.md` is the short bootstrap. It points to the existing repository rules and the top-level documentation map.
+The Copilot instructions and app merge policy require KB-first navigation and the local check.
 
 Update the page, Code map, verification field, and folder index in the same pull request as the related change.
 If documentation needs no change, state `KB: no change needed` and give the reason in the pull request body.
