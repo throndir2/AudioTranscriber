@@ -1,5 +1,11 @@
 # MCP hooks
 
+**Status:** Implemented
+**Last Updated:** 2026-11-14
+**Audience:** Users and contributors
+**Last verified:** 2026-11-14 against b3ed981
+**Code:** `src/AudioTranscriber.App`, `tools/AudioTranscriber.UiMcp`, `scripts/Start-Mcp.ps1`, `.mcp.json`
+
 AudioTranscriber exposes two stdio [Model Context Protocol](https://modelcontextprotocol.io/) servers for agents.
 
 | Mode | Command | What it drives |

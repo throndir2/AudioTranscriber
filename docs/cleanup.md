@@ -1,5 +1,11 @@
 # Disk cleanup
 
+**Status:** Implemented
+**Last Updated:** 2026-11-14
+**Audience:** Users and contributors
+**Last verified:** 2026-11-14 against b3ed981
+**Code:** `scripts/Clean.ps1`, `scripts/Setup.ps1`
+
 The build, the tests, and the development app write large generated folders into each
 checkout. Each Copilot session uses its own git worktree, so these folders repeat in each
 worktree. This page tells you what the folders are, when to clean them, and how.
@@ -84,7 +90,7 @@ delete local settings, credentials files, recordings, or uncommitted work.
 
 ## Old worktrees
 
-The Copilot app owns the worktrees in `C:\Repositories\copilot-worktrees\AudioTranscriber`.
+The Copilot app owns the worktrees in its configured worktrees folder.
 
 - To remove the worktree of a finished session, archive the session in the app.
 - Do not remove the worktree of a session that is not archived.

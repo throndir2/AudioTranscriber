@@ -1,5 +1,11 @@
 # ASR providers
 
+**Status:** Partial
+**Last Updated:** 2026-11-14
+**Audience:** Users and contributors
+**Last verified:** 2026-11-14 against b3ed981
+**Code:** `src/AudioTranscriber.Providers`, `src/AudioTranscriber.Application`, `src/AudioTranscriber.Diarization`, `tools/AudioTranscriber.Benchmarks`
+
 Metadata checked **2026-09-11 UTC**. Catalog identity is not a guarantee of
 availability on a particular account, a runtime model name, or free quota.
 Source ASR only: no translation, chat request, reference hints, or automatic
@@ -7,6 +13,19 @@ cloud fallback on errors. The one cloud re-check is the opt-in
 [low-confidence fallback](#low-confidence-fallback-for-local-whisper) below.
 New sessions default to [local Parakeet](#local-parakeet-default); local sessions
 require no NVIDIA credential.
+
+## Local recognizers and uploads
+
+Local Parakeet and Local Whisper run inference on this computer. They do not
+send audio to a provider. Installing a model downloads model files from its
+published source, but it does not upload session audio.
+
+Local Whisper has one optional exception. If a chunk's confidence is below the
+configured threshold, the application can retry that chunk with local Parakeet.
+It can use hosted Parakeet only when the session has explicit NVIDIA consent,
+the NVIDIA key is available, and the language is supported. That fallback sends
+only the low-confidence chunk. See
+[low-confidence fallback](#low-confidence-fallback-for-local-whisper).
 
 ## Hosted catalog and wire contract
 
@@ -149,6 +168,11 @@ load. Inference is bounded to 30-second inputs.
 
 Review the catalog without downloading anything:
 
+**Known wrapper defect:** `Install-WhisperModel.ps1` builds this project, then
+launches it from `bin\Release\net10.0-windows`. The project targets `net10.0`,
+so the wrapper commands below are blocked until the source path is corrected.
+The direct .NET command uses the project's actual `net10.0` output folder.
+
 ```powershell
 .\scripts\Install-WhisperModel.ps1 -List
 .\scripts\Install-WhisperModel.ps1 -Model tiny
@@ -176,7 +200,7 @@ The equivalent .NET command, after building the benchmark tool, is:
 
 ```powershell
 .\.tools\dotnet\dotnet.exe `
-  .\tools\AudioTranscriber.Benchmarks\bin\Release\net10.0-windows\AudioTranscriber.Benchmarks.dll `
+  .\tools\AudioTranscriber.Benchmarks\bin\Release\net10.0\AudioTranscriber.Benchmarks.dll `
   install-model --model tiny --directory '.models\whisper' `
   --accept-model-license --accept-download-bytes 77691713
 ```
@@ -261,6 +285,12 @@ threads spin, so more threads buy little speed for much more CPU.
 
 Measured 2026-09-27 on an i7-13700K (24 logical CPUs), with the same 48 public
 English clips as below: 7.4 minutes, first clip excluded as warm-up.
+
+### Historical local model comparison
+
+The measurements below are historical results from the 48-clip comparison on
+2026-09-27. They were not rerun for this audit. The current benchmark tool
+compares hosted NVIDIA routes; it does not reproduce this local comparison.
 
 | Engine | WER | Speed | CPU seconds per audio second | Peak RAM |
 |---|---|---|---|---|

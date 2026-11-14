@@ -1,5 +1,11 @@
 # Local speaker diarization
 
+**Status:** Implemented
+**Last Updated:** 2026-11-14
+**Audience:** Contributors
+**Last verified:** 2026-11-14 against b3ed981
+**Code:** `src/AudioTranscriber.Diarization`, `src/AudioTranscriber.Worker`, `src/AudioTranscriber.Application`
+
 ## What runs locally
 
 `AudioTranscriber.Diarization` implements the Core `IDiarizationService`.
@@ -272,6 +278,10 @@ Voice library**. Exports never include embeddings.
 Installing models makes public model-download requests; inference makes none.
 
 ## Verification performed, not a quality benchmark
+
+The details below are historical execution evidence from earlier local runs.
+They were not rerun for this documentation audit. They do not prove current
+hardware behavior or recognition quality.
 
 Windows x64 .NET SDK **10.0.401**, runtime **10.0.12**, actual pinned sherpa
 native binaries and both verified models were exercised locally:
